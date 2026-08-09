@@ -50,8 +50,9 @@ enum Pipeline {
         sender: thread::JoinHandle<SendResult>,
         receiver: thread::JoinHandle<ReceiveResult>,
     },
+    /// The sender is on another machine.
+    Receive(thread::JoinHandle<ReceiveResult>),
 }
-
 impl Pipeline {
     fn join(self) -> Result<RunOutcome, Box<dyn Error>> {
         // Thread errors are Send + Sync and the caller's are not, so they cross
@@ -81,6 +82,29 @@ impl Pipeline {
                         mismatched: received.mismatched,
                         wire_bytes,
                         payload_bytes,
+                    }),
+                })
+            }
+            Pipeline::Receive(receiver) => {
+                let (received, decoder) =
+                    receiver.join().expect("receiver thread").map_err(flatten)?;
+                Ok(RunOutcome {
+                    submitted: received.submitted,
+                    decoded: decoder.decoded(),
+                    errors: decoder.errors(),
+                    dropped: decoder.dropped(),
+                    max_backlog: received.max_backlog,
+                    trailing_backlog: received.trailing_backlog,
+                    backlog: received.backlog,
+                    transport: Some(transport::TransportOutcome {
+                        // Nothing was sent from this machine.
+                        tx: TxStats::default(),
+                        rx: received.rx,
+                        jitter: received.jitter,
+                        verified: received.verified,
+                        mismatched: received.mismatched,
+                        wire_bytes: received.rx.bytes,
+                        payload_bytes: 0,
                     }),
                 })
             }
@@ -222,6 +246,47 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                 })?;
 
             Pipeline::Loopback { sender, receiver }
+        }
+        crate::Transport::Lan => {
+            // The sender is on the other machine. The fixture is still loaded
+            // locally, but only for its SPS and PPS: our packetiser keeps
+            // parameter sets out of the access units, so until the control
+            // plane carries them the decoder has to be told out of band.
+            drop(source);
+            let socket = std::net::UdpSocket::bind(cli.bind)?;
+            println!(
+                "transport: RTP over UDP, listening on {}",
+                socket.local_addr()?
+            );
+
+            let receive_stop = Arc::clone(&stop);
+            let receiver = thread::Builder::new()
+                .name("rtp-rx".into())
+                .spawn(move || {
+                    transport::receive_loop(
+                        socket,
+                        decoder,
+                        recorder,
+                        transport::VerifyLedger::new(false),
+                        SAMPLE_INTERVAL,
+                        receive_stop,
+                    )
+                })?;
+
+            // Nothing local finishes the run, so a deadline does.
+            let deadline_stop = Arc::clone(&stop);
+            let run_for = Duration::from_secs_f64(cli.seconds) + DRAIN_GRACE;
+            thread::Builder::new()
+                .name("deadline".into())
+                .spawn(move || {
+                    let until = Timestamp::now().add(Nanos(run_for.as_nanos() as u64));
+                    while !deadline_stop.load(Ordering::Acquire) && Timestamp::now() < until {
+                        thread::sleep(Duration::from_millis(50));
+                    }
+                    deadline_stop.store(true, Ordering::Release);
+                })?;
+
+            Pipeline::Receive(receiver)
         }
     };
 

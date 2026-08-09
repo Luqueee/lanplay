@@ -55,6 +55,9 @@ pub struct Cli {
     /// Bytes per datagram, RTP header included.
     #[arg(long, default_value_t = lanplay_transport::MAX_UDP_PAYLOAD)]
     pub mtu: usize,
+    /// Address to receive RTP on, for `--transport lan`.
+    #[arg(long, default_value = "0.0.0.0:5004")]
+    pub bind: std::net::SocketAddr,
     /// Compare every reconstructed access unit against the original by
     /// SHA-256, rather than trusting that the decoder did not complain.
     #[arg(long)]
@@ -97,6 +100,9 @@ pub enum Transport {
     Direct,
     /// Through RTP over a UDP socket on the loopback interface.
     Loopback,
+    /// Receive RTP from another machine. The sender is elsewhere; the fixture
+    /// is still read locally, for its parameter sets only.
+    Lan,
 }
 
 impl Cli {

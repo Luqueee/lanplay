@@ -357,16 +357,21 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
         // The whole point of routing through RTP is that the bytes come out
         // the other side unchanged. A decoder that does not complain is not
         // evidence of that; a digest is.
-        let complete = transport.rx.access_units_completed == transport.tx.access_units;
+        //
+        // With the sender on another machine there is no local count to
+        // compare against, so the run's own intent stands in for it: the
+        // sender was asked for exactly this many access units.
+        let (expected, source) = if transport.tx.access_units > 0 {
+            (transport.tx.access_units, "sent from here")
+        } else {
+            (inputs.expected_frames, "expected from the remote sender")
+        };
         checks.push(Check {
             name: "access units intact",
-            passed: complete && transport.mismatched == 0,
+            passed: transport.rx.access_units_completed == expected && transport.mismatched == 0,
             detail: format!(
-                "{} sent, {} reconstructed, {} verified byte-for-byte, {} mismatched",
-                transport.tx.access_units,
-                transport.rx.access_units_completed,
-                transport.verified,
-                transport.mismatched,
+                "{expected} {source}, {} reconstructed, {} verified byte-for-byte, {} mismatched",
+                transport.rx.access_units_completed, transport.verified, transport.mismatched,
             ),
         });
 
