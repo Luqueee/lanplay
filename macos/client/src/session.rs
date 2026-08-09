@@ -5,7 +5,9 @@ use std::thread;
 use std::time::Duration;
 
 use lanplay_decoder_videotoolbox::{DecodedFrame, DecoderConfig, VideoToolboxDecoder};
-use lanplay_renderer_metal::{LatestFrameSlot, RenderStats, RendererConfig, SurfaceFrame};
+use lanplay_renderer_metal::{
+    LatestFrameSlot, LiveCounters, RenderStats, RendererConfig, RendererError, SurfaceFrame,
+};
 use lanplay_telemetry::{
     Nanos, Recorder, Segment, Snapshot, Stage, Telemetry, TelemetryConfig, Timestamp, Trend,
     resident_bytes, wait_until,
@@ -17,6 +19,7 @@ use lanplay_video_core::{
 
 use crate::Cli;
 use crate::gate::{GateInputs, TransportInputs, evaluate};
+use crate::preflight;
 use crate::transport;
 
 /// How often the backlog and resident memory are sampled. Fast enough to fit a
@@ -180,14 +183,19 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
         }),
     )?;
     let hardware_decoder = decoder.uses_hardware_decoder();
-    println!(
-        "decoder: {} acceleration",
+
+    // The three the client can answer for itself. The display, occlusion,
+    // Space and miniaturised checks belong to the renderer, which prints them
+    // once its window exists; the terminator is printed from `on_ready` below
+    // so an orchestrator has exactly one line to wait on.
+    let mut checks = vec![
         if hardware_decoder {
-            "hardware"
+            preflight::Item::ok("decoder", "VideoToolbox reports hardware acceleration")
         } else {
-            "SOFTWARE"
-        }
-    );
+            preflight::Item::fail("decoder", "session is not hardware accelerated")
+        },
+        preflight::Item::ok("app-nap", "LatencyCritical activity held for the run"),
+    ];
     let memory_stop = Arc::clone(&stop);
     let memory_sampler = thread::Builder::new()
         .name("memory".into())
@@ -322,28 +330,64 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
         }
     };
 
-    // AppKit owns this thread from here until the run stops.
-    let render_stats = lanplay_renderer_metal::run(
+    // The closure below consumes its copy; the original stays for the
+    // failure path, where the renderer never calls it.
+    let ready_checks = checks.clone();
+    let counters = LiveCounters::new();
+    let telemetry = Arc::new(telemetry);
+    let sampler_stop = Arc::clone(&stop);
+    let sampler = crate::windows::spawn(
+        Arc::clone(&telemetry),
+        Arc::clone(&counters),
+        Duration::from_secs_f64(cli.window_seconds.max(1.0)),
+        sampler_stop,
+    );
+
+    // AppKit owns this thread from here until the run stops. The renderer
+    // prints its own preflight items and then calls `on_ready`, which is
+    // where the block is terminated.
+    let render = lanplay_renderer_metal::run(
         RendererConfig {
             width: cli.width,
             height: cli.height,
-            title: format!("lanplay phase 2 — {}x{}@{}", cli.width, cli.height, cli.fps),
+            title: format!("lanplay — {}x{}@{}", cli.width, cli.height, cli.fps),
             mode: cli.drive_mode(),
             recorder: telemetry.recorder(),
             stop: Arc::clone(&stop),
             render_delay: cli.render_delay_ms.map(Duration::from_millis),
             present_limit: None,
+            counters: Arc::clone(&counters),
+            require_clean_environment: cli.require_clean_display.then_some(feed_fps),
+            on_ready: Some(Box::new(move || {
+                preflight::report(&ready_checks);
+            })),
         },
         Arc::clone(&slot),
-    )?;
+    );
+    let render_stats = match render {
+        Ok(stats) => stats,
+        Err(RendererError::DirtyEnvironment(problems)) => {
+            for problem in &problems {
+                checks.push(preflight::Item::fail("display", problem));
+            }
+            preflight::report(&checks);
+            stop.store(true, Ordering::Release);
+            return Err(preflight::Refused.into());
+        }
+        Err(other) => return Err(other.into()),
+    };
 
     stop.store(true, Ordering::Release);
     let outcome = pipeline.join()?;
     let memory = memory_sampler.join().expect("memory sampler");
+    let slices = sampler.join().expect("window sampler");
 
     if !telemetry.flush(Duration::from_secs(5)) {
         return Err("telemetry collector did not catch up".into());
     }
+    let telemetry = Arc::try_unwrap(telemetry)
+        .map_err(|_| "a telemetry handle outlived the run")
+        .expect("every sampler has been joined");
     let snapshot = telemetry.shutdown();
 
     let still_in_slot = slot
@@ -351,6 +395,26 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
         .saturating_sub(render_stats.rendered + render_stats.superseded);
 
     report(cli, &outcome, &memory, &render_stats, &snapshot);
+    if !slices.is_empty() {
+        println!(
+            "  worst callback drop between windows: {:.1}% over {} windows",
+            crate::windows::worst_callback_drop(&slices) * 100.0,
+            slices.len()
+        );
+    }
+    if let Some(path) = &cli.report {
+        let json = build_report(
+            cli,
+            feed_fps,
+            expected_frames,
+            &outcome,
+            &render_stats,
+            &snapshot,
+            slices,
+        );
+        std::fs::write(path, serde_json::to_string_pretty(&json)?)?;
+        println!("report written to {}", path.display());
+    }
 
     let verdict = evaluate(&GateInputs {
         target_fps: feed_fps,
@@ -605,4 +669,103 @@ fn report(
 
     println!();
     println!("{snapshot}");
+}
+
+/// Assembles the machine-readable result.
+///
+/// Every number comes from this machine's clock. The sender's timestamps are
+/// not comparable until phase 9 estimates the offset, so `frame_age` here is
+/// the client's `local_age`: its first sight of a frame to putting it on
+/// screen.
+#[allow(clippy::too_many_arguments)]
+fn build_report(
+    cli: &Cli,
+    feed_fps: f64,
+    expected_frames: u64,
+    outcome: &RunOutcome,
+    render: &RenderStats,
+    snapshot: &Snapshot,
+    slices: Vec<crate::report::Window>,
+) -> crate::report::Report {
+    let arrival = snapshot.segment(Segment::Arrival);
+    let decode = snapshot.segment(Segment::Decode);
+    let (rx, jitter, corruption) = match &outcome.transport {
+        Some(transport) => (transport.rx, transport.jitter, transport.mismatched),
+        None => (Default::default(), Nanos::ZERO, 0),
+    };
+    let reconstructed = if outcome.transport.is_some() {
+        rx.access_units_completed
+    } else {
+        outcome.submitted
+    };
+
+    // Anything that moved the window during the run makes the presentation
+    // numbers untrustworthy even if it recovered, so it is named rather than
+    // averaged away.
+    let mut invalidating = Vec::new();
+    let mut blame = |count: u64, what: &str| {
+        if count > 0 {
+            invalidating.push(format!("{count} {what}"));
+        }
+    };
+    blame(render.occlusion_changes, "occlusion changes");
+    blame(render.space_changes, "Space changes");
+    blame(render.miniaturise_events, "miniaturise events");
+    blame(render.display_changes, "display changes");
+
+    crate::report::Report {
+        run: crate::report::Run {
+            seconds: cli.seconds,
+            target_fps: feed_fps,
+            invalidated: !invalidating.is_empty(),
+            invalidating_events: invalidating,
+        },
+        stream: crate::report::Stream {
+            expected: expected_frames,
+            reconstructed,
+            packet_loss: rx.lost,
+            au_loss: expected_frames.saturating_sub(reconstructed),
+            corruption,
+            reordered: rx.reordered,
+            duplicates: rx.duplicates,
+        },
+        network: crate::report::Network {
+            arrival_p50_ms: arrival.p50.as_millis_f64(),
+            arrival_p95_ms: arrival.p95.as_millis_f64(),
+            arrival_p99_ms: arrival.p99.as_millis_f64(),
+            arrival_max_ms: arrival.max.as_millis_f64(),
+            rtp_jitter_us: jitter.get() as f64 / 1000.0,
+        },
+        decode: crate::report::Decode {
+            decoded: outcome.decoded,
+            errors: outcome.errors,
+            p50_ms: decode.p50.as_millis_f64(),
+            p95_ms: decode.p95.as_millis_f64(),
+            p99_ms: decode.p99.as_millis_f64(),
+            backlog_slope_per_min: outcome.backlog.slope_per_minute().unwrap_or(0.0),
+        },
+        display: crate::report::Display {
+            nominal_hz: render.display_hz,
+            callbacks: render.callbacks,
+            rendered: render.rendered,
+            superseded: render.superseded,
+            empty_refreshes: render.empty_ticks,
+            callback_interval_p50_ms: render.callback_interval.p50.as_millis_f64(),
+            callback_interval_p95_ms: render.callback_interval.p95.as_millis_f64(),
+            callback_interval_p99_ms: render.callback_interval.p99.as_millis_f64(),
+            callback_interval_max_ms: render.callback_interval.max.as_millis_f64(),
+            frame_age_p50_ms: snapshot.local_age.p50.as_millis_f64(),
+            frame_age_p95_ms: snapshot.local_age.p95.as_millis_f64(),
+            frame_age_p99_ms: snapshot.local_age.p99.as_millis_f64(),
+        },
+        environment: crate::report::Environment {
+            occlusion_changes: render.occlusion_changes,
+            space_changes: render.space_changes,
+            miniaturise_events: render.miniaturise_events,
+            display_changes: render.display_changes,
+            link_pauses: render.link_pauses,
+            app_nap_protection: true,
+        },
+        windows: slices,
+    }
 }

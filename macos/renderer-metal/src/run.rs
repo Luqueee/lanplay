@@ -18,6 +18,7 @@ use objc2_quartz_core::{
     CAMetalDrawable, CAMetalLayer,
 };
 
+use crate::environment::{Environment, LiveCounters, Watcher, bump, read};
 use crate::error::RendererError;
 use crate::gpu::Gpu;
 use crate::slot::{LatestFrameSlot, SurfaceFrame};
@@ -49,9 +50,20 @@ pub struct RendererConfig {
     pub render_delay: Option<Duration>,
     /// Stop after this many presents (None = until `stop` or the window closes).
     pub present_limit: Option<u64>,
+    /// Read by a supervising thread while the run is in progress, so a long
+    /// measurement can be watched rather than only autopsied.
+    pub counters: Arc<LiveCounters>,
+    /// The refresh rate this run needs. When set, `run` inspects the window
+    /// before entering the loop and refuses to start in an environment that
+    /// would make the measurement meaningless. `None` skips the check.
+    pub require_clean_environment: Option<f64>,
+    /// Called once, after the environment check passes and before the run
+    /// loop starts. The client prints the preflight terminator here, which is
+    /// the signal the orchestrator uses to start the remote sender.
+    pub on_ready: Option<Box<dyn FnOnce() + Send>>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct RenderStats {
     pub rendered: u64,
     /// Frames the producer threw away because the renderer had not taken the
@@ -79,6 +91,22 @@ pub struct RenderStats {
     /// signal exists and this is the measured cadence: presents divided by the
     /// span between the first and the last.
     pub display_hz: f64,
+    /// Gap between consecutive display-link callbacks. Empty in
+    /// [`DriveMode::Immediate`], which has no callbacks to space out: its loop
+    /// spins as fast as the slot can be checked, so the interval between
+    /// passes says nothing about the display.
+    pub callback_interval: Percentiles,
+    /// The window and display as the run found them, with `display_hz` filled
+    /// in from what was actually measured.
+    pub environment: Environment,
+    /// Copies of [`LiveCounters`], read once the loop has ended, so a caller
+    /// that did not keep the `Arc` still gets them.
+    pub callbacks: u64,
+    pub occlusion_changes: u64,
+    pub space_changes: u64,
+    pub miniaturise_events: u64,
+    pub display_changes: u64,
+    pub link_pauses: u64,
 }
 
 impl core::fmt::Display for RenderStats {
@@ -89,13 +117,24 @@ impl core::fmt::Display for RenderStats {
             self.rendered, self.superseded, self.empty_ticks, self.display_hz
         )?;
         writeln!(f, "  drawable wait  {}", self.drawable_wait)?;
-        write!(f, "  encode cpu     {}", self.encode_cpu)
+        writeln!(f, "  encode cpu     {}", self.encode_cpu)?;
+        writeln!(f, "  callback gap   {}", self.callback_interval)?;
+        write!(
+            f,
+            "  callbacks {}  link pauses {}  occlusion {}  space {}  miniaturise {}  display {}",
+            self.callbacks,
+            self.link_pauses,
+            self.occlusion_changes,
+            self.space_changes,
+            self.miniaturise_events,
+            self.display_changes
+        )
     }
 }
 
 /// Blocking. MUST be called on the main thread (AppKit).
 pub fn run(
-    config: RendererConfig,
+    mut config: RendererConfig,
     slot: Arc<LatestFrameSlot>,
 ) -> Result<RenderStats, RendererError> {
     let mtm = MainThreadMarker::new().ok_or(RendererError::NotMainThread)?;
@@ -124,11 +163,21 @@ pub fn run(
     app.finishLaunching();
     app.activate();
     surface.window.makeKeyAndOrderFront(None);
+    settle(&app);
 
-    let core = RenderLoop::new(gpu, slot, &config);
+    // `FnOnce` has to be owned to be called, and the mode functions only
+    // borrow the config.
+    let on_ready = config.on_ready.take();
+    // The fallback pause threshold, before the link has spoken for itself.
+    let expected_period = Nanos(if surface.nominal_hz > 0.0 {
+        (1e9 / surface.nominal_hz) as u64
+    } else {
+        0
+    });
+    let core = RenderLoop::new(gpu, slot, &config, expected_period);
     let result = match config.mode {
-        DriveMode::Immediate => immediate(&app, &surface, core, &config),
-        DriveMode::DisplayLink => display_link(mtm, &app, &surface, core, &config),
+        DriveMode::Immediate => immediate(&app, &surface, core, &config, on_ready),
+        DriveMode::DisplayLink => display_link(mtm, &app, &surface, core, &config, on_ready),
     };
 
     // Whatever ended the loop — the limit, the stop flag, the user closing the
@@ -154,12 +203,36 @@ struct RenderLoop {
     /// Gaps between the display link's successive target presentation times.
     link_cadence: Track,
     last_target: Option<f64>,
+    /// Gaps between consecutive display-link callbacks, measured on the local
+    /// clock rather than from the link's target times: a suspended link keeps
+    /// its target times consistent and simply stops calling, so only the
+    /// arrival of the callback shows the pause.
+    callback_interval: Track,
+    last_callback: Option<Timestamp>,
+    /// Twice this marks a callback gap as a pause. It starts from what the
+    /// display advertises and is replaced by the link's own median cadence as
+    /// soon as there are enough samples to trust it.
+    expected_period: Nanos,
+    cadence_samples: u64,
+    counters: Arc<LiveCounters>,
     first_present: Option<Timestamp>,
     last_present: Option<Timestamp>,
 }
 
+/// How many cadence samples to gather before believing the link over the
+/// display's advertised rate, and how often to revise that belief afterwards.
+/// A second's worth at 120 Hz: long enough that a couple of slow first frames
+/// do not set the threshold, short enough to follow a display that changes
+/// mode mid-run.
+const CADENCE_REVISION: u64 = 120;
+
 impl RenderLoop {
-    fn new(gpu: Gpu, slot: Arc<LatestFrameSlot>, config: &RendererConfig) -> RenderLoop {
+    fn new(
+        gpu: Gpu,
+        slot: Arc<LatestFrameSlot>,
+        config: &RendererConfig,
+        expected_period: Nanos,
+    ) -> RenderLoop {
         RenderLoop {
             gpu,
             slot,
@@ -173,6 +246,11 @@ impl RenderLoop {
             encode_cpu: Track::new(),
             link_cadence: Track::new(),
             last_target: None,
+            callback_interval: Track::new(),
+            last_callback: None,
+            expected_period,
+            cadence_samples: 0,
+            counters: Arc::clone(&config.counters),
             first_present: None,
             last_present: None,
         }
@@ -188,6 +266,7 @@ impl RenderLoop {
     fn take_frame(&mut self) -> Option<SurfaceFrame> {
         let Some(frame) = self.slot.take() else {
             self.empty_ticks += 1;
+            bump(&self.counters.empty_ticks);
             return None;
         };
         self.recorder.mark(frame.id, Stage::RenderSubmit);
@@ -200,6 +279,10 @@ impl RenderLoop {
     /// Immediate mode asks the layer for a drawable itself, which is where the
     /// compositor's back-pressure lands. Reports whether it drew.
     fn tick_from_layer(&mut self, layer: &CAMetalLayer) -> Result<bool, RendererError> {
+        // Immediate mode has no callbacks, so what it counts here is draw
+        // attempts: one per pass of its loop, whether or not a frame was
+        // waiting.
+        bump(&self.counters.callbacks);
         let Some(frame) = self.take_frame() else {
             return Ok(false);
         };
@@ -217,6 +300,7 @@ impl RenderLoop {
     /// so the acquisition itself is a pointer read; the waiting happened
     /// before the callback fired.
     fn tick_from_link(&mut self, update: &CAMetalDisplayLinkUpdate) -> Result<(), RendererError> {
+        self.record_callback(Timestamp::now());
         self.record_cadence(update.targetPresentationTimestamp());
         let Some(frame) = self.take_frame() else {
             return Ok(());
@@ -243,6 +327,7 @@ impl RenderLoop {
         self.encode_cpu
             .record(committed.saturating_since(encode_start));
         self.rendered += 1;
+        bump(&self.counters.rendered);
         self.first_present.get_or_insert(committed);
         self.last_present = Some(committed);
         Ok(())
@@ -255,18 +340,53 @@ impl RenderLoop {
             // that into the cadence would misreport the refresh rate.
             if gap > 0.0 && gap < 0.1 {
                 self.link_cadence.record(Nanos((gap * 1e9) as u64));
+                self.cadence_samples += 1;
+                // Revising from the histogram costs a percentile query, so it
+                // happens once a second rather than once a frame.
+                if self.cadence_samples % CADENCE_REVISION == 0 {
+                    let median = self.link_cadence.percentiles().p50;
+                    if median.0 > 0 {
+                        self.expected_period = median;
+                    }
+                }
             }
         }
     }
 
-    fn stats(&self, mode: DriveMode) -> RenderStats {
+    /// Counts the callback and measures how long it has been since the last
+    /// one. A gap of more than two periods is the signature of a link macOS
+    /// suspended, which is the failure this whole gate exists to catch.
+    fn record_callback(&mut self, now: Timestamp) {
+        bump(&self.counters.callbacks);
+        let Some(previous) = self.last_callback.replace(now) else {
+            return;
+        };
+        let gap = now.saturating_since(previous);
+        self.callback_interval.record(gap);
+        if gap.0 > 2 * self.expected_period.0 {
+            bump(&self.counters.link_pauses);
+        }
+    }
+
+    fn stats(&self, mode: DriveMode, mut environment: Environment) -> RenderStats {
+        // The environment was read before the first frame, when the link had
+        // only been asked for a rate; what it actually delivered is known now.
+        environment.display_hz = self.display_hz(mode);
         RenderStats {
             rendered: self.rendered,
             superseded: self.slot.superseded(),
             empty_ticks: self.empty_ticks,
             drawable_wait: self.drawable_wait.percentiles(),
             encode_cpu: self.encode_cpu.percentiles(),
-            display_hz: self.display_hz(mode),
+            display_hz: environment.display_hz,
+            callback_interval: self.callback_interval.percentiles(),
+            environment,
+            callbacks: read(&self.counters.callbacks),
+            occlusion_changes: read(&self.counters.occlusion_changes),
+            space_changes: read(&self.counters.space_changes),
+            miniaturise_events: read(&self.counters.miniaturise_events),
+            display_changes: read(&self.counters.display_changes),
+            link_pauses: read(&self.counters.link_pauses),
         }
     }
 
@@ -327,17 +447,77 @@ fn pump(app: &NSApplication) {
     }
 }
 
+/// Lets AppKit publish the window's occlusion state before anything is judged
+/// by it.
+///
+/// `occlusionState` is maintained by the window server, not set by
+/// `orderFront`, and a window that has just appeared reads as not visible for
+/// the first few passes of the run loop. Preflighting before it settles would
+/// fail a perfectly clean desktop.
+fn settle(app: &NSApplication) {
+    let run_loop = NSRunLoop::currentRunLoop();
+    // SAFETY: reading a framework constant.
+    let mode = unsafe { NSDefaultRunLoopMode };
+    let deadline = Timestamp::now().add(Nanos(SETTLE_NS));
+    while Timestamp::now() < deadline {
+        autoreleasepool(|_| {
+            pump(app);
+            run_loop.runMode_beforeDate(mode, &NSDate::dateWithTimeIntervalSinceNow(0.01));
+        });
+    }
+}
+
+/// Long enough for the window server to publish an occlusion state, short
+/// enough that a preflight failure is still reported inside the first second.
+const SETTLE_NS: u64 = 250_000_000;
+
+/// Reports what was inspected and refuses the run if the environment would
+/// make its numbers meaningless.
+///
+/// One line per item, on stdout, so an orchestrator can read the reasons
+/// rather than infer them from an exit code. The terminator is the caller's
+/// to print: only the client knows what else it checked.
+fn preflight(environment: &Environment, required: Option<f64>) -> Result<(), RendererError> {
+    let Some(required_hz) = required else {
+        return Ok(());
+    };
+    let mut problems = Vec::new();
+    for check in environment.checks(required_hz) {
+        let verdict = if check.passed { "ok" } else { "FAIL" };
+        println!("preflight: {verdict} {} — {}", check.name, check.detail);
+        if !check.passed {
+            problems.push(check.detail);
+        }
+    }
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(RendererError::DirtyEnvironment(problems))
+    }
+}
+
 fn immediate(
     app: &NSApplication,
     surface: &Surface,
     mut core: RenderLoop,
     config: &RendererConfig,
+    on_ready: Option<Box<dyn FnOnce() + Send>>,
 ) -> Result<RenderStats, RendererError> {
+    // Immediate mode has no link to ask, so the display's advertised rate is
+    // the only figure available until frames have been presented.
+    let environment = surface.environment(surface.nominal_hz);
+    preflight(&environment, config.require_clean_environment)?;
+    let mut watcher = Watcher::new(Arc::clone(&config.counters), &environment);
+    if let Some(ready) = on_ready {
+        ready();
+    }
+
     while !should_stop(&config.stop, &core) {
         // One pool per iteration: a drawable, an event and a date per pass at
         // over a thousand passes a second is not something to let accumulate.
         let drew = autoreleasepool(|_| {
             pump(app);
+            watcher.sample(&surface.window);
             core.tick_from_layer(&surface.layer)
         })?;
 
@@ -350,7 +530,7 @@ fn immediate(
         }
     }
     report_missed(&core);
-    Ok(core.stats(DriveMode::Immediate))
+    Ok(core.stats(DriveMode::Immediate, environment))
 }
 
 fn display_link(
@@ -359,27 +539,43 @@ fn display_link(
     surface: &Surface,
     core: RenderLoop,
     config: &RendererConfig,
+    on_ready: Option<Box<dyn FnOnce() + Send>>,
 ) -> Result<RenderStats, RendererError> {
     let core = Rc::new(RefCell::new(core));
     let target = LinkTarget::new(mtm, Rc::clone(&core));
 
     let link = CAMetalDisplayLink::initWithMetalLayer(CAMetalDisplayLink::alloc(), &surface.layer);
-    link.setDelegate(Some(ProtocolObject::from_ref(&*target)));
     // Ask for the panel's full rate. On a variable-refresh display the link
     // otherwise settles wherever the system thinks is polite, which is exactly
     // the number this renderer exists to measure.
     let hz = surface.nominal_hz as f32;
     link.setPreferredFrameRateRange(CAFrameRateRange::new(hz, hz, hz));
 
+    // Preflight once the link exists but before it is wired to anything: a
+    // dirty environment must cost a fraction of a second, not ten minutes, and
+    // a link that never received a callback needs no orderly teardown.
+    let environment = surface.environment(link.preferredFrameRateRange().preferred as f64);
+    if let Err(error) = preflight(&environment, config.require_clean_environment) {
+        link.invalidate();
+        return Err(error);
+    }
+    let mut watcher = Watcher::new(Arc::clone(&config.counters), &environment);
+
+    link.setDelegate(Some(ProtocolObject::from_ref(&*target)));
     let run_loop = NSRunLoop::currentRunLoop();
     // SAFETY: this is the main thread's run loop and the link is used, and
     // later removed, only from this thread.
     let mode = unsafe { NSDefaultRunLoopMode };
     unsafe { link.addToRunLoop_forMode(&run_loop, mode) };
 
+    if let Some(ready) = on_ready {
+        ready();
+    }
+
     let outcome = loop {
         let failure = autoreleasepool(|_| {
             pump(app);
+            watcher.sample(&surface.window);
             // Blocks until the link's source fires, so the callback runs here.
             // The ceiling only bounds how long a stop request can go unnoticed.
             let deadline = NSDate::dateWithTimeIntervalSinceNow(0.05);
@@ -402,7 +598,7 @@ fn display_link(
     outcome?;
     let core = core.borrow();
     report_missed(&core);
-    Ok(core.stats(DriveMode::DisplayLink))
+    Ok(core.stats(DriveMode::DisplayLink, environment))
 }
 
 fn report_missed(core: &RenderLoop) {

@@ -8,8 +8,11 @@
 
 mod gate;
 mod nap;
+mod preflight;
+mod report;
 mod session;
 mod transport;
+mod windows;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -63,6 +66,16 @@ pub struct Cli {
     /// SHA-256, rather than trusting that the decoder did not complain.
     #[arg(long)]
     pub verify: bool,
+    /// Refuse to run unless the display can present at the source rate and
+    /// the window is unoccluded, on the active Space and not minimised.
+    #[arg(long)]
+    pub require_clean_display: bool,
+    /// Write the machine-readable result here.
+    #[arg(long)]
+    pub report: Option<PathBuf>,
+    /// Length of each rolling window in the report.
+    #[arg(long, default_value_t = 10.0)]
+    pub window_seconds: f64,
     #[arg(long, value_enum, default_value_t = Mode::DisplayLink)]
     pub mode: Mode,
 

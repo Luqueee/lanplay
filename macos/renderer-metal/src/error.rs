@@ -23,6 +23,10 @@ pub enum RendererError {
         plane: usize,
         status: i32,
     },
+    /// The preflight found the window or display in a state that would make
+    /// the measurement meaningless, and the caller asked to be told rather
+    /// than handed a number it cannot trust.
+    DirtyEnvironment(Vec<String>),
 }
 
 impl fmt::Display for RendererError {
@@ -49,6 +53,16 @@ impl fmt::Display for RendererError {
                     f,
                     "plane {plane} could not be bound as a Metal texture ({status})"
                 )
+            }
+            RendererError::DirtyEnvironment(problems) => {
+                write!(f, "the environment is unfit for a measurement: ")?;
+                for (index, problem) in problems.iter().enumerate() {
+                    if index > 0 {
+                        f.write_str("; ")?;
+                    }
+                    f.write_str(problem)?;
+                }
+                Ok(())
             }
         }
     }

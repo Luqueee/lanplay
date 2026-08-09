@@ -16,7 +16,7 @@
 //! use std::sync::Arc;
 //! use std::sync::atomic::AtomicBool;
 //!
-//! use lanplay_renderer_metal::{DriveMode, LatestFrameSlot, RendererConfig, run};
+//! use lanplay_renderer_metal::{DriveMode, LatestFrameSlot, LiveCounters, RendererConfig, run};
 //! use lanplay_telemetry::{Telemetry, TelemetryConfig};
 //!
 //! let telemetry = Telemetry::start(TelemetryConfig::default());
@@ -32,6 +32,9 @@
 //!         stop: Arc::new(AtomicBool::new(false)),
 //!         render_delay: None,
 //!         present_limit: None,
+//!         counters: LiveCounters::new(),
+//!         require_clean_environment: Some(120.0),
+//!         on_ready: None,
 //!     },
 //!     slot,
 //! )
@@ -39,6 +42,7 @@
 //! println!("{stats}");
 //! ```
 
+mod environment;
 mod error;
 mod gpu;
 mod run;
@@ -47,6 +51,7 @@ mod slot;
 mod stats;
 mod window;
 
+pub use environment::{Environment, LiveCounters};
 pub use error::RendererError;
 pub use run::{DriveMode, RenderStats, RendererConfig, run};
 pub use slot::{LatestFrameSlot, SurfaceFrame};

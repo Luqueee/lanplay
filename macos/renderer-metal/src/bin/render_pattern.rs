@@ -13,7 +13,9 @@ use std::time::{Duration, Instant};
 
 use clap::{Parser, ValueEnum};
 use lanplay_protocol::FrameIdSource;
-use lanplay_renderer_metal::{DriveMode, LatestFrameSlot, RendererConfig, SurfaceFrame, run};
+use lanplay_renderer_metal::{
+    DriveMode, LatestFrameSlot, LiveCounters, RendererConfig, SurfaceFrame, run,
+};
 use lanplay_telemetry::{Recorder, Stage, Telemetry, TelemetryConfig, Timestamp};
 use lanplay_video_core::PixelFormat;
 use objc2_core_foundation::{CFBoolean, CFDictionary, CFNumber, CFRetained, CFType};
@@ -86,6 +88,9 @@ fn main() {
             .render_delay_ms
             .map(|ms| Duration::from_secs_f64(ms / 1_000.0)),
         present_limit: None,
+        counters: LiveCounters::new(),
+        require_clean_environment: Some(120.0),
+        on_ready: None,
     };
 
     let stats = run(config, slot);

@@ -238,7 +238,7 @@ fn a_window_sees_a_collapse_that_the_cumulative_view_hides() {
     });
     let recorder = telemetry.recorder();
 
-    let mut present = |frame: u64, age_ms: f64| {
+    let present = |frame: u64, age_ms: f64| {
         let base = Timestamp::from_nanos(frame * 8_333_333);
         recorder.mark_at(FrameId::new(frame), Stage::FrameCreated, base);
         recorder.mark_at(

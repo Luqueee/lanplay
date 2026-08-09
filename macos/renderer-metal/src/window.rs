@@ -9,6 +9,7 @@ use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use objc2_metal::{MTLDevice, MTLPixelFormat};
 use objc2_quartz_core::CAMetalLayer;
 
+use crate::environment::{Environment, WindowState};
 use crate::error::RendererError;
 
 /// The window, its Metal layer and what the display underneath can do.
@@ -102,6 +103,31 @@ impl Surface {
             drawable_width: drawable_width as u32,
             drawable_height: drawable_height as u32,
         })
+    }
+
+    /// The window's situation right now, for the preflight and for the stats.
+    ///
+    /// The rate is re-read from whichever screen the window is actually on
+    /// rather than reused from `open`: a window can be dragged, or the display
+    /// it opened on can change mode, and a run that needs 120 Hz must be told
+    /// so before it starts rather than be judged against a stale figure.
+    pub(crate) fn environment(&self, display_hz: f64) -> Environment {
+        let state = WindowState::read(&self.window);
+        Environment {
+            display_name: state
+                .screen
+                .as_ref()
+                .map_or_else(|| self.display_name.clone(), |screen| screen.name.clone()),
+            display_hz,
+            maximum_frames_per_second: state
+                .screen
+                .as_ref()
+                .map_or(self.nominal_hz, |screen| screen.maximum_frames_per_second),
+            on_active_space: state.on_active_space,
+            occluded: state.occluded,
+            miniaturised: state.miniaturised,
+            drawable: (self.drawable_width, self.drawable_height),
+        }
     }
 }
 
