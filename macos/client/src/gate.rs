@@ -55,6 +55,8 @@ pub struct GateInputs {
     pub span_callbacks: u64,
     /// Refreshes over that same span that found nothing new.
     pub span_empty_ticks: u64,
+    /// Refreshes over that same span that took a frame and found no drawable.
+    pub span_missed_drawables: u64,
 
     pub memory: Trend,
     /// True when the renderer is driven by the display link, so `empty_ticks`
@@ -257,24 +259,27 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
         ),
     });
 
-    // Every callback either drew a frame, found nothing new, or failed to get
-    // a drawable. The first two are counted over the measured span and the
-    // renders over the whole run, which are the same number only because the
-    // decoder stops publishing before the drain starts. Nothing in the code
-    // enforces that, so it is enforced here: the day a producer keeps
-    // publishing into the drain, the run's renders outgrow the span's
-    // callbacks and this fails instead of quietly reporting a wrong rate.
-    let accounted_refreshes = inputs.rendered + inputs.span_empty_ticks;
+    // Every refresh drew a frame, found nothing new, or took a frame and lost
+    // the race for a drawable. There is no fourth outcome, so the three close
+    // on the callback count exactly. Two assumptions ride on that equality and
+    // neither is enforced anywhere else: that the decoder stops publishing
+    // before the drain starts, which is why the whole run's renders can be
+    // compared against the span's refreshes; and that no refresh goes
+    // unaccounted. Publishing into the drain makes the left side outgrow the
+    // right; losing refreshes to a fourth outcome makes it fall short. Either
+    // way the rate in the report is wrong, and this says so rather than
+    // letting it read as a slow link.
+    let accounted = inputs.rendered + inputs.span_empty_ticks + inputs.span_missed_drawables;
     checks.push(Check {
         name: "span accounted",
         owner: Owner::Pipeline,
-        passed: accounted_refreshes <= inputs.span_callbacks,
+        passed: accounted == inputs.span_callbacks,
         detail: format!(
-            "{} rendered + {} empty against {} callbacks, {} without a drawable",
+            "{} callbacks = {} rendered + {} empty + {} without a drawable",
+            inputs.span_callbacks,
             inputs.rendered,
             inputs.span_empty_ticks,
-            inputs.span_callbacks,
-            inputs.span_callbacks.saturating_sub(accounted_refreshes)
+            inputs.span_missed_drawables
         ),
     });
 
@@ -639,6 +644,7 @@ mod tests {
             still_in_slot: 0,
             span_callbacks: frames,
             span_empty_ticks: 0,
+            span_missed_drawables: 0,
             display_driven: true,
             transport: None,
             memory: flat_trend(200e6, 60),
@@ -661,12 +667,24 @@ mod tests {
 
     #[test]
     fn callbacks_that_never_got_a_drawable_are_not_a_span_fault() {
-        // A shortfall is normal: those callbacks found a frame and lost the
-        // race for a drawable. Only an overshoot means the span is wrong.
+        // Drawable starvation is a real thing to report, but it is not a
+        // broken span: the third outcome accounts for those refreshes.
         let mut inputs = healthy(4_800);
         inputs.span_callbacks = 4_900;
         inputs.span_empty_ticks = 50;
+        inputs.span_missed_drawables = 50;
         assert!(named(&inputs, "span accounted").passed);
+    }
+
+    #[test]
+    fn refreshes_that_belong_to_no_outcome_are_caught() {
+        // The shortfall the third outcome does not explain: refreshes that
+        // happened and went nowhere, which would read as a slow link.
+        let mut inputs = healthy(4_800);
+        inputs.span_callbacks = 4_900;
+        inputs.span_empty_ticks = 50;
+        let check = named(&inputs, "span accounted");
+        assert!(!check.passed, "{}", check.detail);
     }
 
     #[test]
@@ -778,6 +796,9 @@ mod tests {
         inputs.display_hz = 60.0;
         inputs.rendered = 2_000;
         inputs.superseded = 2_000;
+        // A 60 Hz panel refreshes half as often as the source produces, so it
+        // cannot offer more refreshes than it drew.
+        inputs.span_callbacks = 2_000;
         // Half the frames never present, and the cadence follows the 60 Hz
         // panel rather than the 120 fps source.
         inputs.snapshot = snapshot_of(Run {

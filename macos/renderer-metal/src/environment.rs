@@ -29,6 +29,11 @@ pub struct LiveCounters {
     pub callbacks: AtomicU64,
     pub rendered: AtomicU64,
     pub empty_ticks: AtomicU64,
+    /// Ticks that took a frame and then found no drawable free. The third
+    /// outcome of a tick, alongside a render and an empty one, so a
+    /// supervisor differencing these across a span can close the books:
+    /// `callbacks == rendered + empty_ticks + missed_drawables`.
+    pub missed_drawables: AtomicU64,
     pub occlusion_changes: AtomicU64,
     pub space_changes: AtomicU64,
     pub miniaturise_events: AtomicU64,

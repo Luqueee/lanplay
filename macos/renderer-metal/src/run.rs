@@ -102,6 +102,10 @@ pub struct RenderStats {
     /// Copies of [`LiveCounters`], read once the loop has ended, so a caller
     /// that did not keep the `Arc` still gets them.
     pub callbacks: u64,
+    /// Zero by construction in [`DriveMode::DisplayLink`]: the link reserves
+    /// the drawable before it calls back, so only [`DriveMode::Immediate`]
+    /// can be refused one.
+    pub missed_drawables: u64,
     pub occlusion_changes: u64,
     pub space_changes: u64,
     pub miniaturise_events: u64,
@@ -121,8 +125,9 @@ impl core::fmt::Display for RenderStats {
         writeln!(f, "  callback gap   {}", self.callback_interval)?;
         write!(
             f,
-            "  callbacks {}  link pauses {}  occlusion {}  space {}  miniaturise {}  display {}",
+            "  callbacks {}  missed drawables {}  link pauses {}  occlusion {}  space {}  miniaturise {}  display {}",
             self.callbacks,
+            self.missed_drawables,
             self.link_pauses,
             self.occlusion_changes,
             self.space_changes,
@@ -289,6 +294,7 @@ impl RenderLoop {
         let wait_start = Timestamp::now();
         let Some(drawable) = layer.nextDrawable() else {
             self.missed_drawables += 1;
+            bump(&self.counters.missed_drawables);
             return Ok(false);
         };
         let wait = Timestamp::now().saturating_since(wait_start);
@@ -382,6 +388,7 @@ impl RenderLoop {
             callback_interval: self.callback_interval.percentiles(),
             environment,
             callbacks: read(&self.counters.callbacks),
+            missed_drawables: read(&self.counters.missed_drawables),
             occlusion_changes: read(&self.counters.occlusion_changes),
             space_changes: read(&self.counters.space_changes),
             miniaturise_events: read(&self.counters.miniaturise_events),

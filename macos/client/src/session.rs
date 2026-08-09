@@ -205,7 +205,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     // The far end of the measured span. The renderer keeps presenting until
     // `stop`, which the watchdog only sets two seconds after the sender has
     // finished, so the run's own end is the wrong mark to count to. Only the
-    // two counters the drain moves are marked: no frame arrives after the
+    // The counters the drain moves are marked: no frame arrives after the
     // last access unit, so `rendered` and `superseded` cannot advance in it.
     let spans_end = Arc::new(SpanEnd::default());
     let stream_ended = Arc::new(AtomicBool::new(false));
@@ -458,6 +458,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
         empty_ticks: render_stats.empty_ticks,
         span_callbacks: spans_end.callbacks(render_stats.callbacks),
         span_empty_ticks: spans_end.empty_ticks(render_stats.empty_ticks),
+        span_missed_drawables: spans_end.missed_drawables(render_stats.missed_drawables),
         still_in_slot,
         display_driven: matches!(cli.mode, crate::Mode::DisplayLink),
         memory: memory.clone(),
@@ -808,6 +809,7 @@ struct SpanEnd {
     marked: AtomicBool,
     callbacks: AtomicU64,
     empty_ticks: AtomicU64,
+    missed_drawables: AtomicU64,
 }
 
 impl SpanEnd {
@@ -818,6 +820,10 @@ impl SpanEnd {
         );
         self.empty_ticks.store(
             counters.empty_ticks.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+        self.missed_drawables.store(
+            counters.missed_drawables.load(Ordering::Relaxed),
             Ordering::Relaxed,
         );
         self.marked.store(true, Ordering::Release);
@@ -836,6 +842,14 @@ impl SpanEnd {
     fn empty_ticks(&self, whole_run: u64) -> u64 {
         if self.marked.load(Ordering::Acquire) {
             self.empty_ticks.load(Ordering::Relaxed)
+        } else {
+            whole_run
+        }
+    }
+
+    fn missed_drawables(&self, whole_run: u64) -> u64 {
+        if self.marked.load(Ordering::Acquire) {
+            self.missed_drawables.load(Ordering::Relaxed)
         } else {
             whole_run
         }
