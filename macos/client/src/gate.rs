@@ -50,6 +50,11 @@ pub struct GateInputs {
     pub superseded: u64,
     pub empty_ticks: u64,
     pub still_in_slot: u64,
+    /// Display-link callbacks over the measured span, which ends with the
+    /// stream rather than with the run.
+    pub span_callbacks: u64,
+    /// Refreshes over that same span that found nothing new.
+    pub span_empty_ticks: u64,
 
     pub memory: Trend,
     /// True when the renderer is driven by the display link, so `empty_ticks`
@@ -249,6 +254,27 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
         detail: format!(
             "{} decoded = {} rendered + {} superseded + {} held",
             inputs.decoded, inputs.rendered, inputs.superseded, inputs.still_in_slot
+        ),
+    });
+
+    // Every callback either drew a frame, found nothing new, or failed to get
+    // a drawable. The first two are counted over the measured span and the
+    // renders over the whole run, which are the same number only because the
+    // decoder stops publishing before the drain starts. Nothing in the code
+    // enforces that, so it is enforced here: the day a producer keeps
+    // publishing into the drain, the run's renders outgrow the span's
+    // callbacks and this fails instead of quietly reporting a wrong rate.
+    let accounted_refreshes = inputs.rendered + inputs.span_empty_ticks;
+    checks.push(Check {
+        name: "span accounted",
+        owner: Owner::Pipeline,
+        passed: accounted_refreshes <= inputs.span_callbacks,
+        detail: format!(
+            "{} rendered + {} empty against {} callbacks, {} without a drawable",
+            inputs.rendered,
+            inputs.span_empty_ticks,
+            inputs.span_callbacks,
+            inputs.span_callbacks.saturating_sub(accounted_refreshes)
         ),
     });
 
@@ -611,6 +637,8 @@ mod tests {
             superseded: 0,
             empty_ticks: 0,
             still_in_slot: 0,
+            span_callbacks: frames,
+            span_empty_ticks: 0,
             display_driven: true,
             transport: None,
             memory: flat_trend(200e6, 60),
@@ -618,6 +646,27 @@ mod tests {
             zero_copy_render_path: true,
             metal_texture_cache: true,
         }
+    }
+
+    #[test]
+    fn renders_beyond_the_span_that_produced_them_are_caught() {
+        // The renderer kept drawing after the counters were marked, which can
+        // only happen if the producer published into the drain.
+        let mut inputs = healthy(4_800);
+        inputs.span_callbacks = 4_700;
+        inputs.span_empty_ticks = 100;
+        let check = named(&inputs, "span accounted");
+        assert!(!check.passed, "{}", check.detail);
+    }
+
+    #[test]
+    fn callbacks_that_never_got_a_drawable_are_not_a_span_fault() {
+        // A shortfall is normal: those callbacks found a frame and lost the
+        // race for a drawable. Only an overshoot means the span is wrong.
+        let mut inputs = healthy(4_800);
+        inputs.span_callbacks = 4_900;
+        inputs.span_empty_ticks = 50;
+        assert!(named(&inputs, "span accounted").passed);
     }
 
     #[test]

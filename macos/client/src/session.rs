@@ -456,6 +456,8 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
         rendered: render_stats.rendered,
         superseded: render_stats.superseded,
         empty_ticks: render_stats.empty_ticks,
+        span_callbacks: spans_end.callbacks(render_stats.callbacks),
+        span_empty_ticks: spans_end.empty_ticks(render_stats.empty_ticks),
         still_in_slot,
         display_driven: matches!(cli.mode, crate::Mode::DisplayLink),
         memory: memory.clone(),
