@@ -136,7 +136,8 @@ pub fn main() -> std::process::ExitCode {
 /// driver installed the two orders are not the same. Guessing which index is
 /// the physical panel is how a benchmark ends up measuring the wrong screen.
 fn dxgi_listing() -> String {
-    use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
+    use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, IDXGIOutput6};
+    use windows::core::Interface;
 
     let mut text = String::new();
     // SAFETY: every returned interface is checked before use and the loop
@@ -175,6 +176,21 @@ fn dxgi_listing() -> String {
                     }
                     Err(error) => {
                         let _ = writeln!(text, "  output {output_index} | GetDesc failed: {error}");
+                    }
+                }
+                // The colour space is why a duplication can refuse a format.
+                // An HDR desktop is not 8-bit BGRA, and DuplicateOutput1 will
+                // not tone-map down to a list that only offers one.
+                match output.cast::<IDXGIOutput6>().and_then(|six| six.GetDesc1()) {
+                    Ok(desc) => {
+                        let _ = writeln!(
+                            text,
+                            "    colour space {} | {} bits per colour",
+                            desc.ColorSpace.0, desc.BitsPerColor
+                        );
+                    }
+                    Err(error) => {
+                        let _ = writeln!(text, "    no IDXGIOutput6: {error}");
                     }
                 }
             }
