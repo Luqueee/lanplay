@@ -5,6 +5,11 @@
 //! a lock-free queue. Assembling timelines, computing percentiles, and any
 //! logging happen on a dedicated collector thread.
 //!
+//! A frame's life is tiled into named [`Segment`]s, each measured between two
+//! real marks. Time the segments do not cover is reported as
+//! [`FrameTimeline::unattributed_gap`] and is a debt to be paid with more
+//! instrumentation; no metric here is defined as a residue of the others.
+//!
 //! ```no_run
 //! use lanplay_protocol::FrameIdSource;
 //! use lanplay_telemetry::{Stage, Telemetry, TelemetryConfig};
@@ -29,9 +34,11 @@ mod stage;
 mod stats;
 mod timeline;
 
-pub use clock::{Nanos, Timestamp};
+pub use clock::{ClockDomain, Nanos, Timestamp};
 pub use collector::{Reporter, Telemetry, TelemetryConfig};
 pub use recorder::Recorder;
-pub use stage::{STAGE_COUNT, Side, Stage};
-pub use stats::{Counters, Snapshot, SpanStats};
-pub use timeline::{FRAME_AGE, FrameTimeline, SPANS, Span};
+pub use stage::{STAGE_COUNT, Stage};
+pub use stats::{Counters, P99_SOAK_FRAMES, Percentiles, Snapshot};
+pub use timeline::{
+    FRAME_AGE, FrameTimeline, Mark, SEGMENT_COUNT, Segment, SegmentKind, SegmentSample, Segments,
+};

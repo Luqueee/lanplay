@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use lanplay_protocol::FrameId;
-use lanplay_telemetry::{Stage, Telemetry, TelemetryConfig};
+use lanplay_telemetry::{ClockDomain, Segment, Stage, Telemetry, TelemetryConfig, Timestamp};
 
 fn config() -> TelemetryConfig {
     TelemetryConfig {
@@ -130,31 +130,27 @@ fn a_full_queue_drops_marks_instead_of_blocking() {
 }
 
 #[test]
-fn percentiles_reflect_recorded_spans() {
+fn percentiles_reflect_recorded_segments() {
     let telemetry = Telemetry::start(config());
     let recorder = telemetry.recorder();
 
     // 100 frames with a deterministic 2 ms encode; the last one takes 20 ms.
     for id in 1..=100u64 {
         let frame = FrameId::new(id);
-        let base = lanplay_telemetry::Timestamp::from_nanos(id * 100_000_000);
+        let base = Timestamp::from_nanos(id * 100_000_000);
         let encode_ms = if id == 100 { 20 } else { 2 };
         recorder.mark_at(frame, Stage::EncodeSubmit, base);
         recorder.mark_at(
             frame,
             Stage::EncodeComplete,
-            lanplay_telemetry::Timestamp::from_nanos(base.as_nanos() + encode_ms * 1_000_000),
+            Timestamp::from_nanos(base.as_nanos() + encode_ms * 1_000_000),
         );
         recorder.mark_at(frame, Stage::PresentSubmit, base);
     }
 
     assert!(telemetry.flush(Duration::from_secs(2)));
     let snapshot = telemetry.shutdown();
-    let encode = snapshot
-        .spans
-        .iter()
-        .find(|span| span.name == "encode")
-        .expect("encode span");
+    let encode = snapshot.segment(Segment::Encode);
 
     assert_eq!(encode.count, 100);
     assert!(
@@ -162,4 +158,71 @@ fn percentiles_reflect_recorded_spans() {
         "{encode:?}"
     );
     assert!(encode.max.as_millis_f64() >= 19.0, "{encode:?}");
+    assert!(!snapshot.p99_is_soaked(), "100 frames must not claim a p99");
+}
+
+#[test]
+fn marks_from_two_clocks_are_measured_but_flagged() {
+    // What phase 5 will do: merge the host's marks, recorded on the Windows
+    // clock, into a timeline the Mac is assembling.
+    let telemetry = Telemetry::start(config());
+    let local = telemetry.recorder();
+    let remote = local.with_domain(ClockDomain::LocalWindows);
+    let frame = FrameId::new(11);
+
+    remote.mark_at(
+        frame,
+        Stage::NetworkSendLast,
+        Timestamp::from_nanos(1_000_000),
+    );
+    local.mark_at(
+        frame,
+        Stage::NetworkReceiveFirst,
+        Timestamp::from_nanos(1_400_000),
+    );
+    local.mark_at(
+        frame,
+        Stage::PresentSubmit,
+        Timestamp::from_nanos(3_000_000),
+    );
+
+    assert!(telemetry.flush(Duration::from_secs(2)));
+    let snapshot = telemetry.shutdown();
+
+    assert_eq!(snapshot.segment(Segment::Network).count, 1);
+    assert_eq!(snapshot.counters.cross_domain_segments, 1);
+    assert_eq!(snapshot.clock_domain, ClockDomain::local());
+}
+
+#[test]
+fn unmeasured_time_is_reported_as_gap_not_absorbed() {
+    let telemetry = Telemetry::start(config());
+    let recorder = telemetry.recorder();
+    let frame = FrameId::new(21);
+
+    // Decoder-only pipeline: 4 ms of the frame's life has no instrumentation.
+    recorder.mark_at(frame, Stage::FrameCreated, Timestamp::from_nanos(0));
+    recorder.mark_at(frame, Stage::DecodeSubmit, Timestamp::from_nanos(4_000_000));
+    recorder.mark_at(
+        frame,
+        Stage::DecodeComplete,
+        Timestamp::from_nanos(5_600_000),
+    );
+    recorder.mark_at(
+        frame,
+        Stage::PresentSubmit,
+        Timestamp::from_nanos(6_000_000),
+    );
+
+    assert!(telemetry.flush(Duration::from_secs(2)));
+    let snapshot = telemetry.shutdown();
+
+    assert_eq!(snapshot.segment(Segment::Decode).count, 1);
+    assert_eq!(snapshot.segment(Segment::Capture).count, 0);
+    assert_eq!(snapshot.unattributed_gap.count, 1);
+    assert!(
+        (snapshot.unattributed_gap.p50.as_millis_f64() - 4.4).abs() < 0.1,
+        "{:?}",
+        snapshot.unattributed_gap
+    );
 }

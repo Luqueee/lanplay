@@ -1,6 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["crates/protocol", "crates/telemetry", "crates/capabilities", "tools/benchmark"]
+members = [
+    "crates/protocol",
+    "crates/telemetry",
+    "crates/capabilities",
+    "crates/video-core",
+    "tools/benchmark",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,6 +18,7 @@ license = "MIT"
 lanplay-protocol = { path = "crates/protocol" }
 lanplay-telemetry = { path = "crates/telemetry" }
 lanplay-capabilities = { path = "crates/capabilities" }
+lanplay-video-core = { path = "crates/video-core" }
 clap = { version = "4", features = ["derive"] }
 crossbeam-queue = "0.3"
 hdrhistogram = { version = "7", default-features = false }

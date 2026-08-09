@@ -9,11 +9,11 @@ use crossbeam_queue::ArrayQueue;
 use lanplay_protocol::FrameId;
 use parking_lot::{Condvar, Mutex};
 
-use crate::clock::{Nanos, Timestamp};
+use crate::clock::{ClockDomain, Nanos, Timestamp};
 use crate::recorder::{Channel, Event, Recorder};
 use crate::stage::Stage;
-use crate::stats::{Counters, Histograms, Snapshot, SpanStats};
-use crate::timeline::{FRAME_AGE, FrameTimeline, SPANS};
+use crate::stats::{Counters, Histograms, Percentiles, Snapshot};
+use crate::timeline::{FrameTimeline, Mark, Segment};
 
 /// Called on the collector thread whenever a periodic report is due.
 ///
@@ -34,6 +34,8 @@ pub struct TelemetryConfig {
     /// How often `reporter` is invoked, if at all.
     pub report_interval: Option<Duration>,
     pub reporter: Option<Reporter>,
+    /// Clock the local recorder stamps its marks with.
+    pub clock_domain: ClockDomain,
 }
 
 impl Default for TelemetryConfig {
@@ -45,6 +47,7 @@ impl Default for TelemetryConfig {
             poll_interval: Duration::from_micros(250),
             report_interval: None,
             reporter: None,
+            clock_domain: ClockDomain::local(),
         }
     }
 }
@@ -59,6 +62,7 @@ pub struct Telemetry {
 }
 
 struct Shared {
+    clock_domain: ClockDomain,
     inner: Mutex<Inner>,
     running: AtomicBool,
     folds: AtomicU64,
@@ -106,6 +110,7 @@ impl Telemetry {
             poll_interval,
             report_interval,
             reporter,
+            clock_domain,
         } = config;
 
         let channel = Arc::new(Channel {
@@ -113,6 +118,7 @@ impl Telemetry {
             dropped: AtomicU64::new(0),
         });
         let shared = Arc::new(Shared {
+            clock_domain,
             inner: Mutex::new(Inner {
                 histograms: Histograms::new(),
                 counters: Counters::default(),
@@ -145,7 +151,7 @@ impl Telemetry {
             .expect("spawn telemetry collector");
 
         Telemetry {
-            recorder: Recorder::new(Arc::clone(&channel)),
+            recorder: Recorder::new(Arc::clone(&channel), clock_domain),
             channel,
             shared,
             handle: Some(handle),
@@ -243,17 +249,22 @@ impl Shared {
         };
 
         Snapshot {
-            spans: SPANS
+            clock_domain: self.clock_domain,
+            segments: Segment::ALL
                 .iter()
-                .zip(&inner.histograms.spans)
-                .map(|(span, histogram)| SpanStats::from_histogram(span.name, histogram))
+                .zip(&inner.histograms.segments)
+                .map(|(segment, histogram)| Percentiles::from_histogram(segment.label(), histogram))
                 .collect(),
-            frame_age: SpanStats::from_histogram(FRAME_AGE.name, &inner.histograms.frame_age),
-            present_interval: SpanStats::from_histogram(
+            frame_age: Percentiles::from_histogram("frame age", &inner.histograms.frame_age),
+            unattributed_gap: Percentiles::from_histogram(
+                "unattributed gap",
+                &inner.histograms.unattributed_gap,
+            ),
+            present_interval: Percentiles::from_histogram(
                 "present interval",
                 &inner.histograms.present_interval,
             ),
-            capture_interval: SpanStats::from_histogram(
+            capture_interval: Percentiles::from_histogram(
                 "capture interval",
                 &inner.histograms.capture_interval,
             ),
@@ -331,10 +342,14 @@ fn ingest(
     pending: &mut Pending,
 ) {
     let index = (event.frame.get() % slots.len() as u64) as usize;
+    let mark = Mark {
+        at: event.at,
+        domain: event.domain,
+    };
 
     let is_new_frame = match &mut slots[index] {
         Slot::Collecting(timeline) if timeline.frame() == event.frame => {
-            if !timeline.set(event.stage, event.at) {
+            if !timeline.set(event.stage, mark) {
                 pending.duplicates += 1;
             }
             false
@@ -353,7 +368,7 @@ fn ingest(
             completed.push(previous);
         }
         let mut timeline = FrameTimeline::new(event.frame);
-        timeline.set(event.stage, event.at);
+        timeline.set(event.stage, mark);
         pending.started += 1;
         slots[index] = Slot::Collecting(timeline);
     }
@@ -388,16 +403,28 @@ fn fold(shared: &Shared, completed: &mut Vec<FrameTimeline>, pending: &mut Pendi
         }
 
         let histograms = &mut inner.histograms;
-        for (span, histogram) in SPANS.iter().zip(&mut histograms.spans) {
-            if let Some(duration) = timeline.span(span) {
-                Histograms::record(histogram, duration, &mut histograms.clipped);
+        for sample in timeline.segments() {
+            Histograms::record(
+                &mut histograms.segments[sample.segment.index()],
+                sample.duration,
+                &mut histograms.clipped,
+            );
+            if sample.cross_domain {
+                inner.counters.cross_domain_segments += 1;
             }
         }
         if let Some(age) = timeline.frame_age() {
             Histograms::record(&mut histograms.frame_age, age, &mut histograms.clipped);
         }
+        if let Some(gap) = timeline.unattributed_gap() {
+            Histograms::record(
+                &mut histograms.unattributed_gap,
+                gap,
+                &mut histograms.clipped,
+            );
+        }
 
-        if let Some(present) = timeline.mark(Stage::PresentSubmit) {
+        if let Some(present) = timeline.at(Stage::PresentSubmit) {
             if let Some(previous) = inner.last_present
                 && let Some(delta) = present.since(previous)
             {
@@ -413,7 +440,7 @@ fn fold(shared: &Shared, completed: &mut Vec<FrameTimeline>, pending: &mut Pendi
                 None => present,
             });
         }
-        if let Some(created) = timeline.mark(Stage::FrameCreated) {
+        if let Some(created) = timeline.at(Stage::FrameCreated) {
             if let Some(previous) = inner.last_created
                 && let Some(delta) = created.since(previous)
             {

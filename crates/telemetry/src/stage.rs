@@ -90,27 +90,6 @@ impl Stage {
             Stage::PresentSubmit => "present_submit",
         }
     }
-
-    /// Which machine records this stage. Determines whether an interval is
-    /// comparable without clock-offset correction.
-    pub const fn side(self) -> Side {
-        match self {
-            Stage::NetworkReceiveFirst
-            | Stage::NetworkReceiveLast
-            | Stage::FrameReassembled
-            | Stage::DecodeSubmit
-            | Stage::DecodeComplete
-            | Stage::RenderSubmit
-            | Stage::PresentSubmit => Side::Client,
-            _ => Side::Host,
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Side {
-    Host,
-    Client,
 }
 
 #[cfg(test)]

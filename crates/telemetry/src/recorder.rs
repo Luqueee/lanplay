@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crossbeam_queue::ArrayQueue;
 use lanplay_protocol::FrameId;
 
-use crate::clock::Timestamp;
+use crate::clock::{ClockDomain, Timestamp};
 use crate::stage::Stage;
 
 #[derive(Clone, Copy, Debug)]
@@ -12,6 +12,7 @@ pub(crate) struct Event {
     pub frame: FrameId,
     pub stage: Stage,
     pub at: Timestamp,
+    pub domain: ClockDomain,
 }
 
 pub(crate) struct Channel {
@@ -25,14 +26,31 @@ pub(crate) struct Channel {
 /// formatting, no syscall, no blocking. When the queue is full the event is
 /// dropped and counted, because stalling a capture or encode thread to keep a
 /// measurement would corrupt the very thing being measured.
+///
+/// Every mark carries the recorder's [`ClockDomain`], so an interval between
+/// two clocks can never be mistaken for one measured on a single machine.
 #[derive(Clone)]
 pub struct Recorder {
     channel: Arc<Channel>,
+    domain: ClockDomain,
 }
 
 impl Recorder {
-    pub(crate) fn new(channel: Arc<Channel>) -> Self {
-        Recorder { channel }
+    pub(crate) fn new(channel: Arc<Channel>, domain: ClockDomain) -> Self {
+        Recorder { channel, domain }
+    }
+
+    /// A recorder that stamps marks with a different clock domain, for
+    /// timings received from the other machine.
+    pub fn with_domain(&self, domain: ClockDomain) -> Recorder {
+        Recorder {
+            channel: Arc::clone(&self.channel),
+            domain,
+        }
+    }
+
+    pub fn domain(&self) -> ClockDomain {
+        self.domain
     }
 
     #[inline]
@@ -45,7 +63,12 @@ impl Recorder {
     /// callback that reports its own submit time).
     #[inline]
     pub fn mark_at(&self, frame: FrameId, stage: Stage, at: Timestamp) {
-        let event = Event { frame, stage, at };
+        let event = Event {
+            frame,
+            stage,
+            at,
+            domain: self.domain,
+        };
         if self.channel.queue.push(event).is_err() {
             self.channel.dropped.fetch_add(1, Ordering::Relaxed);
         }
@@ -55,6 +78,7 @@ impl Recorder {
 impl core::fmt::Debug for Recorder {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Recorder")
+            .field("domain", &self.domain)
             .field("queued", &self.channel.queue.len())
             .field("capacity", &self.channel.queue.capacity())
             .finish()

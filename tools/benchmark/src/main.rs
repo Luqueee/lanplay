@@ -7,7 +7,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use lanplay_protocol::{ClientCapabilities, HostCapabilities};
-use lanplay_telemetry::Snapshot;
+use lanplay_telemetry::{Nanos, Segment, Snapshot};
 
 use crate::synthetic::{Run, SyntheticArgs};
 
@@ -155,18 +155,28 @@ fn gate(args: &SyntheticArgs, run: &Run) -> bool {
         ));
     }
 
-    for span in &snapshot.spans {
-        let expected = if span.name == "gpu preprocess" && args.preprocess_ms <= 0.0 {
+    for segment in Segment::ALL {
+        let preprocess_off = args.preprocess_ms <= 0.0
+            && matches!(segment, Segment::GpuPreprocess | Segment::PreprocessWait);
+        let expected = if preprocess_off {
             0
         } else {
             snapshot.counters.frames_presented
         };
-        if span.count != expected {
+        let measured = snapshot.segment(segment).count;
+        if measured != expected {
             failures.push(format!(
-                "span '{}' measured {} times, expected {expected}",
-                span.name, span.count,
+                "segment '{}' measured {measured} times, expected {expected}",
+                segment.label(),
             ));
         }
+    }
+
+    // Every nanosecond of a synthetic frame's life is instrumented, so an
+    // unattributed gap here means the chain lost track of a mark.
+    let gap_p99 = snapshot.unattributed_gap.p99;
+    if gap_p99 > Nanos::from_micros(200) {
+        failures.push(format!("unattributed gap p99 is {gap_p99}, expected ~0"));
     }
 
     let measured_fps = snapshot.presented_per_second();
@@ -180,8 +190,11 @@ fn gate(args: &SyntheticArgs, run: &Run) -> bool {
     }
 
     println!();
+    if !snapshot.p99_is_soaked() {
+        println!("gate: NOTE {}", snapshot.tail_confidence());
+    }
     if failures.is_empty() {
-        println!("gate: PASS ({measured_fps:.1} presented/s, every span measured)");
+        println!("gate: PASS ({measured_fps:.1} presented/s, every segment measured)");
         return true;
     }
     for failure in &failures {

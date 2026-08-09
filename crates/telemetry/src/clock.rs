@@ -9,6 +9,52 @@
 
 use core::fmt;
 
+/// Which clock a [`Timestamp`] was read from.
+///
+/// Two machines' monotonic clocks share no epoch, so subtracting across them
+/// is meaningless until phase 8 estimates the offset. The domain travels with
+/// each mark instead of each timestamp: the hot path stays a bare `u64`, and
+/// the session that records a mark already knows which clock it read.
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ClockDomain {
+    /// `mach_continuous_time` on the client Mac.
+    LocalMac,
+    /// `QueryPerformanceCounter` on the host PC.
+    LocalWindows,
+    /// A portable build; neither target platform.
+    Other,
+    /// A remote timestamp already corrected onto the local clock.
+    Synchronized,
+}
+
+impl ClockDomain {
+    /// The domain of everything [`Timestamp::now`] returns in this process.
+    pub const fn local() -> Self {
+        #[cfg(target_os = "macos")]
+        {
+            ClockDomain::LocalMac
+        }
+        #[cfg(windows)]
+        {
+            ClockDomain::LocalWindows
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        {
+            ClockDomain::Other
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            ClockDomain::LocalMac => "local-mac",
+            ClockDomain::LocalWindows => "local-windows",
+            ClockDomain::Other => "local-other",
+            ClockDomain::Synchronized => "synchronized",
+        }
+    }
+}
+
 /// A point on the local monotonic clock, in nanoseconds since an arbitrary,
 /// process-stable epoch. Only differences are meaningful.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]

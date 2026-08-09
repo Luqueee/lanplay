@@ -2,8 +2,8 @@ use core::fmt;
 
 use hdrhistogram::Histogram;
 
-use crate::clock::Nanos;
-use crate::timeline::SPANS;
+use crate::clock::{ClockDomain, Nanos};
+use crate::timeline::{SEGMENT_COUNT, Segment};
 
 /// Widest interval a histogram can hold: 10 s. Anything longer is a stall, not
 /// a latency, and gets clipped and counted.
@@ -11,10 +11,14 @@ const MAX_NANOS: u64 = 10_000_000_000;
 /// Two significant figures, i.e. 1% bucket precision. Enough for p99 latency
 /// and ~26 KB per histogram.
 const SIGNIFICANT_FIGURES: u8 = 2;
+/// Below this many frames a p99 rests on fewer than ~36 tail observations,
+/// which is not enough to call a regression.
+pub const P99_SOAK_FRAMES: u64 = 3_600;
 
 pub(crate) struct Histograms {
-    pub spans: Vec<Histogram<u32>>,
+    pub segments: Vec<Histogram<u32>>,
     pub frame_age: Histogram<u32>,
+    pub unattributed_gap: Histogram<u32>,
     pub present_interval: Histogram<u32>,
     pub capture_interval: Histogram<u32>,
     pub clipped: u64,
@@ -23,8 +27,9 @@ pub(crate) struct Histograms {
 impl Histograms {
     pub fn new() -> Self {
         Histograms {
-            spans: SPANS.iter().map(|_| new_histogram()).collect(),
+            segments: Segment::ALL.iter().map(|_| new_histogram()).collect(),
             frame_age: new_histogram(),
+            unattributed_gap: new_histogram(),
             present_interval: new_histogram(),
             capture_interval: new_histogram(),
             clipped: 0,
@@ -49,10 +54,10 @@ fn new_histogram() -> Histogram<u32> {
     Histogram::new_with_bounds(1, MAX_NANOS, SIGNIFICANT_FIGURES).expect("valid histogram bounds")
 }
 
-/// Percentile summary of one interval.
+/// Percentile summary of one series.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct SpanStats {
-    pub name: &'static str,
+pub struct Percentiles {
+    pub label: &'static str,
     pub count: u64,
     pub mean: Nanos,
     pub p50: Nanos,
@@ -61,10 +66,10 @@ pub struct SpanStats {
     pub max: Nanos,
 }
 
-impl SpanStats {
-    pub(crate) fn from_histogram(name: &'static str, histogram: &Histogram<u32>) -> Self {
-        SpanStats {
-            name,
+impl Percentiles {
+    pub(crate) fn from_histogram(label: &'static str, histogram: &Histogram<u32>) -> Self {
+        Percentiles {
+            label,
             count: histogram.len(),
             mean: Nanos(histogram.mean() as u64),
             p50: Nanos(histogram.value_at_quantile(0.50)),
@@ -94,23 +99,35 @@ pub struct Counters {
     pub late_events: u64,
     /// Samples larger than the histogram ceiling.
     pub clipped_samples: u64,
+    /// Segments measured between two different clocks; only as good as the
+    /// offset estimate between them.
+    pub cross_domain_segments: u64,
 }
 
 /// Aggregate view of a run.
 #[derive(Clone, Debug)]
 pub struct Snapshot {
-    pub spans: Vec<SpanStats>,
-    pub frame_age: SpanStats,
+    /// Clock every local mark was read from.
+    pub clock_domain: ClockDomain,
+    /// Indexed by [`Segment::index`].
+    pub segments: Vec<Percentiles>,
+    pub frame_age: Percentiles,
+    /// Frame age no named segment accounts for: missing instrumentation.
+    pub unattributed_gap: Percentiles,
     /// Interval between consecutive `present_submit` marks: client cadence.
-    pub present_interval: SpanStats,
+    pub present_interval: Percentiles,
     /// Interval between consecutive `frame_created` marks: source cadence.
-    pub capture_interval: SpanStats,
+    pub capture_interval: Percentiles,
     pub counters: Counters,
     /// Wall time between the first and last presented frame.
     pub window: Nanos,
 }
 
 impl Snapshot {
+    pub fn segment(&self, segment: Segment) -> &Percentiles {
+        &self.segments[segment.index()]
+    }
+
     /// Presented frames per second over the measured window.
     pub fn presented_per_second(&self) -> f64 {
         let seconds = self.window.as_secs_f64();
@@ -122,8 +139,7 @@ impl Snapshot {
     }
 
     /// True when nothing was lost: no dropped marks, no incomplete frames, no
-    /// duplicates. The Fase 0 gate needs this to hold before any number below
-    /// it can be trusted.
+    /// duplicates. The numbers below are only trustworthy once this holds.
     pub fn is_lossless(&self) -> bool {
         let c = &self.counters;
         c.events_dropped == 0
@@ -131,22 +147,34 @@ impl Snapshot {
             && c.duplicate_marks == 0
             && c.late_events == 0
     }
+
+    /// Whether the run is long enough for its p99 to mean anything.
+    pub fn p99_is_soaked(&self) -> bool {
+        self.counters.frames_presented >= P99_SOAK_FRAMES
+    }
 }
 
 impl fmt::Display for Snapshot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "clock domain: {}", self.clock_domain.label())?;
+        writeln!(f)?;
         writeln!(
             f,
-            "{:<18} {:>7} {:>9} {:>9} {:>9} {:>9}",
-            "span", "count", "p50", "p95", "p99", "max"
+            "{:<18} {:>7} {:>9} {:>9} {:>9} {:>9}  {}",
+            "segment", "count", "p50", "p95", "p99", "max", "kind"
         )?;
-        for stats in &self.spans {
-            write_stats(f, stats)?;
+        for segment in Segment::ALL {
+            write_series(
+                f,
+                &self.segments[segment.index()],
+                Some(segment.kind().label()),
+            )?;
         }
         writeln!(f)?;
-        write_stats(f, &self.frame_age)?;
-        write_stats(f, &self.present_interval)?;
-        write_stats(f, &self.capture_interval)?;
+        write_series(f, &self.frame_age, None)?;
+        write_series(f, &self.unattributed_gap, None)?;
+        write_series(f, &self.present_interval, None)?;
+        write_series(f, &self.capture_interval, None)?;
         writeln!(f)?;
         writeln!(
             f,
@@ -157,30 +185,56 @@ impl fmt::Display for Snapshot {
             self.counters.frames_started,
             self.counters.frames_incomplete,
         )?;
-        write!(
+        writeln!(
             f,
-            "events {} recorded, {} dropped, {} duplicate, {} late, {} clipped",
+            "events {} recorded, {} dropped, {} duplicate, {} late, {} clipped, {} cross-domain",
             self.counters.events_recorded,
             self.counters.events_dropped,
             self.counters.duplicate_marks,
             self.counters.late_events,
             self.counters.clipped_samples,
-        )
+            self.counters.cross_domain_segments,
+        )?;
+        write!(f, "{}", self.tail_confidence())
     }
 }
 
-fn write_stats(f: &mut fmt::Formatter<'_>, stats: &SpanStats) -> fmt::Result {
-    if stats.count == 0 {
-        return writeln!(f, "{:<18} {:>7}", stats.name, 0);
+impl Snapshot {
+    /// One line stating exactly how much tail the p99 column rests on, so a
+    /// five-second run is never quoted as if it were a soak.
+    pub fn tail_confidence(&self) -> String {
+        let frames = self.counters.frames_presented;
+        let tail = frames / 100;
+        if self.p99_is_soaked() {
+            format!("p99 backed by {tail} tail observations from {frames} frames")
+        } else {
+            format!(
+                "p99 backed by only {tail} tail observations from {frames} frames; \
+                 soak {P99_SOAK_FRAMES}+ before trusting it"
+            )
+        }
+    }
+}
+
+fn write_series(
+    f: &mut fmt::Formatter<'_>,
+    series: &Percentiles,
+    kind: Option<&str>,
+) -> fmt::Result {
+    if series.count == 0 {
+        return writeln!(f, "{:<18} {:>7}", series.label, 0);
     }
     writeln!(
         f,
-        "{:<18} {:>7} {:>6.2} ms {:>6.2} ms {:>6.2} ms {:>6.2} ms",
-        stats.name,
-        stats.count,
-        stats.p50.as_millis_f64(),
-        stats.p95.as_millis_f64(),
-        stats.p99.as_millis_f64(),
-        stats.max.as_millis_f64(),
+        "{:<18} {:>7} {:>6.2} ms {:>6.2} ms {:>6.2} ms {:>6.2} ms  {}",
+        series.label,
+        series.count,
+        series.p50.as_millis_f64(),
+        series.p95.as_millis_f64(),
+        series.p99.as_millis_f64(),
+        series.max.as_millis_f64(),
+        kind.unwrap_or(""),
     )
 }
+
+const _: () = assert!(SEGMENT_COUNT == Segment::ALL.len());
