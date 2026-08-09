@@ -72,6 +72,25 @@ impl Timestamp {
         Timestamp(nanos)
     }
 
+    /// A mark the OS made on its own clock, read back onto ours.
+    ///
+    /// Two constructors rather than one because the two capture APIs report
+    /// in different units: Desktop Duplication hands back raw QPC ticks and
+    /// Windows.Graphics.Capture hands back a WinRT `TimeSpan`. Collapsing
+    /// them into a single `from_os` would make a unit error invisible.
+    #[cfg(windows)]
+    #[inline]
+    pub fn from_qpc_ticks(ticks: i64) -> Self {
+        Timestamp(platform::nanos_from_qpc_ticks(ticks))
+    }
+
+    /// A WinRT `TimeSpan`, in hundreds of nanoseconds.
+    #[cfg(windows)]
+    #[inline]
+    pub fn from_time_span(hundred_nanos: i64) -> Self {
+        Timestamp(platform::nanos_from_hundred_nanos(hundred_nanos))
+    }
+
     #[inline]
     pub const fn as_nanos(self) -> u64 {
         self.0
@@ -257,6 +276,23 @@ mod platform {
         debug_assert!(ok != 0);
         let _ = ok;
         ((u128::from(ticks as u64) * 1_000_000_000) / u128::from(*FREQUENCY)) as u64
+    }
+
+    /// A raw `QueryPerformanceCounter` value from elsewhere in the process,
+    /// put on the same scale as [`now_nanos`]. Desktop Duplication reports
+    /// `LastPresentTime` this way.
+    #[inline]
+    pub fn nanos_from_qpc_ticks(ticks: i64) -> u64 {
+        ((u128::from(ticks.max(0) as u64) * 1_000_000_000) / u128::from(*FREQUENCY)) as u64
+    }
+
+    /// A WinRT `TimeSpan`, which counts hundreds of nanoseconds from the same
+    /// origin QPC uses. Windows.Graphics.Capture reports `SystemRelativeTime`
+    /// this way, and the unit difference is the whole reason these are two
+    /// functions rather than one.
+    #[inline]
+    pub fn nanos_from_hundred_nanos(hns: i64) -> u64 {
+        hns.max(0) as u64 * 100
     }
 }
 
