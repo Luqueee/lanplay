@@ -25,6 +25,9 @@ use windows::Win32::Graphics::Direct3D11::{
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory1, IDXGIOutput,
 };
+use windows::Win32::UI::HiDpi::{
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
+};
 use windows::core::Interface;
 
 use crate::backend::CaptureError;
@@ -79,6 +82,19 @@ impl CaptureDevice {
     /// this benchmark needs to serve, and guessing would be worse than being
     /// explicit about the limit.
     pub fn open(output_index: u32) -> Result<CaptureDevice, CaptureError> {
+        // Process-wide, and deliberately here rather than left to each binary.
+        // `IDXGIOutput5::DuplicateOutput1` is documented to fail with
+        // DXGI_ERROR_UNSUPPORTED for a process that is not per-monitor DPI
+        // aware, and the failure names the pixel format, so a caller that
+        // forgets spends its time looking at the format list instead. It also
+        // stops a scaled display handing back a stretched surface. Idempotent,
+        // and an error means something already set a context, which is fine.
+        //
+        // SAFETY: no arguments to get wrong, and no failure mode that matters.
+        unsafe {
+            let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        }
+
         // SAFETY: every call below takes valid pointers and its result is
         // checked before use; the COM objects are refcounted by `windows`.
         unsafe {
