@@ -274,6 +274,8 @@ pub struct Mark {
 pub struct SegmentSample {
     pub segment: Segment,
     pub duration: Nanos,
+    /// Clock the interval started on.
+    pub domain: ClockDomain,
     /// True when the two marks came from different clocks, so the number is
     /// only as good as the offset estimate between them.
     pub cross_domain: bool,
@@ -342,6 +344,7 @@ impl FrameTimeline {
             Some(SegmentSample {
                 segment: *segment,
                 duration: end.at.since(start.at)?,
+                domain: start.domain,
                 cross_domain: start.domain != end.domain,
             })
         })
@@ -355,9 +358,34 @@ impl FrameTimeline {
             .map(|sample| sample.duration)
     }
 
+    /// Content-to-compositor, end to end.
+    ///
+    /// `None` whenever the frame was born on another machine, because the two
+    /// clocks share no epoch: subtracting them would produce a number that
+    /// looks like latency and is actually clock offset.
     pub fn frame_age(&self) -> Option<Nanos> {
         let created = self.at(FRAME_AGE.0)?;
         self.at(FRAME_AGE.1)?.since(created)
+    }
+
+    /// Earliest mark this machine made for the frame.
+    pub fn first_local(&self, domain: ClockDomain) -> Option<Timestamp> {
+        Stage::ALL
+            .into_iter()
+            .filter_map(|stage| self.mark(stage))
+            .filter(|mark| mark.domain == domain)
+            .map(|mark| mark.at)
+            .min()
+    }
+
+    /// From this machine's first sight of the frame to putting it on screen.
+    ///
+    /// The honest end-to-end number for a receiver: one clock, no offset
+    /// estimate, no assumptions about the sender. On a machine that also
+    /// created the frame it is the same thing as [`FrameTimeline::frame_age`].
+    pub fn local_age(&self, domain: ClockDomain) -> Option<Nanos> {
+        let first = self.first_local(domain)?;
+        self.at(Stage::PresentSubmit)?.since(first)
     }
 
     /// Sum of every segment of `kind`.
@@ -373,18 +401,35 @@ impl FrameTimeline {
             .fold(Nanos::ZERO, |acc, sample| acc + sample.duration)
     }
 
-    /// Frame age that no named segment accounts for: missing instrumentation,
+    /// Sum of the named segments measured entirely on one machine's clock.
+    pub fn attributed_local(&self, domain: ClockDomain) -> Nanos {
+        self.segments()
+            .filter(|sample| !sample.cross_domain && sample.domain == domain)
+            .fold(Nanos::ZERO, |acc, sample| acc + sample.duration)
+    }
+
+    /// Time this machine can see but cannot name: missing instrumentation,
     /// scheduler delay between two unmarked points, or a stage this build
     /// never marks. It is a debt to be paid with more marks, not a metric to
     /// be interpreted.
-    pub fn unattributed_gap(&self) -> Option<Nanos> {
-        let age = self.frame_age()?;
-        age.get().checked_sub(self.attributed().get()).map(Nanos)
+    ///
+    /// Measured against [`FrameTimeline::local_age`] rather than the whole
+    /// frame age, because a receiver cannot account for time that elapsed on
+    /// the sender's clock and should not pretend to.
+    pub fn unattributed_gap(&self, domain: ClockDomain) -> Option<Nanos> {
+        let age = self.local_age(domain)?;
+        age.get()
+            .checked_sub(self.attributed_local(domain).get())
+            .map(Nanos)
     }
 
-    /// A frame is complete when it was both born and presented.
+    /// A frame is complete when it reached the compositor.
+    ///
+    /// Deliberately says nothing about where it was born: on a receiver the
+    /// birth mark belongs to the other machine, and requiring it would make
+    /// every frame of a working stream look incomplete.
     pub fn is_complete(&self) -> bool {
-        self.at(Stage::FrameCreated).is_some() && self.at(Stage::PresentSubmit).is_some()
+        self.at(Stage::PresentSubmit).is_some()
     }
 
     /// Raw stage marks, for dumping an unaggregated trace.
@@ -425,6 +470,7 @@ impl Iterator for Segments<'_> {
             return Some(SegmentSample {
                 segment,
                 duration,
+                domain: from_mark.domain,
                 cross_domain: from_mark.domain != mark.domain,
             });
         }
@@ -450,7 +496,11 @@ impl fmt::Display for FrameTimeline {
         write_row(f, "measured work", Some(self.total(SegmentKind::Work)))?;
         write_row(f, "waits", Some(self.total(SegmentKind::Wait)))?;
         write_row(f, "wire", Some(self.total(SegmentKind::Wire)))?;
-        write_row(f, "unattributed gap", self.unattributed_gap())?;
+        write_row(
+            f,
+            "unattributed gap",
+            self.unattributed_gap(ClockDomain::local()),
+        )?;
         write_row(f, "frame age", self.frame_age())
     }
 }
@@ -502,7 +552,10 @@ mod tests {
 
         assert_eq!(timeline.frame_age(), Some(Nanos::from_millis_f64(6.5)));
         assert_eq!(timeline.attributed(), Nanos::from_millis_f64(6.5));
-        assert_eq!(timeline.unattributed_gap(), Some(Nanos::ZERO));
+        assert_eq!(
+            timeline.unattributed_gap(ClockDomain::local()),
+            Some(Nanos::ZERO)
+        );
     }
 
     #[test]
@@ -553,7 +606,7 @@ mod tests {
         assert_eq!(timeline.segment(Segment::Capture), None);
         assert_eq!(timeline.attributed(), Nanos::from_millis_f64(2.0));
         assert_eq!(
-            timeline.unattributed_gap(),
+            timeline.unattributed_gap(ClockDomain::local()),
             Some(Nanos::from_millis_f64(4.0))
         );
     }
@@ -632,7 +685,72 @@ mod tests {
         );
         // Diagnostics stay out of the sum, so the gap remains non-negative.
         assert!(timeline.attributed() <= timeline.frame_age().unwrap());
-        assert!(timeline.unattributed_gap().is_some());
+        assert!(timeline.unattributed_gap(ClockDomain::local()).is_some());
+    }
+
+    #[test]
+    fn a_frame_born_on_another_machine_is_still_measurable_here() {
+        // What the client sees on a real LAN run: the birth mark belongs to
+        // the sender, so frame age is unknowable, but everything from this
+        // machine's first sight of the frame onwards is on one clock.
+        let timeline = timeline(&[
+            (Stage::NetworkReceiveFirst, 10.0),
+            (Stage::NetworkReceiveLast, 11.0),
+            (Stage::FrameReassembled, 11.0),
+            (Stage::DecodeSubmit, 11.0),
+            (Stage::DecodeComplete, 12.5),
+            (Stage::RenderSubmit, 16.25),
+            (Stage::PresentSubmit, 16.5),
+        ]);
+
+        assert_eq!(timeline.frame_age(), None, "no birth mark to measure from");
+        assert!(timeline.is_complete(), "it reached the compositor");
+        assert_eq!(
+            timeline.local_age(ClockDomain::local()),
+            Some(Nanos::from_millis_f64(6.5))
+        );
+        // The arrival spread is a diagnostic, so it is exactly the part the
+        // chain cannot name: 1.0 ms of the 6.5.
+        assert_eq!(
+            timeline.unattributed_gap(ClockDomain::local()),
+            Some(Nanos::from_millis_f64(1.0))
+        );
+    }
+
+    #[test]
+    fn a_remote_segment_is_not_counted_as_local_work() {
+        let mut timeline = FrameTimeline::new(FrameId::new(2));
+        timeline.set(
+            Stage::NetworkSendFirst,
+            Mark {
+                at: Timestamp::from_nanos(1_000_000),
+                domain: ClockDomain::LocalWindows,
+            },
+        );
+        timeline.set(
+            Stage::NetworkReceiveLast,
+            Mark {
+                at: Timestamp::from_nanos(3_000_000),
+                domain: ClockDomain::LocalMac,
+            },
+        );
+        timeline.set(
+            Stage::PresentSubmit,
+            Mark {
+                at: Timestamp::from_nanos(5_000_000),
+                domain: ClockDomain::LocalMac,
+            },
+        );
+
+        // Transit crosses the wire, so it is not the Mac's to account for.
+        assert_eq!(
+            timeline.attributed_local(ClockDomain::LocalMac),
+            Nanos::ZERO
+        );
+        assert_eq!(
+            timeline.local_age(ClockDomain::LocalMac),
+            Some(Nanos::from_millis(2))
+        );
     }
 
     #[test]

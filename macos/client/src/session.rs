@@ -25,6 +25,8 @@ const SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
 /// Time given to the pipeline to drain after the last access unit is
 /// submitted, so frames already in flight are not counted as losses.
 const DRAIN_GRACE: Duration = Duration::from_millis(300);
+/// Extra listening time in LAN mode, to cover launching the remote sender.
+const LAN_STARTUP_GRACE: Duration = Duration::from_secs(25);
 
 /// What the run produced, whichever path the access units took to the decoder.
 struct RunOutcome {
@@ -275,7 +277,12 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
 
             // Nothing local finishes the run, so a deadline does.
             let deadline_stop = Arc::clone(&stop);
-            let run_for = Duration::from_secs_f64(cli.seconds) + DRAIN_GRACE;
+            // The remote sender is launched by hand after this process is
+            // listening, so the window has to be wider than the run itself.
+            // Only the deadline grows: the gate still judges against
+            // `--seconds` worth of frames, which is what the sender was asked
+            // for.
+            let run_for = Duration::from_secs_f64(cli.seconds) + LAN_STARTUP_GRACE + DRAIN_GRACE;
             thread::Builder::new()
                 .name("deadline".into())
                 .spawn(move || {

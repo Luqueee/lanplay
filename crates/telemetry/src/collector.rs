@@ -79,7 +79,7 @@ struct Inner {
     recent_capacity: usize,
     first_present: Option<Timestamp>,
     last_present: Option<Timestamp>,
-    last_created: Option<Timestamp>,
+    last_source: Option<Timestamp>,
 }
 
 /// Timelines live inline in the ring on purpose: 256 slots is ~73 KB held for
@@ -126,7 +126,7 @@ impl Telemetry {
                 recent_capacity: recent_frames.max(1),
                 first_present: None,
                 last_present: None,
-                last_created: None,
+                last_source: None,
             }),
             running: AtomicBool::new(true),
             folds: AtomicU64::new(0),
@@ -264,9 +264,10 @@ impl Shared {
                 "present interval",
                 &inner.histograms.present_interval,
             ),
-            capture_interval: Percentiles::from_histogram(
-                "capture interval",
-                &inner.histograms.capture_interval,
+            local_age: Percentiles::from_histogram("local age", &inner.histograms.local_age),
+            source_interval: Percentiles::from_histogram(
+                "source interval",
+                &inner.histograms.source_interval,
             ),
             counters,
             window,
@@ -416,7 +417,10 @@ fn fold(shared: &Shared, completed: &mut Vec<FrameTimeline>, pending: &mut Pendi
         if let Some(age) = timeline.frame_age() {
             Histograms::record(&mut histograms.frame_age, age, &mut histograms.clipped);
         }
-        if let Some(gap) = timeline.unattributed_gap() {
+        if let Some(age) = timeline.local_age(shared.clock_domain) {
+            Histograms::record(&mut histograms.local_age, age, &mut histograms.clipped);
+        }
+        if let Some(gap) = timeline.unattributed_gap(shared.clock_domain) {
             Histograms::record(
                 &mut histograms.unattributed_gap,
                 gap,
@@ -440,19 +444,21 @@ fn fold(shared: &Shared, completed: &mut Vec<FrameTimeline>, pending: &mut Pendi
                 None => present,
             });
         }
-        if let Some(created) = timeline.at(Stage::FrameCreated) {
-            if let Some(previous) = inner.last_created
-                && let Some(delta) = created.since(previous)
+        // The source of work for this machine is whatever it first saw of the
+        // frame: a capture on the host, a datagram on the client.
+        if let Some(source) = timeline.first_local(shared.clock_domain) {
+            if let Some(previous) = inner.last_source
+                && let Some(delta) = source.since(previous)
             {
                 Histograms::record(
-                    &mut histograms.capture_interval,
+                    &mut histograms.source_interval,
                     delta,
                     &mut histograms.clipped,
                 );
             }
-            inner.last_created = Some(match inner.last_created {
-                Some(previous) => previous.max(created),
-                None => created,
+            inner.last_source = Some(match inner.last_source {
+                Some(previous) => previous.max(source),
+                None => source,
             });
         }
 

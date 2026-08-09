@@ -18,9 +18,10 @@ pub const P99_SOAK_FRAMES: u64 = 3_600;
 pub(crate) struct Histograms {
     pub segments: Vec<Histogram<u32>>,
     pub frame_age: Histogram<u32>,
+    pub local_age: Histogram<u32>,
     pub unattributed_gap: Histogram<u32>,
     pub present_interval: Histogram<u32>,
-    pub capture_interval: Histogram<u32>,
+    pub source_interval: Histogram<u32>,
     pub clipped: u64,
 }
 
@@ -29,9 +30,10 @@ impl Histograms {
         Histograms {
             segments: Segment::ALL.iter().map(|_| new_histogram()).collect(),
             frame_age: new_histogram(),
+            local_age: new_histogram(),
             unattributed_gap: new_histogram(),
             present_interval: new_histogram(),
-            capture_interval: new_histogram(),
+            source_interval: new_histogram(),
             clipped: 0,
         }
     }
@@ -112,12 +114,18 @@ pub struct Snapshot {
     /// Indexed by [`Segment::index`].
     pub segments: Vec<Percentiles>,
     pub frame_age: Percentiles,
+    /// From this machine's first sight of a frame to putting it on screen.
+    /// The end-to-end number a receiver can measure without a synchronised
+    /// clock; equal to `frame_age` when the frame was born here.
+    pub local_age: Percentiles,
     /// Frame age no named segment accounts for: missing instrumentation.
     pub unattributed_gap: Percentiles,
     /// Interval between consecutive `present_submit` marks: client cadence.
     pub present_interval: Percentiles,
-    /// Interval between consecutive `frame_created` marks: source cadence.
-    pub capture_interval: Percentiles,
+    /// Interval between the first mark this machine makes for consecutive
+    /// frames: the rate at which work arrives here, whether that is a capture
+    /// or a datagram.
+    pub source_interval: Percentiles,
     pub counters: Counters,
     /// Wall time between the first and last presented frame.
     pub window: Nanos,
@@ -180,9 +188,10 @@ impl fmt::Display for Snapshot {
         }
         writeln!(f)?;
         write_series(f, &self.frame_age, None)?;
+        write_series(f, &self.local_age, None)?;
         write_series(f, &self.unattributed_gap, None)?;
         write_series(f, &self.present_interval, None)?;
-        write_series(f, &self.capture_interval, None)?;
+        write_series(f, &self.source_interval, None)?;
         writeln!(f)?;
         writeln!(
             f,

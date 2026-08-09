@@ -250,7 +250,7 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
     let present_period = Nanos::from_millis_f64(1000.0 / deliverable.max(1.0));
     let stall_limit = Nanos((present_period.get() as f64 * STALL_MULTIPLE) as u64);
     let worst_interval = snapshot.present_interval.max;
-    let worst_source_gap = snapshot.capture_interval.max;
+    let worst_source_gap = snapshot.source_interval.max;
     let inherited = worst_interval <= worst_source_gap;
     checks.push(Check {
         name: "no present stalls",
