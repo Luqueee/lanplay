@@ -217,6 +217,10 @@ pub fn compare(plan: &Plan, kind_seed: u64) -> Result<CompareReport, Box<dyn Err
         let lead_in_until = Timestamp::now().add(BLOCK_LEAD_IN);
         harness.pump(&mut capture, lead_in_until)?;
 
+        // The gap while the other backend held the display is not an interval
+        // this one produced, and spliced across it would be reported as its
+        // worst stall.
+        harness.stats.skip_next_interval();
         let measured_from = Timestamp::now();
         let mark = harness.stats.mark();
         let until = measured_from.add(Nanos::from_millis_f64(
@@ -227,6 +231,7 @@ pub fn compare(plan: &Plan, kind_seed: u64) -> Result<CompareReport, Box<dyn Err
         harness.finish_block(&mut capture, measured_to);
 
         let seconds = measured_to.saturating_since(measured_from).as_secs_f64();
+        harness.measured = harness.measured + measured_to.saturating_since(measured_from);
         let stats = harness.stats.block(mark, seconds);
         block_reports.push(BlockReport {
             index: block.index,
@@ -291,6 +296,10 @@ struct Harness<'device> {
     timer: Option<CopyTimer>,
     /// Owned textures whose simulated downstream time has not elapsed.
     holds: Vec<(PoolHandle, Timestamp)>,
+    /// Measured time this backend actually held the display, summed over its
+    /// own blocks. In `compare` the other backend's blocks sit in between, so
+    /// the wall clock from first acquire to last is nearly double this.
+    measured: Nanos,
     pool_create_ms: Option<f64>,
     owned_pool_rebuilds: u64,
     pool_cpu_accessible: bool,
@@ -334,6 +343,7 @@ impl<'device> Harness<'device> {
             pool: None,
             timer: None,
             holds: Vec::new(),
+            measured: Nanos::ZERO,
             pool_create_ms: None,
             owned_pool_rebuilds: 0,
             pool_cpu_accessible: false,
@@ -627,7 +637,11 @@ impl<'device> Harness<'device> {
     }
 
     fn finish_run(&mut self, at: Timestamp) {
-        self.stats.end_window(at);
+        if self.measured > Nanos::ZERO {
+            self.stats.set_window(self.measured);
+        } else {
+            self.stats.end_window(at);
+        }
         if let Some(timer) = &mut self.timer {
             timer.drain(self.device.context());
         }

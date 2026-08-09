@@ -222,6 +222,17 @@ impl Stats {
         self.window_end = Some(at);
     }
 
+    /// Replaces the measured span with an explicitly accumulated one.
+    ///
+    /// `compare` interleaves the two backends, so a backend's window is the
+    /// sum of its own blocks and not the wall clock from its first acquire to
+    /// its last: the other backend's blocks sit in between, and counting them
+    /// halves every rate this backend reports.
+    pub fn set_window(&mut self, measured: Nanos) {
+        self.window_start = Some(Timestamp::from_nanos(0));
+        self.window_end = Some(Timestamp::from_nanos(measured.get()));
+    }
+
     /// Measured wall time. Zero before [`Stats::begin_window`].
     pub fn window(&self) -> Nanos {
         match (self.window_start, self.window_end) {
