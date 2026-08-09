@@ -174,53 +174,65 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
         ),
     });
 
-    // Starvation is a statement about the decoder, not about tick counts. A
-    // decoder producing at least as many frames per second as the display
-    // consumes cannot be starving it: an occasional empty tick is then phase
-    // noise between two unsynchronised clocks, which is also what a real
-    // network source will look like.
+    // Starvation is a statement about the decoder, and the bar it must clear
+    // is the rate that can actually reach the screen: the lower of the source
+    // rate and the refresh rate. A 60 fps source on a 120 Hz panel leaves half
+    // the refreshes with nothing new by arithmetic, and calling that
+    // starvation would condemn a perfectly healthy pipeline.
     //
-    // The empty-tick share only means anything when a tick is a display
-    // refresh. A decoder-driven renderer polls, so its empty ticks count spin
-    // iterations and say nothing about starvation.
+    // The empty-refresh share is therefore judged against what the rate
+    // difference already predicts, and only when a tick is a refresh at all:
+    // a decoder-driven renderer polls, so its empty ticks count spin
+    // iterations and say nothing about anything.
     let decoded_per_second = inputs.decoded as f64 / inputs.run_seconds.max(f64::EPSILON);
-    let keeps_up = decoded_per_second >= inputs.display_hz * 0.99;
+    let deliverable = inputs.target_fps.min(inputs.display_hz);
+    let keeps_up = decoded_per_second >= deliverable * 0.99;
     let ticks = inputs.rendered + inputs.empty_ticks;
     let empty_fraction = if ticks == 0 {
         1.0
     } else {
         inputs.empty_ticks as f64 / ticks as f64
     };
-    let ticks_meaningful = inputs.display_driven;
+    let predicted_empty =
+        (1.0 - (inputs.target_fps / inputs.display_hz.max(1.0)).min(1.0)).max(0.0);
+    let unexplained_empty = empty_fraction - predicted_empty;
     checks.push(Check {
         name: "no decoder starvation",
-        passed: keeps_up && (!ticks_meaningful || empty_fraction <= MAX_EMPTY_TICK_FRACTION),
-        detail: if ticks_meaningful {
+        passed: keeps_up
+            && (!inputs.display_driven || unexplained_empty <= MAX_EMPTY_TICK_FRACTION),
+        detail: if inputs.display_driven {
             format!(
-                "decoder produced {decoded_per_second:.1}/s for a {:.1} Hz display; \
-                 {} of {ticks} refreshes empty ({:.2}%), {} superseded",
+                "decoder produced {decoded_per_second:.1}/s against {deliverable:.1}/s \
+                 deliverable on a {:.1} Hz display; {:.2}% of {ticks} refreshes empty, \
+                 {:.2}% predicted by the rate difference, {} superseded",
                 inputs.display_hz,
-                inputs.empty_ticks,
                 empty_fraction * 100.0,
+                predicted_empty * 100.0,
                 inputs.superseded,
             )
         } else {
             format!(
-                "decoder produced {decoded_per_second:.1}/s for a {:.1} Hz display; \
-                 {} superseded ({} idle polls, not display refreshes)",
+                "decoder produced {decoded_per_second:.1}/s against {deliverable:.1}/s \
+                 deliverable on a {:.1} Hz display; {} superseded \
+                 ({} idle polls, not display refreshes)",
                 inputs.display_hz, inputs.superseded, inputs.empty_ticks,
             )
         },
     });
 
-    // A gap in presentation is only the presenter's fault if the source did
-    // not gap first. When the feed thread loses the CPU for four refreshes,
-    // the pipeline faithfully reproduces that hole, and blaming Metal for it
-    // would send the next investigation to the wrong place. The source gap is
-    // reported either way: in later phases it is the network, and then it
-    // stops being someone else's problem.
-    let display_period = Nanos::from_millis_f64(1000.0 / inputs.display_hz.max(1.0));
-    let stall_limit = Nanos((display_period.get() as f64 * STALL_MULTIPLE) as u64);
+    // Judged against the period presents actually have, which is set by the
+    // slower of source and display: a 60 fps source on a 120 Hz panel presents
+    // every 16.7 ms by design, and measuring its gaps against the 8.3 ms
+    // refresh would call every normal interval a stall.
+    //
+    // A gap is also only the presenter's fault if the source did not gap
+    // first. When the feed thread loses the CPU for four periods the pipeline
+    // faithfully reproduces that hole, and blaming Metal for it would send the
+    // next investigation to the wrong component. The source gap is reported
+    // either way: in later phases it is the network, and then it stops being
+    // someone else's problem.
+    let present_period = Nanos::from_millis_f64(1000.0 / deliverable.max(1.0));
+    let stall_limit = Nanos((present_period.get() as f64 * STALL_MULTIPLE) as u64);
     let worst_interval = snapshot.present_interval.max;
     let worst_source_gap = snapshot.capture_interval.max;
     let inherited = worst_interval <= worst_source_gap;
@@ -229,10 +241,10 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
         passed: worst_interval <= stall_limit || inherited,
         detail: format!(
             "worst present interval {worst_interval} against a {stall_limit} limit \
-             ({STALL_MULTIPLE:.0}x the {display_period} display period); \
+             ({STALL_MULTIPLE:.0}x the {present_period} present period); \
              worst source gap {worst_source_gap}{}",
             if worst_interval > stall_limit && inherited {
-                " — the stall came in with the source, not from the presenter"
+                " - the stall came in with the source, not from the presenter"
             } else {
                 ""
             }
@@ -611,11 +623,46 @@ mod tests {
             supersede_every: Some(2),
             ..Run::of(4_800)
         });
-        assert!(
-            starvation_check(&inputs).passed,
-            "{}",
-            starvation_check(&inputs).detail
-        );
+        let check = starvation_check(&inputs);
+        assert!(check.passed, "{}", check.detail);
+    }
+
+    #[test]
+    fn a_source_slower_than_the_panel_leaves_refreshes_empty_by_arithmetic() {
+        // 60 fps into a 120 Hz display: half the refreshes have nothing new,
+        // and every source frame still reaches the screen.
+        let mut inputs = healthy(3_600);
+        inputs.target_fps = 60.0;
+        inputs.run_seconds = 60.0;
+        inputs.rendered = 3_591;
+        inputs.superseded = 9;
+        inputs.empty_ticks = 3_626;
+        let check = starvation_check(&inputs);
+        assert!(check.passed, "{}", check.detail);
+    }
+
+    #[test]
+    fn a_slow_source_is_not_judged_against_the_refresh_period() {
+        // 60 fps on a 120 Hz panel presents every 16.7 ms by design. Measuring
+        // those intervals against the 8.3 ms refresh would report a stall on
+        // every single frame.
+        let mut inputs = healthy(3_600);
+        inputs.target_fps = 60.0;
+        inputs.run_seconds = 60.0;
+        inputs.rendered = 3_591;
+        inputs.superseded = 9;
+        inputs.empty_ticks = 3_626;
+        inputs.snapshot = snapshot_of(Run {
+            period_ms: 16.667,
+            ..Run::of(3_600)
+        });
+        let verdict = evaluate(&inputs);
+        let check = verdict
+            .checks
+            .iter()
+            .find(|check| check.name == "no present stalls")
+            .unwrap();
+        assert!(check.passed, "{}", check.detail);
     }
 
     #[test]
