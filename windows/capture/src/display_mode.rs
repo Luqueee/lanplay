@@ -35,6 +35,10 @@ pub fn main() -> std::process::ExitCode {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--out" => out = args.next().map(PathBuf::from),
+            "--dxgi" => {
+                report(&out, &dxgi_listing());
+                return std::process::ExitCode::SUCCESS;
+            }
             "--set" => {
                 let spec = args.next().unwrap_or_default();
                 match parse_mode(&spec) {
@@ -123,6 +127,63 @@ pub fn main() -> std::process::ExitCode {
         report(&out, &text);
         std::process::ExitCode::from(2)
     }
+}
+
+/// Which DXGI adapter and output index corresponds to which GDI display.
+///
+/// The capture backends address outputs by DXGI index and everything else on
+/// the machine names them by GDI device, and on a box with a virtual display
+/// driver installed the two orders are not the same. Guessing which index is
+/// the physical panel is how a benchmark ends up measuring the wrong screen.
+fn dxgi_listing() -> String {
+    use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
+
+    let mut text = String::new();
+    // SAFETY: every returned interface is checked before use and the loop
+    // stops at the first enumeration failure, which is how DXGI signals the
+    // end of both lists.
+    unsafe {
+        let factory: IDXGIFactory1 = match CreateDXGIFactory1() {
+            Ok(factory) => factory,
+            Err(error) => return format!("CreateDXGIFactory1 failed: {error}\n"),
+        };
+        for adapter_index in 0.. {
+            let Ok(adapter) = factory.EnumAdapters1(adapter_index) else {
+                break;
+            };
+            let description = adapter
+                .GetDesc1()
+                .map(|desc| String::from_utf16_lossy(trim_nul(&desc.Description)))
+                .unwrap_or_else(|_| "?".to_string());
+            let _ = writeln!(text, "adapter {adapter_index} | {description}");
+            let mut any = false;
+            for output_index in 0.. {
+                let Ok(output) = adapter.EnumOutputs(output_index) else {
+                    break;
+                };
+                any = true;
+                match output.GetDesc() {
+                    Ok(desc) => {
+                        let _ = writeln!(
+                            text,
+                            "  output {output_index} | {} | {}x{} | attached={}",
+                            String::from_utf16_lossy(trim_nul(&desc.DeviceName)),
+                            desc.DesktopCoordinates.right - desc.DesktopCoordinates.left,
+                            desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top,
+                            desc.AttachedToDesktop.as_bool()
+                        );
+                    }
+                    Err(error) => {
+                        let _ = writeln!(text, "  output {output_index} | GetDesc failed: {error}");
+                    }
+                }
+            }
+            if !any {
+                let _ = writeln!(text, "  no outputs");
+            }
+        }
+    }
+    text
 }
 
 fn parse_mode(spec: &str) -> Option<(u32, u32, u32)> {
