@@ -14,8 +14,6 @@
 //! Every input is a field of [`RunReport`], so the verdict can be recomputed
 //! from the published JSON by anyone who doubts it.
 
-use core::fmt;
-
 use lanplay_telemetry::P99_SOAK_FRAMES;
 
 use crate::report::{CheckReport, GateReport, RunReport};
@@ -87,36 +85,6 @@ impl Verdict {
     }
 }
 
-impl fmt::Display for Verdict {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for check in &self.checks {
-            writeln!(
-                f,
-                "  [{}] {:<26} {}",
-                if check.passed { "pass" } else { "FAIL" },
-                check.name,
-                check.detail
-            )?;
-        }
-        for note in &self.untested {
-            writeln!(f, "  [none] {:<26} {}", "untested", note)?;
-        }
-        if !self.soaked {
-            writeln!(
-                f,
-                "  [note] {:<26} run is shorter than the {P99_SOAK_FRAMES}-frame soak; tail \
-                 numbers are indicative only",
-                "soak"
-            )?;
-        }
-        write!(
-            f,
-            "gate 3A: {}",
-            if self.passed() { "PASS" } else { "FAIL" }
-        )
-    }
-}
-
 pub fn evaluate(report: &RunReport) -> Verdict {
     let mut checks = Vec::new();
     let mut untested = Vec::new();
@@ -149,7 +117,9 @@ pub fn evaluate(report: &RunReport) -> Verdict {
     //    only ends one way. Both APIs report their own: AccumulatedFrames for
     //    Desktop Duplication, pool depth for WGC.
     let backlog_ok = match stability.backlog_slope_per_min {
-        Some(slope) => slope <= MAX_BACKLOG_GROWTH && stability.backlog_trailing <= MAX_TRAILING_BACKLOG,
+        Some(slope) => {
+            slope <= MAX_BACKLOG_GROWTH && stability.backlog_trailing <= MAX_TRAILING_BACKLOG
+        }
         None => false,
     };
     checks.push(Check {
@@ -213,8 +183,8 @@ pub fn evaluate(report: &RunReport) -> Verdict {
 
     // 5. A source mark that goes backwards makes every delivery delay computed
     //    from it meaningless, so the tolerance is zero rather than small.
-    let monotonic = stability.source_timestamp_regressions == 0
-        && stability.acquire_timestamp_regressions == 0;
+    let monotonic =
+        stability.source_timestamp_regressions == 0 && stability.acquire_timestamp_regressions == 0;
     checks.push(Check {
         name: "timestamps monotonic",
         passed: monotonic,
@@ -251,13 +221,13 @@ pub fn evaluate(report: &RunReport) -> Verdict {
 
     // 7. The API was asked to wait a bounded time. Blocking for twice that is
     //    the API breaking its own contract, whatever the latency is.
-    let ceiling = stability.acquire_timeout_ms as f64 * ACQUIRE_TIMEOUT_SLACK;
+    let ceiling = report.config.acquire_timeout_ms as f64 * ACQUIRE_TIMEOUT_SLACK;
     checks.push(Check {
         name: "acquire honours timeout",
         passed: capture.acquire.max_ms <= ceiling,
         detail: format!(
             "worst acquire {:.3} ms against a {} ms timeout (ceiling {ceiling:.0} ms), {} timeouts",
-            capture.acquire.max_ms, stability.acquire_timeout_ms, capture.timeouts
+            capture.acquire.max_ms, report.config.acquire_timeout_ms, capture.timeouts
         ),
     });
 
@@ -311,8 +281,7 @@ pub fn evaluate(report: &RunReport) -> Verdict {
 
         checks.push(Check {
             name: "gpu copy measured",
-            passed: handoff.copies == 0
-                || handoff.gpu_result_fraction >= MIN_GPU_RESULT_FRACTION,
+            passed: handoff.copies == 0 || handoff.gpu_result_fraction >= MIN_GPU_RESULT_FRACTION,
             detail: format!(
                 "{} of {} copies returned a GPU timestamp ({:.1}%); {} found no free query, {} \
                  disjoint, {} unresolved at exit",
@@ -354,7 +323,7 @@ mod tests {
             max_ms: 11.0,
             ..Summary::default()
         };
-        report.stability.acquire_timeout_ms = 100;
+        report.config.acquire_timeout_ms = 100;
         report.stability.backlog_slope_per_min = Some(0.0);
         report.stability.backlog_samples = 240;
         report.stability.backlog_trailing = 1.0;
@@ -371,10 +340,22 @@ mod tests {
             .expect("check present")
     }
 
+    /// Names what broke, so a failing assertion says which check rather
+    /// than only that one did.
+    fn failures(verdict: &Verdict) -> String {
+        verdict
+            .checks
+            .iter()
+            .filter(|check| !check.passed)
+            .map(|check| format!("{}: {}", check.name, check.detail))
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+
     #[test]
     fn a_healthy_run_passes_every_check() {
         let verdict = evaluate(&healthy());
-        assert!(verdict.passed(), "{verdict}");
+        assert!(verdict.passed(), "{}", failures(&verdict));
         assert!(verdict.soaked);
     }
 
@@ -431,7 +412,11 @@ mod tests {
         report.stability.backlog_samples = 1;
         let verdict = evaluate(&report);
         assert!(!check(&verdict, "no growing backlog").passed);
-        assert!(check(&verdict, "no growing backlog").detail.contains("unmeasured"));
+        assert!(
+            check(&verdict, "no growing backlog")
+                .detail
+                .contains("unmeasured")
+        );
     }
 
     #[test]
@@ -497,7 +482,13 @@ mod tests {
         report.stability.frames_after_last_restart = 900;
         let verdict = evaluate(&report);
         assert!(check(&verdict, "recovers from Lost").passed);
-        assert!(verdict.untested.is_empty() || !verdict.untested.iter().any(|note| note.contains("Acquired::Lost")));
+        assert!(
+            verdict.untested.is_empty()
+                || !verdict
+                    .untested
+                    .iter()
+                    .any(|note| note.contains("Acquired::Lost"))
+        );
     }
 
     #[test]
@@ -530,15 +521,25 @@ mod tests {
     fn the_timeout_ceiling_follows_the_configured_timeout() {
         let mut report = healthy();
         report.capture.acquire.max_ms = 201.0;
-        report.stability.acquire_timeout_ms = 200;
+        report.config.acquire_timeout_ms = 200;
         assert!(check(&evaluate(&report), "acquire honours timeout").passed);
     }
 
     #[test]
     fn an_uninjected_stall_adds_no_check_and_one_note() {
         let verdict = evaluate(&healthy());
-        assert!(!verdict.checks.iter().any(|check| check.name == "recovers from stall"));
-        assert!(verdict.untested.iter().any(|note| note.contains("--stall-ms")));
+        assert!(
+            !verdict
+                .checks
+                .iter()
+                .any(|check| check.name == "recovers from stall")
+        );
+        assert!(
+            verdict
+                .untested
+                .iter()
+                .any(|note| note.contains("--stall-ms"))
+        );
     }
 
     #[test]
@@ -553,7 +554,11 @@ mod tests {
         });
         let verdict = evaluate(&report);
         assert!(!check(&verdict, "recovers from stall").passed);
-        assert!(check(&verdict, "recovers from stall").detail.contains("never"));
+        assert!(
+            check(&verdict, "recovers from stall")
+                .detail
+                .contains("never")
+        );
     }
 
     #[test]
@@ -591,8 +596,18 @@ mod tests {
     #[test]
     fn native_runs_have_no_handoff_checks() {
         let verdict = evaluate(&healthy());
-        assert!(!verdict.checks.iter().any(|check| check.name == "pool keeps up"));
-        assert!(!verdict.checks.iter().any(|check| check.name == "gpu copy measured"));
+        assert!(
+            !verdict
+                .checks
+                .iter()
+                .any(|check| check.name == "pool keeps up")
+        );
+        assert!(
+            !verdict
+                .checks
+                .iter()
+                .any(|check| check.name == "gpu copy measured")
+        );
     }
 
     #[test]
@@ -618,7 +633,7 @@ mod tests {
     fn a_handful_of_unresolved_queries_is_tolerated() {
         let verdict = evaluate(&with_handoff(6_000, 5_950, 0, Some(0.0)));
         assert!(check(&verdict, "gpu copy measured").passed);
-        assert!(verdict.passed(), "{verdict}");
+        assert!(verdict.passed(), "{}", failures(&verdict));
     }
 
     #[test]
@@ -629,7 +644,6 @@ mod tests {
         let verdict = evaluate(&report);
         assert!(!verdict.soaked);
         assert!(verdict.passed(), "an unsoaked run is not a failed one");
-        assert!(format!("{verdict}").contains("indicative only"));
     }
 
     #[test]
@@ -639,15 +653,5 @@ mod tests {
         assert_eq!(report.checks.len(), verdict.checks.len());
         assert_eq!(report.passed, verdict.passed());
         assert!(report.checks.iter().all(|check| !check.name.is_empty()));
-    }
-
-    #[test]
-    fn the_rendered_verdict_names_the_failing_check() {
-        let mut report = healthy();
-        report.stability.mapped_bytes = 4096;
-        let rendered = format!("{}", evaluate(&report));
-        assert!(rendered.contains("FAIL"));
-        assert!(rendered.contains("no CPU readback"));
-        assert!(rendered.ends_with("gate 3A: FAIL"));
     }
 }

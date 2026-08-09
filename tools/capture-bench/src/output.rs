@@ -40,7 +40,10 @@ impl Output {
         stdout.flush()?;
 
         if let Some(path) = &self.path {
-            if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
                 fs::create_dir_all(parent)?;
             }
             let mut file = fs::File::create(path)?;
@@ -110,10 +113,8 @@ mod tests {
     fn stdout_and_the_log_receive_the_same_bytes() {
         use std::fmt::Write;
 
-        let directory = std::env::temp_dir().join(format!(
-            "capture-bench-output-{}",
-            std::process::id()
-        ));
+        let directory =
+            std::env::temp_dir().join(format!("capture-bench-output-{}", std::process::id()));
         let path = directory.join("nested/block.txt");
 
         let mut output = Output::new(Some(path.clone()));

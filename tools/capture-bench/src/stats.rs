@@ -96,10 +96,6 @@ impl Stats {
         }
     }
 
-    pub fn period(&self) -> Nanos {
-        self.period
-    }
-
     /// Records a frame and reports how its interval compared to the source
     /// cadence, which is what the stall-recovery tracking needs.
     pub fn frame(&mut self, observation: FrameObservation) -> Option<StallClass> {
@@ -259,7 +255,7 @@ impl Stats {
         }
     }
 
-    pub fn stability_report(&self, acquire_timeout_ms: u32) -> StabilityReport {
+    pub fn stability_report(&self) -> StabilityReport {
         let stalls = self.stalls.counts();
         StabilityReport {
             access_lost: self.access_lost,
@@ -281,7 +277,6 @@ impl Stats {
             backlog_trailing: self.backlog.last().unwrap_or(0.0),
             pool_cpu_accessible: false,
             mapped_bytes: 0,
-            acquire_timeout_ms,
         }
     }
 
@@ -302,7 +297,11 @@ impl Stats {
         let frames = self.frames - mark.frames;
         BlockStats {
             frames,
-            frames_per_second: if seconds > 0.0 { frames as f64 / seconds } else { 0.0 },
+            frames_per_second: if seconds > 0.0 {
+                frames as f64 / seconds
+            } else {
+                0.0
+            },
             delivery: self.delivery.summary_from(mark.delivery),
             acquire: self.acquire.summary_from(mark.acquire),
             interval: self.interval.summary_from(mark.interval),
@@ -379,7 +378,7 @@ mod tests {
         stats.skip_next_interval();
         assert_eq!(stats.frame(observation(500_000_000, 499_000_000)), None);
         assert_eq!(
-            stats.stability_report(100).intervals_over_2x,
+            stats.stability_report().intervals_over_2x,
             0,
             "the harness caused that gap by not consuming"
         );
@@ -400,7 +399,7 @@ mod tests {
         assert_eq!(stats.delivery.len(), 0);
         assert_eq!(stats.delivery_unusable, 1);
         assert_eq!(
-            stats.stability_report(100).source_timestamp_regressions,
+            stats.stability_report().source_timestamp_regressions,
             0,
             "a zero mark is not an instant and cannot regress"
         );
@@ -414,7 +413,7 @@ mod tests {
         cursor_only.delivery = None;
         stats.frame(cursor_only);
         stats.frame(observation(3_000_000, 2_900_000));
-        assert_eq!(stats.stability_report(100).source_timestamp_regressions, 0);
+        assert_eq!(stats.stability_report().source_timestamp_regressions, 0);
     }
 
     #[test]
@@ -452,7 +451,7 @@ mod tests {
 
         // A mark before the reset's last one is still a regression.
         stats.frame(observation(1_100_000_000, 900_000_000));
-        assert_eq!(stats.stability_report(100).source_timestamp_regressions, 1);
+        assert_eq!(stats.stability_report().source_timestamp_regressions, 1);
     }
 
     #[test]
@@ -461,7 +460,7 @@ mod tests {
         stats.frame(observation(0, 0));
         stats.begin_window(Timestamp::from_nanos(0));
         stats.frame(observation(900_000_000, 899_000_000));
-        assert_eq!(stats.stability_report(100).intervals_over_2x, 0);
+        assert_eq!(stats.stability_report().intervals_over_2x, 0);
     }
 
     #[test]
@@ -481,7 +480,10 @@ mod tests {
         let mut stats = Stats::new(PERIOD);
         stats.begin_window(Timestamp::from_nanos(0));
         for index in 1..=200u64 {
-            stats.frame(observation(index * 10_000_000, index * 10_000_000 - 1_000_000));
+            stats.frame(observation(
+                index * 10_000_000,
+                index * 10_000_000 - 1_000_000,
+            ));
         }
         stats.end_window(Timestamp::from_nanos(2_000_000_000));
 
@@ -497,17 +499,26 @@ mod tests {
         let mut stats = Stats::new(PERIOD);
         stats.begin_window(Timestamp::from_nanos(0));
         for index in 1..=100u64 {
-            stats.frame(observation(index * 10_000_000, index * 10_000_000 - 1_000_000));
+            stats.frame(observation(
+                index * 10_000_000,
+                index * 10_000_000 - 1_000_000,
+            ));
         }
         let mark = stats.mark();
         for index in 101..=150u64 {
-            stats.frame(observation(index * 10_000_000, index * 10_000_000 - 2_000_000));
+            stats.frame(observation(
+                index * 10_000_000,
+                index * 10_000_000 - 2_000_000,
+            ));
         }
 
         let block = stats.block(mark, 0.5);
         assert_eq!(block.frames, 50);
         assert!((block.frames_per_second - 100.0).abs() < 1e-9);
         assert_eq!(block.delivery.count, 50);
-        assert!((block.delivery.p50_ms - 2.0).abs() < 1e-9, "the earlier block's 1 ms delays are not in this one");
+        assert!(
+            (block.delivery.p50_ms - 2.0).abs() < 1e-9,
+            "the earlier block's 1 ms delays are not in this one"
+        );
     }
 }

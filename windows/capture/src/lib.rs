@@ -14,6 +14,8 @@ pub mod dda;
 #[cfg(windows)]
 pub mod device;
 #[cfg(windows)]
+pub mod display_mode;
+#[cfg(windows)]
 pub mod texture_pool;
 #[cfg(windows)]
 pub mod wgc;

@@ -131,6 +131,10 @@ pub struct HandoffReport {
     pub source_hold: Summary,
     pub pool_starvation: u64,
     pub pool_starvation_slope_per_min: Option<f64>,
+    /// Times the owned pool had to be rebuilt because the output changed
+    /// size under it. Non-zero means part of the run measured a different
+    /// resolution from the rest.
+    pub owned_pool_rebuilds: u64,
     pub queries_resolved: u64,
     /// Copies made without a query because every query set was still in
     /// flight. Counted, never waited for.
@@ -183,7 +187,6 @@ pub struct StabilityReport {
     /// Bytes the loop moved to system memory. Structurally zero: nothing here
     /// maps a resource or copies to a staging texture.
     pub mapped_bytes: u64,
-    pub acquire_timeout_ms: u32,
 }
 
 /// What the API did when the consumer deliberately stopped consuming.
@@ -289,6 +292,77 @@ impl CompareReport {
             schema: SCHEMA.to_owned(),
             mode: "compare".to_owned(),
             ..CompareReport::default()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The JSON is the artefact the phase 3 decision gets argued from, and the
+    /// gate is a pure function of it. If a section stops being emitted, the
+    /// verdict stops being checkable from the file.
+    #[test]
+    fn a_run_report_serialises_every_section_the_gate_reads() {
+        let value: serde_json::Value =
+            serde_json::to_value(RunReport::new("native", "wgc")).expect("serialises");
+        let object = value.as_object().expect("an object");
+
+        for key in [
+            "schema",
+            "mode",
+            "backend",
+            "backend_api",
+            "device",
+            "config",
+            "startup",
+            "capture",
+            "handoff",
+            "system",
+            "stability",
+            "injected_stall",
+            "gate",
+        ] {
+            assert!(object.contains_key(key), "{key} missing from the report");
+        }
+        assert_eq!(object["schema"], SCHEMA);
+        // Absent rather than zeroed: a native run owns no textures and a run
+        // with no injected stall provoked nothing.
+        assert!(object["handoff"].is_null());
+        assert!(object["injected_stall"].is_null());
+    }
+
+    #[test]
+    fn the_period_the_cadence_was_judged_against_is_in_the_file() {
+        // A cadence number with no denominator cannot be re-checked, so both
+        // the detected mode and any override have to survive into the JSON.
+        let value = serde_json::to_value(RunReport::new("native", "dda")).expect("serialises");
+        assert!(value["config"].get("source_hz").is_some());
+        assert!(value["config"].get("source_hz_overridden").is_some());
+        assert!(value["device"].get("refresh_numerator").is_some());
+        assert!(value["device"].get("refresh_denominator").is_some());
+        assert!(value["device"].get("refresh_source").is_some());
+        assert!(value["stability"].get("period_ms").is_some());
+    }
+
+    #[test]
+    fn the_three_copy_numbers_are_three_separate_keys() {
+        let mut report = RunReport::new("handoff", "wgc");
+        report.handoff = Some(HandoffReport::default());
+        let value = serde_json::to_value(report).expect("serialises");
+        let handoff = &value["handoff"];
+        assert!(handoff.get("copy_submit_cpu").is_some());
+        assert!(handoff.get("copy_gpu").is_some());
+        assert!(handoff.get("copy_completion_observed").is_some());
+    }
+
+    #[test]
+    fn a_compare_report_carries_both_runs_and_the_order_they_ran_in() {
+        let value = serde_json::to_value(CompareReport::new()).expect("serialises");
+        assert_eq!(value["mode"], "compare");
+        for key in ["schema", "device", "config", "blocks", "wgc", "dda"] {
+            assert!(value.get(key).is_some(), "{key} missing");
         }
     }
 }

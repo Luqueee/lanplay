@@ -374,7 +374,10 @@ fn distribution(out: &mut impl Write, label: &str, distribution: &Distribution) 
 pub fn compare_block(out: &mut impl Write, report: &CompareReport) -> fmt::Result {
     let device = &report.device;
     writeln!(out, "{RULE}")?;
-    writeln!(out, "capture-bench compare :: wgc vs dda, alternating blocks")?;
+    writeln!(
+        out,
+        "capture-bench compare :: wgc vs dda, alternating blocks"
+    )?;
     writeln!(out, "{}", device.description)?;
     writeln!(
         out,
@@ -404,7 +407,13 @@ pub fn compare_block(out: &mut impl Write, report: &CompareReport) -> fmt::Resul
     writeln!(out, "{:<30}{:>18}{:>18}", "", "wgc", "dda")?;
     let wgc = &report.wgc;
     let dda = &report.dda;
-    row(out, "frames", wgc.capture.frames as f64, dda.capture.frames as f64, 0)?;
+    row(
+        out,
+        "frames",
+        wgc.capture.frames as f64,
+        dda.capture.frames as f64,
+        0,
+    )?;
     row(
         out,
         "frames/s",
@@ -497,8 +506,20 @@ pub fn compare_block(out: &mut impl Write, report: &CompareReport) -> fmt::Resul
         0,
     )?;
     if let (Some(left), Some(right)) = (&wgc.handoff, &dda.handoff) {
-        row(out, "copy GPU p50 (ms)", left.copy_gpu.p50_ms, right.copy_gpu.p50_ms, 3)?;
-        row(out, "copy GPU p99 (ms)", left.copy_gpu.p99_ms, right.copy_gpu.p99_ms, 3)?;
+        row(
+            out,
+            "copy GPU p50 (ms)",
+            left.copy_gpu.p50_ms,
+            right.copy_gpu.p50_ms,
+            3,
+        )?;
+        row(
+            out,
+            "copy GPU p99 (ms)",
+            left.copy_gpu.p99_ms,
+            right.copy_gpu.p99_ms,
+            3,
+        )?;
         row(
             out,
             "source hold p99 (ms)",
@@ -553,4 +574,158 @@ fn block_line(out: &mut impl Write, block: &BlockReport) -> fmt::Result {
         block.intervals_over_2x,
         block.access_lost
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::report::{DeviceReport, GateReport, HandoffReport, InjectedStallReport, RunReport};
+
+    fn rendered(report: &RunReport) -> String {
+        let mut block = String::new();
+        run_block(&mut block, report).expect("rendering into a String cannot fail");
+        block
+    }
+
+    fn populated(mode: &str) -> RunReport {
+        let mut report = RunReport::new(mode, "dda");
+        report.backend_api = "DuplicateOutput1".to_owned();
+        report.device = DeviceReport {
+            adapter: "NVIDIA GeForce RTX 4060 Ti".to_owned(),
+            output: r"\\.\DISPLAY1".to_owned(),
+            output_width: 1920,
+            output_height: 1080,
+            refresh_numerator: 100,
+            refresh_denominator: 1,
+            refresh_hz: 100.0,
+            refresh_source: "dxgi mode list".to_owned(),
+            description: "NVIDIA GeForce RTX 4060 Ti driving \\\\.\\DISPLAY1 at 1920x1080"
+                .to_owned(),
+            ..DeviceReport::default()
+        };
+        report.config.source_hz = 100.0;
+        report.capture.frames = 6_000;
+        report.capture.window_s = 60.0;
+        report.capture.frames_per_second = 100.0;
+        report.capture.expected_frames = 6_000.0;
+        report.capture.source_mark = "desktop presented".to_owned();
+        report.stability.period_ms = 10.0;
+        report
+    }
+
+    #[test]
+    fn every_report_names_the_gpu_and_the_output_before_any_number() {
+        // A capture benchmark that does not say which GPU and driver produced
+        // it is a number without a subject.
+        let block = rendered(&populated("native"));
+        let identity = block.find("RTX 4060 Ti").expect("the adapter is named");
+        assert!(
+            identity < block.find("CAPTURE").expect("CAPTURE section"),
+            "the subject has to come before the numbers"
+        );
+        assert!(block.contains(r"\\.\DISPLAY1"));
+    }
+
+    #[test]
+    fn the_measured_mode_is_printed_with_its_rational_and_its_source() {
+        let block = rendered(&populated("native"));
+        assert!(block.contains("1920x1080 @ 100.000 Hz (100/1 from dxgi mode list)"));
+    }
+
+    #[test]
+    fn a_native_run_has_the_four_required_sections_and_no_handoff() {
+        let block = rendered(&populated("native"));
+        for section in ["STARTUP", "CAPTURE", "SYSTEM", "STABILITY"] {
+            assert!(block.contains(section), "{section} missing from the block");
+        }
+        assert!(!block.contains("HANDOFF"));
+        assert!(!block.contains("INJECTED STALL"));
+    }
+
+    #[test]
+    fn a_handoff_run_reports_the_three_copy_numbers_under_three_names() {
+        // Conflating any two of these is the specific error the phase exists
+        // to avoid, so the block must never show fewer than three.
+        let mut report = populated("handoff");
+        report.handoff = Some(HandoffReport {
+            pool_size: 3,
+            copies: 6_000,
+            queries_resolved: 6_000,
+            gpu_result_fraction: 1.0,
+            ..HandoffReport::default()
+        });
+        let block = rendered(&report);
+        assert!(block.contains("copy submit (CPU)"));
+        assert!(block.contains("copy GPU time"));
+        assert!(block.contains("copy completion seen"));
+        assert!(block.contains("pool starvation"));
+    }
+
+    #[test]
+    fn an_incomplete_gpu_sample_says_why_rather_than_leaving_it_unexplained() {
+        let mut report = populated("handoff");
+        report.handoff = Some(HandoffReport {
+            copies: 6_000,
+            queries_resolved: 5_000,
+            gpu_result_fraction: 5_000.0 / 6_000.0,
+            ..HandoffReport::default()
+        });
+        let block = rendered(&report);
+        assert!(block.contains("DONOTFLUSH"));
+        assert!(block.contains("must not have one here"));
+    }
+
+    #[test]
+    fn an_injected_stall_that_never_recovered_says_never() {
+        let mut report = populated("native");
+        report.injected_stall = Some(InjectedStallReport {
+            requested_ms: 500,
+            actual_ms: 500.7,
+            frames_to_recover: None,
+            recovered: false,
+            ..InjectedStallReport::default()
+        });
+        let block = rendered(&report);
+        assert!(block.contains("INJECTED STALL"));
+        assert!(block.contains("never"));
+    }
+
+    #[test]
+    fn the_gate_verdict_closes_the_block() {
+        let mut report = populated("native");
+        report.gate = Some(GateReport {
+            passed: false,
+            soaked: true,
+            checks: vec![crate::report::CheckReport {
+                name: "no CPU readback".to_owned(),
+                passed: false,
+                detail: "4096 bytes mapped".to_owned(),
+            }],
+            untested: Vec::new(),
+        });
+        let block = rendered(&report);
+        assert!(block.trim_end().ends_with("gate 3A: FAIL"));
+        assert!(block.contains("[FAIL] no CPU readback"));
+    }
+
+    #[test]
+    fn a_run_too_short_to_quote_says_so_next_to_its_verdict() {
+        let mut report = populated("native");
+        report.gate = Some(GateReport {
+            passed: true,
+            soaked: false,
+            checks: Vec::new(),
+            untested: vec!["recovery from Acquired::Lost: no loss occurred".to_owned()],
+        });
+        let block = rendered(&report);
+        assert!(block.contains("too few frames"));
+        assert!(block.contains("no loss occurred"));
+    }
+
+    #[test]
+    fn unobtainable_system_numbers_say_so_instead_of_reading_as_zero() {
+        let block = rendered(&populated("native"));
+        assert!(block.contains("process CPU           unobtainable on this platform"));
+        assert!(block.contains("memory slope          unmeasured"));
+    }
 }

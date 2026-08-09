@@ -77,10 +77,6 @@ impl StallClassifier {
         }
     }
 
-    pub fn period(&self) -> Nanos {
-        self.period
-    }
-
     pub fn observe(&mut self, interval: Nanos) -> StallClass {
         let class = classify(self.period, interval);
         self.counts.observed += 1;
@@ -115,7 +111,6 @@ impl StallClassifier {
 /// whether they are looking at a rounding artefact or at a different clock.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MonotonicCheck {
-    observed: u64,
     regressions: u64,
     worst_backstep: Nanos,
     last: Option<Timestamp>,
@@ -123,7 +118,6 @@ pub struct MonotonicCheck {
 
 impl MonotonicCheck {
     pub fn observe(&mut self, at: Timestamp) {
-        self.observed += 1;
         if let Some(previous) = self.last
             && at < previous
         {
@@ -134,10 +128,6 @@ impl MonotonicCheck {
         // subsequent good one look like a regression too, and the count stops
         // meaning "how many times the clock went backwards".
         self.last = Some(at);
-    }
-
-    pub fn observed(&self) -> u64 {
-        self.observed
     }
 
     pub fn regressions(&self) -> u64 {
@@ -151,7 +141,6 @@ impl MonotonicCheck {
     /// Clears the counts but keeps the last mark, so the warm-up/steady-state
     /// boundary is still checked rather than being a free pass.
     pub fn reset_counts(&mut self) {
-        self.observed = 0;
         self.regressions = 0;
         self.worst_backstep = Nanos::ZERO;
     }
@@ -168,7 +157,7 @@ mod tests {
     fn the_period_is_the_reciprocal_of_the_measured_rate() {
         assert_eq!(period_for(100.0), PERIOD);
         assert_eq!(period_for(120.0), Nanos(8_333_333));
-        assert_eq!(period_for(60_000.0 / 1_001.0), Nanos(16_683_350));
+        assert_eq!(period_for(60_000.0 / 1_001.0), Nanos(16_683_333));
     }
 
     #[test]
@@ -243,7 +232,7 @@ mod tests {
         classifier.observe(Nanos(900_000_000));
         classifier.reset_counts();
         assert_eq!(classifier.counts(), StallCounts::default());
-        assert_eq!(classifier.period(), PERIOD);
+        // The period survived the reset: the same interval still classifies.
         assert_eq!(
             classifier.observe(Nanos(900_000_000)),
             StallClass::OverTwoPeriods
@@ -256,7 +245,6 @@ mod tests {
         for nanos in [1, 2, 2, 100, 100_000] {
             check.observe(Timestamp::from_nanos(nanos));
         }
-        assert_eq!(check.observed(), 5);
         assert_eq!(
             check.regressions(),
             0,

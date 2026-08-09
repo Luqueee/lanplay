@@ -446,14 +446,29 @@ fn a_wedged_control_connection_does_not_perturb_a_120hz_producer() {
         "the control connection never actually wedged, so this proves nothing"
     );
 
-    let target = FRAME_PERIOD.get() as f64;
+    // The claim in the name is differential: the wedged connection must not
+    // perturb the producer. Comparing each half against an absolute 8.33 ms
+    // measures the machine's scheduler instead, and a busy machine then fails
+    // a test about isolation while proving nothing either way. Both halves run
+    // on the same machine moments apart, so scheduling noise lands on both and
+    // cancels in the difference.
+    let perturbation = stalled_p99.get() as f64 - baseline_p99.get() as f64;
     let tolerance = Nanos::from_millis(1).get() as f64;
-    for (label, p99) in [("baseline", baseline_p99), ("stalled", stalled_p99)] {
-        let deviation = (p99.get() as f64 - target).abs();
-        assert!(
-            deviation < tolerance,
-            "{label} p99 inter-item interval {p99} deviates {:.3} ms from 8.33 ms",
-            deviation / 1_000_000.0
-        );
-    }
+    assert!(
+        perturbation < tolerance,
+        "the wedged connection cost the producer {:.3} ms at p99 \
+         (baseline {baseline_p99}, stalled {stalled_p99})",
+        perturbation / 1_000_000.0
+    );
+
+    // A loose floor under the whole measurement: if the baseline itself is
+    // nowhere near the target the machine was not producing at 120 Hz at all,
+    // and a small difference between two useless numbers proves nothing.
+    let target = FRAME_PERIOD.get() as f64;
+    let sanity = Nanos::from_millis(4).get() as f64;
+    assert!(
+        (baseline_p99.get() as f64 - target).abs() < sanity,
+        "baseline p99 {baseline_p99} is too far from 8.33 ms for this run to \
+         say anything about isolation"
+    );
 }

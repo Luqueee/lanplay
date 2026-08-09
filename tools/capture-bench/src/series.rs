@@ -50,10 +50,6 @@ impl Series {
         self.samples.len()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.samples.is_empty()
-    }
-
     pub fn summary(&self) -> Summary {
         self.summary_from(0)
     }

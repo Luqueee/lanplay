@@ -12,6 +12,7 @@
 //! seed rather than from the clock so a suspicious result can be re-run
 //! exactly.
 
+use clap::ValueEnum;
 use serde::Serialize;
 
 /// Shortest block worth running. Below this the per-block start-up dominates
@@ -19,7 +20,7 @@ use serde::Serialize;
 /// of running one.
 pub const MIN_BLOCK_SECONDS: f64 = 1.0;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ValueEnum)]
 #[serde(rename_all = "kebab-case")]
 pub enum BackendKind {
     Wgc,
@@ -27,8 +28,6 @@ pub enum BackendKind {
 }
 
 impl BackendKind {
-    pub const BOTH: [BackendKind; 2] = [BackendKind::Wgc, BackendKind::Dda];
-
     pub fn as_str(self) -> &'static str {
         match self {
             BackendKind::Wgc => "wgc",
@@ -166,7 +165,11 @@ mod tests {
     #[test]
     fn a_block_shorter_than_the_floor_is_lifted_to_it() {
         let blocks = alternating(100.0, 0.01, 0);
-        assert!(blocks.iter().all(|block| block.seconds >= MIN_BLOCK_SECONDS));
+        assert!(
+            blocks
+                .iter()
+                .all(|block| block.seconds >= MIN_BLOCK_SECONDS)
+        );
     }
 
     #[test]
