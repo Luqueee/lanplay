@@ -9,7 +9,14 @@
 //! Nothing here is platform specific.
 
 mod access_unit;
+mod annexb;
+mod fixture;
 
 pub use access_unit::{
     AccessUnitSource, EncodedAccessUnit, ParameterSets, PixelFormat, VideoDecoder, VideoTimestamp,
+};
+pub use annexb::{AnnexBError, NalUnitType, RawAccessUnit, parse_stream, split_annex_b, to_avcc};
+pub use fixture::{
+    FixtureError, FixturePattern, FixtureReport, FixtureSource, FixtureSpec, ensure_fixture,
+    verify_no_frame_reordering,
 };

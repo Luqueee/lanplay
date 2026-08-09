@@ -1,17 +1,18 @@
 [package]
-name = "lanplay-bench"
+name = "lanplay-client"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "lanplay-bench"
+name = "lanplay-client"
 path = "src/main.rs"
 
 [dependencies]
-lanplay-capabilities = { workspace = true }
+lanplay-decoder-videotoolbox = { workspace = true }
 lanplay-protocol = { workspace = true }
+lanplay-renderer-metal = { workspace = true }
 lanplay-telemetry = { workspace = true }
 lanplay-video-core = { workspace = true }
 clap = { workspace = true }

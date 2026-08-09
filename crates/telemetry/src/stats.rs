@@ -138,14 +138,22 @@ impl Snapshot {
         (self.counters.frames_presented - 1) as f64 / seconds
     }
 
-    /// True when nothing was lost: no dropped marks, no incomplete frames, no
-    /// duplicates. The numbers below are only trustworthy once this holds.
-    pub fn is_lossless(&self) -> bool {
+    /// No mark was lost, duplicated, or arrived after its frame closed.
+    ///
+    /// Deliberately says nothing about frames completing: a pipeline whose
+    /// job is to drop frames when it falls behind still has intact
+    /// instrumentation, and conflating the two would make every
+    /// latest-frame-wins renderer look broken.
+    pub fn marks_intact(&self) -> bool {
         let c = &self.counters;
-        c.events_dropped == 0
-            && c.frames_incomplete == 0
-            && c.duplicate_marks == 0
-            && c.late_events == 0
+        c.events_dropped == 0 && c.duplicate_marks == 0 && c.late_events == 0
+    }
+
+    /// Marks intact *and* every frame reached present. Only meaningful for a
+    /// pipeline that is not allowed to drop frames, such as the synthetic
+    /// harness.
+    pub fn is_lossless(&self) -> bool {
+        self.marks_intact() && self.counters.frames_incomplete == 0
     }
 
     /// Whether the run is long enough for its p99 to mean anything.
@@ -160,8 +168,8 @@ impl fmt::Display for Snapshot {
         writeln!(f)?;
         writeln!(
             f,
-            "{:<18} {:>7} {:>9} {:>9} {:>9} {:>9}  {}",
-            "segment", "count", "p50", "p95", "p99", "max", "kind"
+            "{:<18} {:>7} {:>9} {:>9} {:>9} {:>9}  kind",
+            "segment", "count", "p50", "p95", "p99", "max"
         )?;
         for segment in Segment::ALL {
             write_series(

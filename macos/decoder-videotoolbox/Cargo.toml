@@ -1,0 +1,23 @@
+[package]
+name = "lanplay-decoder-videotoolbox"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "decode-fixture"
+path = "src/bin/decode_fixture.rs"
+
+[dependencies]
+lanplay-protocol = { workspace = true }
+lanplay-telemetry = { workspace = true }
+lanplay-video-core = { workspace = true }
+clap = { workspace = true }
+objc2 = { workspace = true }
+objc2-core-foundation = { workspace = true }
+objc2-core-media = { workspace = true }
+objc2-core-video = { workspace = true, features = ["objc2-io-surface"] }
+objc2-io-surface = { workspace = true }
+objc2-video-toolbox = { workspace = true }
+parking_lot = { workspace = true }

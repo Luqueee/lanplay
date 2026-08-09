@@ -101,6 +101,34 @@ impl Timestamp {
     }
 }
 
+/// Occupies the calling thread until `target`.
+///
+/// Sleeps most of the way, then spins. Plain sleeping cannot resolve a 120 Hz
+/// frame period on macOS, and pure spinning heats the machine being measured.
+///
+/// The guard band is 3 ms because `thread::sleep` on macOS routinely overshoots
+/// by around a millisecond under load: a narrower band leaves the overshoot
+/// past the deadline, where it shows up as source jitter and gets blamed on
+/// the pipeline.
+pub fn wait_until(target: Timestamp) {
+    const SPIN_GUARD_NANOS: u64 = 3_000_000;
+
+    loop {
+        let now = Timestamp::now();
+        if now >= target {
+            return;
+        }
+        let remaining = target.saturating_since(now).get();
+        if remaining > SPIN_GUARD_NANOS {
+            std::thread::sleep(core::time::Duration::from_nanos(
+                remaining - SPIN_GUARD_NANOS,
+            ));
+        } else {
+            core::hint::spin_loop();
+        }
+    }
+}
+
 /// A duration in nanoseconds. Displays as milliseconds, which is the unit the
 /// whole project reasons in.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug)]

@@ -1,4 +1,6 @@
 /target
+macos/*/target
+/fixtures
 *.bin
 *.h264
 *.hevc

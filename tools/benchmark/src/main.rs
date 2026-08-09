@@ -1,6 +1,7 @@
 //! Phase 0 harness: proves the clock, the telemetry path and the capability
 //! probes work before a single real frame exists.
 
+mod fixture;
 mod synthetic;
 
 use std::process::ExitCode;
@@ -9,6 +10,7 @@ use clap::{Parser, Subcommand};
 use lanplay_protocol::{ClientCapabilities, HostCapabilities};
 use lanplay_telemetry::{Nanos, Segment, Snapshot};
 
+use crate::fixture::FixtureArgs;
 use crate::synthetic::{Run, SyntheticArgs};
 
 #[derive(Parser)]
@@ -24,6 +26,8 @@ enum Command {
     Caps,
     /// Run the synthetic pipeline and print per-frame and aggregate timings.
     Synthetic(Box<SyntheticArgs>),
+    /// Build or reuse an encoded H.264 fixture and describe it.
+    Fixture(FixtureArgs),
 }
 
 fn main() -> ExitCode {
@@ -41,6 +45,13 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         }
+        Command::Fixture(args) => match fixture::run(&args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("fixture: {err}");
+                ExitCode::FAILURE
+            }
+        },
     }
 }
 

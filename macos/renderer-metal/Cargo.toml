@@ -1,0 +1,25 @@
+[package]
+name = "lanplay-renderer-metal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "render-pattern"
+path = "src/bin/render_pattern.rs"
+
+[dependencies]
+lanplay-protocol = { workspace = true }
+lanplay-telemetry = { workspace = true }
+lanplay-video-core = { workspace = true }
+clap = { workspace = true }
+hdrhistogram = { workspace = true }
+objc2 = { workspace = true }
+objc2-app-kit = { workspace = true }
+objc2-core-foundation = { workspace = true }
+objc2-core-video = { workspace = true }
+objc2-foundation = { workspace = true }
+objc2-metal = { workspace = true }
+objc2-quartz-core = { workspace = true }
+parking_lot = { workspace = true }
