@@ -10,12 +10,14 @@ use lanplay_telemetry::{
     Nanos, Recorder, Segment, Snapshot, Stage, Telemetry, TelemetryConfig, Timestamp, Trend,
     resident_bytes, wait_until,
 };
+use lanplay_transport::TxStats;
 use lanplay_video_core::{
     AccessUnitSource, FixtureSource, PixelFormat, VideoDecoder, ensure_fixture,
 };
 
 use crate::Cli;
-use crate::gate::{GateInputs, evaluate};
+use crate::gate::{GateInputs, TransportInputs, evaluate};
+use crate::transport;
 
 /// How often the backlog and resident memory are sampled. Fast enough to fit a
 /// slope through a one-minute run, slow enough to cost nothing.
@@ -24,9 +26,8 @@ const SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
 /// submitted, so frames already in flight are not counted as losses.
 const DRAIN_GRACE: Duration = Duration::from_millis(300);
 
-/// What the feeding thread learned, collected after it finishes so nothing has
-/// to be shared with the render thread while the run is going.
-struct FeedOutcome {
+/// What the run produced, whichever path the access units took to the decoder.
+struct RunOutcome {
     submitted: u64,
     decoded: u64,
     errors: u64,
@@ -34,6 +35,57 @@ struct FeedOutcome {
     max_backlog: usize,
     trailing_backlog: usize,
     backlog: Trend,
+    transport: Option<transport::TransportOutcome>,
+}
+
+type FeedResult = Result<RunOutcome, Box<dyn Error + Send + Sync>>;
+type SendResult = Result<(TxStats, u64, u64), Box<dyn Error + Send + Sync>>;
+type ReceiveResult =
+    Result<(transport::ReceiverOutcome, VideoToolboxDecoder), Box<dyn Error + Send + Sync>>;
+
+/// The threads that move access units, in whichever shape this run uses.
+enum Pipeline {
+    Direct(thread::JoinHandle<FeedResult>),
+    Loopback {
+        sender: thread::JoinHandle<SendResult>,
+        receiver: thread::JoinHandle<ReceiveResult>,
+    },
+}
+
+impl Pipeline {
+    fn join(self) -> Result<RunOutcome, Box<dyn Error>> {
+        // Thread errors are Send + Sync and the caller's are not, so they cross
+        // the boundary as text.
+        let flatten =
+            |error: Box<dyn Error + Send + Sync>| -> Box<dyn Error> { error.to_string().into() };
+        match self {
+            Pipeline::Direct(feed) => feed.join().expect("feed thread").map_err(flatten),
+            Pipeline::Loopback { sender, receiver } => {
+                let (tx, wire_bytes, payload_bytes) =
+                    sender.join().expect("sender thread").map_err(flatten)?;
+                let (received, decoder) =
+                    receiver.join().expect("receiver thread").map_err(flatten)?;
+                Ok(RunOutcome {
+                    submitted: received.submitted,
+                    decoded: decoder.decoded(),
+                    errors: decoder.errors(),
+                    dropped: decoder.dropped(),
+                    max_backlog: received.max_backlog,
+                    trailing_backlog: received.trailing_backlog,
+                    backlog: received.backlog,
+                    transport: Some(transport::TransportOutcome {
+                        tx,
+                        rx: received.rx,
+                        jitter: received.jitter,
+                        verified: received.verified,
+                        mismatched: received.mismatched,
+                        wire_bytes,
+                        payload_bytes,
+                    }),
+                })
+            }
+        }
+    }
 }
 
 pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
@@ -106,17 +158,72 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
         .name("memory".into())
         .spawn(move || sample_memory(memory_stop))?;
 
-    let feed_stop = Arc::clone(&stop);
-    let feed = thread::Builder::new().name("feed".into()).spawn(move || {
-        feed_loop(
-            decoder,
-            source,
-            recorder,
-            feed_fps,
-            expected_frames,
-            feed_stop,
-        )
-    })?;
+    let pipeline = match cli.transport {
+        crate::Transport::Direct => {
+            let feed_stop = Arc::clone(&stop);
+            Pipeline::Direct(thread::Builder::new().name("feed".into()).spawn(move || {
+                feed_loop(
+                    decoder,
+                    source,
+                    recorder,
+                    feed_fps,
+                    expected_frames,
+                    feed_stop,
+                )
+            })?)
+        }
+        crate::Transport::Loopback => {
+            let (sender_socket, receiver_socket, target) = transport::loopback_sockets()?;
+            println!(
+                "transport: RTP over UDP loopback to {target}, mtu {}",
+                cli.mtu
+            );
+            let ledger = transport::VerifyLedger::new(cli.verify);
+
+            let receive_stop = Arc::clone(&stop);
+            let receive_ledger = Arc::clone(&ledger);
+            let receive_recorder = recorder.clone();
+            let receiver = thread::Builder::new()
+                .name("rtp-rx".into())
+                .spawn(move || {
+                    transport::receive_loop(
+                        receiver_socket,
+                        decoder,
+                        receive_recorder,
+                        receive_ledger,
+                        SAMPLE_INTERVAL,
+                        receive_stop,
+                    )
+                })?;
+
+            let send_stop = Arc::clone(&stop);
+            let mtu = cli.mtu;
+            let sender = thread::Builder::new()
+                .name("rtp-tx".into())
+                .spawn(move || {
+                    let result = transport::send_loop(
+                        sender_socket,
+                        source,
+                        recorder,
+                        ledger,
+                        transport::SenderConfig {
+                            target,
+                            fps: feed_fps,
+                            frames: expected_frames,
+                            mtu,
+                        },
+                        Arc::clone(&send_stop),
+                    );
+                    // Give whatever is still in flight time to arrive, decode and
+                    // present before anything is called a loss.
+                    thread::sleep(DRAIN_GRACE);
+                    send_stop.store(true, Ordering::Release);
+                    result
+                })?;
+
+            Pipeline::Loopback { sender, receiver }
+        }
+    };
 
     // AppKit owns this thread from here until the run stops.
     let render_stats = lanplay_renderer_metal::run(
@@ -134,13 +241,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     )?;
 
     stop.store(true, Ordering::Release);
-    let outcome = feed
-        .join()
-        .expect("feed thread")
-        .map_err(|error| -> Box<dyn Error> {
-            // The feed thread's error type is Send + Sync; the caller's is not.
-            error.to_string().into()
-        })?;
+    let outcome = pipeline.join()?;
     let memory = memory_sampler.join().expect("memory sampler");
 
     if !telemetry.flush(Duration::from_secs(5)) {
@@ -175,6 +276,14 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
         memory: memory.clone(),
         snapshot,
         zero_copy_render_path: true,
+        transport: outcome.transport.as_ref().map(|transport| TransportInputs {
+            tx: transport.tx,
+            rx: transport.rx,
+            jitter: transport.jitter,
+            verified: transport.verified,
+            mismatched: transport.mismatched,
+            overhead_ratio: transport.overhead_ratio(),
+        }),
         metal_texture_cache: true,
     });
     println!();
@@ -189,7 +298,7 @@ fn feed_loop(
     fps: f64,
     frames: u64,
     stop: Arc<AtomicBool>,
-) -> Result<FeedOutcome, Box<dyn Error + Send + Sync>> {
+) -> FeedResult {
     let period = Nanos((1_000_000_000.0 / fps) as u64);
     let start = Timestamp::now();
     let mut backlog = Trend::new();
@@ -228,7 +337,7 @@ fn feed_loop(
     thread::sleep(DRAIN_GRACE);
     stop.store(true, Ordering::Release);
 
-    Ok(FeedOutcome {
+    Ok(RunOutcome {
         submitted: decoder.submitted(),
         decoded: decoder.decoded(),
         errors: decoder.errors(),
@@ -236,6 +345,7 @@ fn feed_loop(
         max_backlog,
         trailing_backlog: decoder.in_flight(),
         backlog,
+        transport: None,
     })
 }
 
@@ -257,7 +367,7 @@ fn sample_memory(stop: Arc<AtomicBool>) -> Trend {
 
 fn report(
     cli: &Cli,
-    outcome: &FeedOutcome,
+    outcome: &RunOutcome,
     memory: &Trend,
     render: &RenderStats,
     snapshot: &Snapshot,
@@ -297,6 +407,64 @@ fn report(
     println!("  drawable wait    {}", render.drawable_wait);
     println!("  encode cpu       {}", render.encode_cpu);
 
+    if let Some(transport) = &outcome.transport {
+        let packetization = snapshot.segment(Segment::Packetization);
+        let transit = snapshot.segment(Segment::Transit);
+        let serialisation = snapshot.segment(Segment::Serialisation);
+        let arrival = snapshot.segment(Segment::Arrival);
+        let reassembly = snapshot.segment(Segment::Reassembly);
+        println!();
+        println!("Transport (RTP over UDP loopback)");
+        println!(
+            "  access units     {} sent, {} reconstructed, {} verified, {} mismatched",
+            transport.tx.access_units,
+            transport.rx.access_units_completed,
+            transport.verified,
+            transport.mismatched
+        );
+        println!(
+            "  packets          {} ({} single NAL, {} FU-A), {:.1} per access unit",
+            transport.tx.packets,
+            transport.tx.single_nal,
+            transport.tx.fu_a,
+            transport.tx.packets as f64 / transport.tx.access_units.max(1) as f64
+        );
+        println!(
+            "  wire             {:.1} MB for {:.1} MB of access unit ({:.1}% overhead)",
+            transport.wire_bytes as f64 / 1e6,
+            transport.payload_bytes as f64 / 1e6,
+            (transport.overhead_ratio() - 1.0) * 100.0
+        );
+        println!(
+            "  losses           {} lost, {} malformed, {} dropped AUs, {} duplicates, {} reordered",
+            transport.rx.lost,
+            transport.rx.malformed,
+            transport.rx.access_units_dropped,
+            transport.rx.duplicates,
+            transport.rx.reordered
+        );
+        println!("  rfc3550 jitter   {}", transport.jitter);
+        println!(
+            "  packetization    p50 {} p95 {} p99 {}",
+            packetization.p50, packetization.p95, packetization.p99
+        );
+        println!(
+            "  transit          p50 {} p95 {} p99 {}  (first byte out to last byte in)",
+            transit.p50, transit.p95, transit.p99
+        );
+        println!(
+            "  serialisation    p50 {} p95 {} p99 {}  (overlaps transit)",
+            serialisation.p50, serialisation.p95, serialisation.p99
+        );
+        println!(
+            "  arrival spread   p50 {} p95 {} p99 {}  (overlaps transit)",
+            arrival.p50, arrival.p95, arrival.p99
+        );
+        println!(
+            "  reassembly       p50 {} p95 {} p99 {}",
+            reassembly.p50, reassembly.p95, reassembly.p99
+        );
+    }
     println!();
     println!("Pipeline");
     println!(

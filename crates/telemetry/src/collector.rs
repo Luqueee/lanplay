@@ -403,7 +403,7 @@ fn fold(shared: &Shared, completed: &mut Vec<FrameTimeline>, pending: &mut Pendi
         }
 
         let histograms = &mut inner.histograms;
-        for sample in timeline.segments() {
+        for sample in timeline.segments().chain(timeline.diagnostics()) {
             Histograms::record(
                 &mut histograms.segments[sample.segment.index()],
                 sample.duration,

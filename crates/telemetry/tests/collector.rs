@@ -172,12 +172,12 @@ fn marks_from_two_clocks_are_measured_but_flagged() {
 
     remote.mark_at(
         frame,
-        Stage::NetworkSendLast,
+        Stage::NetworkSendFirst,
         Timestamp::from_nanos(1_000_000),
     );
     local.mark_at(
         frame,
-        Stage::NetworkReceiveFirst,
+        Stage::NetworkReceiveLast,
         Timestamp::from_nanos(1_400_000),
     );
     local.mark_at(
@@ -189,7 +189,7 @@ fn marks_from_two_clocks_are_measured_but_flagged() {
     assert!(telemetry.flush(Duration::from_secs(2)));
     let snapshot = telemetry.shutdown();
 
-    assert_eq!(snapshot.segment(Segment::Network).count, 1);
+    assert_eq!(snapshot.segment(Segment::Transit).count, 1);
     assert_eq!(snapshot.counters.cross_domain_segments, 1);
     assert_eq!(snapshot.clock_domain, ClockDomain::local());
 }

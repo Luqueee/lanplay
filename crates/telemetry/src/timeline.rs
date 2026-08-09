@@ -7,9 +7,11 @@ use crate::stage::{STAGE_COUNT, Stage};
 
 /// What a segment of a frame's life is.
 ///
-/// The distinction matters because the three are attacked differently: work
-/// gets faster hardware or better parameters, waits get scheduling and
-/// admission changes, and the wire gets network engineering.
+/// The distinction matters because each is attacked differently: work gets
+/// faster hardware or better parameters, waits get scheduling and admission
+/// changes, the wire gets network engineering. Diagnostics are measured but
+/// deliberately left out of the accounting, because they overlap something
+/// that is already counted.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SegmentKind {
     /// Something was actively being done to the frame.
@@ -18,6 +20,8 @@ pub enum SegmentKind {
     Wait,
     /// The frame was in flight between machines.
     Wire,
+    /// Measured, informative, and overlapping: not part of the tiling.
+    Diagnostic,
 }
 
 impl SegmentKind {
@@ -26,7 +30,13 @@ impl SegmentKind {
             SegmentKind::Work => "work",
             SegmentKind::Wait => "wait",
             SegmentKind::Wire => "wire",
+            SegmentKind::Diagnostic => "diag",
         }
+    }
+
+    /// Whether this segment counts towards the attributed total.
+    pub const fn is_attributed(self) -> bool {
+        !matches!(self, SegmentKind::Diagnostic)
     }
 }
 
@@ -48,9 +58,14 @@ pub enum Segment {
     /// Bitstream ready, waiting for the packetiser.
     PacketizeWait,
     Packetization,
-    Send,
-    Network,
-    Receive,
+    /// First byte handed to the socket until the last byte has arrived.
+    ///
+    /// One segment rather than send-then-wire-then-receive, because those
+    /// three overlap: the receiver has the first packet of a frame long before
+    /// the sender has finished pushing out the last one. Summing them
+    /// double-counts the overlap, which is exactly what the first loopback run
+    /// showed.
+    Transit,
     Reassembly,
     /// Access unit complete, waiting for the decoder.
     DecoderWait,
@@ -58,6 +73,10 @@ pub enum Segment {
     /// Frame decoded, waiting for the renderer to pick it up.
     PresentationWait,
     Render,
+    /// How long the sender took to push the frame out. Overlaps [`Segment::Transit`].
+    Serialisation,
+    /// How spread out the frame's packets were on arrival. Overlaps [`Segment::Transit`].
+    Arrival,
 }
 
 pub const SEGMENT_COUNT: usize = 15;
@@ -71,14 +90,14 @@ impl Segment {
         Segment::Encode,
         Segment::PacketizeWait,
         Segment::Packetization,
-        Segment::Send,
-        Segment::Network,
-        Segment::Receive,
+        Segment::Transit,
         Segment::Reassembly,
         Segment::DecoderWait,
         Segment::Decode,
         Segment::PresentationWait,
         Segment::Render,
+        Segment::Serialisation,
+        Segment::Arrival,
     ];
 
     #[inline]
@@ -95,14 +114,14 @@ impl Segment {
             Segment::Encode => "encode",
             Segment::PacketizeWait => "packetize wait",
             Segment::Packetization => "packetization",
-            Segment::Send => "send",
-            Segment::Network => "network",
-            Segment::Receive => "receive",
+            Segment::Transit => "transit",
             Segment::Reassembly => "reassembly",
             Segment::DecoderWait => "decoder wait",
             Segment::Decode => "decode",
             Segment::PresentationWait => "presentation wait",
             Segment::Render => "render",
+            Segment::Serialisation => "serialisation",
+            Segment::Arrival => "arrival",
         }
     }
 
@@ -113,7 +132,8 @@ impl Segment {
             | Segment::PacketizeWait
             | Segment::DecoderWait
             | Segment::PresentationWait => SegmentKind::Wait,
-            Segment::Network => SegmentKind::Wire,
+            Segment::Transit => SegmentKind::Wire,
+            Segment::Serialisation | Segment::Arrival => SegmentKind::Diagnostic,
             _ => SegmentKind::Work,
         }
     }
@@ -122,8 +142,13 @@ impl Segment {
 /// Stages that tile a frame's life, in order.
 ///
 /// `CaptureAvailable` is not an anchor: it is detail inside `capture`, and
-/// putting it here would split that segment for no gain.
-const CHAIN: [Stage; 16] = [
+/// putting it here would split that segment for no gain. `NetworkSendLast`
+/// and `NetworkReceiveFirst` are not anchors either, for a stronger reason:
+/// on any pipelined sender the receiver holds the first packet of a frame
+/// before the sender has released the last, so those two marks interleave
+/// with each other and cannot appear on a serial chain. They are measured as
+/// diagnostics instead.
+const CHAIN: [Stage; 14] = [
     Stage::FrameCreated,
     Stage::CaptureAcquired,
     Stage::GpuPreprocessStart,
@@ -132,8 +157,6 @@ const CHAIN: [Stage; 16] = [
     Stage::EncodeComplete,
     Stage::PacketizationStart,
     Stage::NetworkSendFirst,
-    Stage::NetworkSendLast,
-    Stage::NetworkReceiveFirst,
     Stage::NetworkReceiveLast,
     Stage::FrameReassembled,
     Stage::DecodeSubmit,
@@ -142,13 +165,27 @@ const CHAIN: [Stage; 16] = [
     Stage::PresentSubmit,
 ];
 
+/// Pairs measured on their own because they overlap the chain.
+const DIAGNOSTICS: [(Stage, Stage, Segment); 2] = [
+    (
+        Stage::NetworkSendFirst,
+        Stage::NetworkSendLast,
+        Segment::Serialisation,
+    ),
+    (
+        Stage::NetworkReceiveFirst,
+        Stage::NetworkReceiveLast,
+        Segment::Arrival,
+    ),
+];
+
 /// Which segment a pair of consecutive marks represents.
 ///
 /// `AdmissionWait` appears twice on purpose: a pipeline with no GPU
 /// preprocess step still has an admission wait, and it would be wrong to let
 /// that time fall into the unattributed bucket just because an optional stage
 /// is absent.
-const EDGES: [(Stage, Stage, Segment); 16] = [
+const EDGES: [(Stage, Stage, Segment); 14] = [
     (
         Stage::FrameCreated,
         Stage::CaptureAcquired,
@@ -187,18 +224,8 @@ const EDGES: [(Stage, Stage, Segment); 16] = [
     ),
     (
         Stage::NetworkSendFirst,
-        Stage::NetworkSendLast,
-        Segment::Send,
-    ),
-    (
-        Stage::NetworkSendLast,
-        Stage::NetworkReceiveFirst,
-        Segment::Network,
-    ),
-    (
-        Stage::NetworkReceiveFirst,
         Stage::NetworkReceiveLast,
-        Segment::Receive,
+        Segment::Transit,
     ),
     (
         Stage::NetworkReceiveLast,
@@ -306,10 +333,24 @@ impl FrameTimeline {
         }
     }
 
-    /// Duration of one named segment, if this frame has both its marks
-    /// adjacent in the chain.
+    /// Segments measured off the chain because they overlap it. Reported and
+    /// histogrammed, never summed into the attributed total.
+    pub fn diagnostics(&self) -> impl Iterator<Item = SegmentSample> + '_ {
+        DIAGNOSTICS.iter().filter_map(|(from, to, segment)| {
+            let start = self.mark(*from)?;
+            let end = self.mark(*to)?;
+            Some(SegmentSample {
+                segment: *segment,
+                duration: end.at.since(start.at)?,
+                cross_domain: start.domain != end.domain,
+            })
+        })
+    }
+
+    /// Duration of one named segment, chain or diagnostic.
     pub fn segment(&self, segment: Segment) -> Option<Nanos> {
         self.segments()
+            .chain(self.diagnostics())
             .find(|sample| sample.segment == segment)
             .map(|sample| sample.duration)
     }
@@ -541,23 +582,57 @@ mod tests {
     fn marks_from_different_clocks_are_flagged() {
         let mut timeline = FrameTimeline::new(FrameId::new(1));
         timeline.set(
-            Stage::NetworkSendLast,
+            Stage::NetworkSendFirst,
             Mark {
                 at: Timestamp::from_nanos(1_000_000),
                 domain: ClockDomain::LocalWindows,
             },
         );
         timeline.set(
-            Stage::NetworkReceiveFirst,
+            Stage::NetworkReceiveLast,
             Mark {
                 at: Timestamp::from_nanos(1_400_000),
                 domain: ClockDomain::LocalMac,
             },
         );
 
-        let sample = timeline.segments().next().expect("network segment");
-        assert_eq!(sample.segment, Segment::Network);
+        let sample = timeline.segments().next().expect("transit segment");
+        assert_eq!(sample.segment, Segment::Transit);
         assert!(sample.cross_domain);
+    }
+
+    #[test]
+    fn send_and_receive_overlap_without_double_counting() {
+        // What the first loopback run actually looked like: the receiver has
+        // the first packet before the sender has released the last one. If
+        // those two intervals were both on the chain their sum would exceed
+        // the frame age and the accounting would go negative.
+        let timeline = timeline(&[
+            (Stage::FrameCreated, 0.0),
+            (Stage::PacketizationStart, 0.1),
+            (Stage::NetworkSendFirst, 0.2),
+            (Stage::NetworkReceiveFirst, 0.25),
+            (Stage::NetworkSendLast, 0.34),
+            (Stage::NetworkReceiveLast, 0.38),
+            (Stage::FrameReassembled, 0.4),
+            (Stage::PresentSubmit, 1.0),
+        ]);
+
+        assert_eq!(
+            timeline.segment(Segment::Transit),
+            Some(Nanos::from_millis_f64(0.18))
+        );
+        assert_eq!(
+            timeline.segment(Segment::Serialisation),
+            Some(Nanos::from_millis_f64(0.14))
+        );
+        assert_eq!(
+            timeline.segment(Segment::Arrival),
+            Some(Nanos::from_millis_f64(0.13))
+        );
+        // Diagnostics stay out of the sum, so the gap remains non-negative.
+        assert!(timeline.attributed() <= timeline.frame_age().unwrap());
+        assert!(timeline.unattributed_gap().is_some());
     }
 
     #[test]
@@ -579,11 +654,18 @@ mod tests {
     }
 
     #[test]
-    fn every_segment_is_reachable_from_the_chain() {
+    fn every_segment_is_reachable_and_the_chain_runs_forwards() {
         for segment in Segment::ALL {
+            let on_chain = EDGES.iter().any(|(_, _, named)| *named == segment);
+            let diagnostic = DIAGNOSTICS.iter().any(|(_, _, named)| *named == segment);
             assert!(
-                EDGES.iter().any(|(_, _, named)| *named == segment),
-                "{segment:?} has no edge in the chain"
+                on_chain != diagnostic,
+                "{segment:?} must be either a chain edge or a diagnostic, not both or neither"
+            );
+            assert_eq!(
+                segment.kind() == SegmentKind::Diagnostic,
+                diagnostic,
+                "{segment:?} kind disagrees with where it is measured"
             );
         }
         for (from, to, _) in EDGES {
@@ -593,6 +675,12 @@ mod tests {
                 from_position < to_position,
                 "{from:?} -> {to:?} runs backwards"
             );
+        }
+        // Diagnostics are exactly the pairs that could not be ordered on the
+        // chain, so at most one of their endpoints may appear on it.
+        for (from, to, segment) in DIAGNOSTICS {
+            let both_on_chain = CHAIN.contains(&from) && CHAIN.contains(&to);
+            assert!(!both_on_chain, "{segment:?} belongs on the chain, not here");
         }
     }
 }

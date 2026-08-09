@@ -3,12 +3,13 @@ resolver = "3"
 members = [
     "crates/protocol",
     "crates/telemetry",
-    "crates/capabilities",
+    "crates/transport",
     "crates/video-core",
     "macos/client",
     "macos/decoder-videotoolbox",
     "macos/renderer-metal",
     "tools/benchmark",
+    "tools/net-bench",
 ]
 
 [workspace.package]
@@ -23,12 +24,17 @@ lanplay-decoder-videotoolbox = { path = "macos/decoder-videotoolbox" }
 lanplay-protocol = { path = "crates/protocol" }
 lanplay-renderer-metal = { path = "macos/renderer-metal" }
 lanplay-telemetry = { path = "crates/telemetry" }
+lanplay-transport = { path = "crates/transport" }
 lanplay-video-core = { path = "crates/video-core" }
 clap = { version = "4", features = ["derive"] }
 crossbeam-queue = "0.3"
+getrandom = "0.3"
+libc = "0.2"
 hdrhistogram = { version = "7", default-features = false }
 parking_lot = "0.12"
+sha2 = "0.10"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 objc2 = "0.6.4"
 objc2-app-kit = "0.3.2"

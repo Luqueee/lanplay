@@ -9,6 +9,7 @@
 use core::fmt;
 
 use lanplay_telemetry::{Nanos, P99_SOAK_FRAMES, Segment, Snapshot, Trend};
+use lanplay_transport::{RxStats, TxStats};
 
 /// Frames the decoder may still hold at the end of a run before the backlog
 /// counts as real rather than transient.
@@ -55,6 +56,8 @@ pub struct GateInputs {
     /// counts refreshes rather than idle polls.
     pub display_driven: bool,
     pub snapshot: Snapshot,
+    /// Present only when the run went through RTP over UDP.
+    pub transport: Option<TransportInputs>,
 
     /// Structural: the render path creates Metal textures straight from the
     /// decoder's pixel buffers, so no plane is ever copied by the CPU.
@@ -62,6 +65,19 @@ pub struct GateInputs {
     /// Structural: textures come from a `CVMetalTextureCache` fed with
     /// VideoToolbox output.
     pub metal_texture_cache: bool,
+}
+
+/// What the transport did, when there was one.
+#[derive(Clone, Copy, Debug)]
+pub struct TransportInputs {
+    pub tx: TxStats,
+    pub rx: RxStats,
+    pub jitter: Nanos,
+    /// Access units whose reconstructed bytes matched the originals.
+    pub verified: u64,
+    pub mismatched: u64,
+    /// Bytes on the wire per byte of access unit.
+    pub overhead_ratio: f64,
 }
 
 pub struct Check {
@@ -337,6 +353,66 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
         ),
     });
 
+    if let Some(transport) = &inputs.transport {
+        // The whole point of routing through RTP is that the bytes come out
+        // the other side unchanged. A decoder that does not complain is not
+        // evidence of that; a digest is.
+        let complete = transport.rx.access_units_completed == transport.tx.access_units;
+        checks.push(Check {
+            name: "access units intact",
+            passed: complete && transport.mismatched == 0,
+            detail: format!(
+                "{} sent, {} reconstructed, {} verified byte-for-byte, {} mismatched",
+                transport.tx.access_units,
+                transport.rx.access_units_completed,
+                transport.verified,
+                transport.mismatched,
+            ),
+        });
+
+        // Loopback has no wire to lose anything on: every one of these is a
+        // defect in our own code or in how we drive the socket.
+        let rx = &transport.rx;
+        let clean = rx.lost == 0
+            && rx.malformed == 0
+            && rx.unknown_ssrc == 0
+            && rx.unknown_payload_type == 0
+            && rx.access_units_dropped == 0
+            && rx.missing_fragments == 0
+            && rx.oversized_access_units == 0
+            && transport.tx.send_errors == 0;
+        checks.push(Check {
+            name: "transport clean",
+            passed: clean,
+            detail: format!(
+                "{} lost, {} malformed, {} dropped AUs, {} missing fragments, \
+                 {} send errors, {} duplicates, {} reordered",
+                rx.lost,
+                rx.malformed,
+                rx.access_units_dropped,
+                rx.missing_fragments,
+                transport.tx.send_errors,
+                rx.duplicates,
+                rx.reordered,
+            ),
+        });
+
+        // Not pass or fail: the number this phase exists to produce.
+        checks.push(Check {
+            name: "transport cost",
+            passed: true,
+            detail: format!(
+                "{} packets ({} single NAL, {} FU-A), {:.1} bytes on the wire per byte of \
+                 access unit, RFC 3550 jitter {}",
+                transport.tx.packets,
+                transport.tx.single_nal,
+                transport.tx.fu_a,
+                transport.overhead_ratio,
+                transport.jitter,
+            ),
+        });
+    }
+
     Verdict {
         checks,
         soaked: snapshot.p99_is_soaked(),
@@ -442,6 +518,7 @@ mod tests {
             empty_ticks: 0,
             still_in_slot: 0,
             display_driven: true,
+            transport: None,
             memory: flat_trend(200e6, 60),
             snapshot: snapshot_of(Run::of(frames)),
             zero_copy_render_path: true,

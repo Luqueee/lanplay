@@ -15,7 +15,10 @@ mod fixture;
 pub use access_unit::{
     AccessUnitSource, EncodedAccessUnit, ParameterSets, PixelFormat, VideoDecoder, VideoTimestamp,
 };
-pub use annexb::{AnnexBError, NalUnitType, RawAccessUnit, parse_stream, split_annex_b, to_avcc};
+pub use annexb::{
+    AnnexBError, AvccNalUnits, NalUnitType, RawAccessUnit, avcc_nal_units, parse_stream,
+    split_annex_b, to_avcc,
+};
 pub use fixture::{
     FixtureError, FixturePattern, FixtureReport, FixtureSource, FixtureSpec, ensure_fixture,
     verify_no_frame_reordering,

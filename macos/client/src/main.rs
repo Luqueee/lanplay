@@ -8,6 +8,7 @@
 
 mod gate;
 mod session;
+mod transport;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -46,6 +47,18 @@ pub struct Cli {
     /// than the encoder rate is the decoder overload test.
     #[arg(long)]
     pub feed_fps: Option<f64>,
+    /// How access units reach the decoder. `loopback` inserts the real RTP
+    /// packetiser, a UDP socket and the depacketiser between fixture and
+    /// decoder; the delta against `direct` is the cost of our transport.
+    #[arg(long, value_enum, default_value_t = Transport::Direct)]
+    pub transport: Transport,
+    /// Bytes per datagram, RTP header included.
+    #[arg(long, default_value_t = lanplay_transport::MAX_UDP_PAYLOAD)]
+    pub mtu: usize,
+    /// Compare every reconstructed access unit against the original by
+    /// SHA-256, rather than trusting that the decoder did not complain.
+    #[arg(long)]
+    pub verify: bool,
     #[arg(long, value_enum, default_value_t = Mode::DisplayLink)]
     pub mode: Mode,
 
@@ -75,6 +88,15 @@ pub enum Mode {
     Immediate,
     /// Render when the display asks, through `CAMetalDisplayLink`.
     DisplayLink,
+}
+
+/// How access units reach the decoder.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Transport {
+    /// Straight from the fixture, as phase 2 ran it.
+    Direct,
+    /// Through RTP over a UDP socket on the loopback interface.
+    Loopback,
 }
 
 impl Cli {

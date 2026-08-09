@@ -242,6 +242,45 @@ pub fn to_avcc<'a>(nals: impl Iterator<Item = &'a [u8]>, length_size: u8) -> Vec
     out
 }
 
+/// Iterates the NAL units inside AVCC data, length prefixes removed.
+///
+/// Stops at the first truncated prefix rather than guessing: a malformed
+/// sample is a bug upstream, and inventing a NAL boundary would hide it.
+pub fn avcc_nal_units(data: &[u8], length_size: u8) -> AvccNalUnits<'_> {
+    AvccNalUnits {
+        data,
+        cursor: 0,
+        length_size: usize::from(length_size),
+    }
+}
+
+pub struct AvccNalUnits<'a> {
+    data: &'a [u8],
+    cursor: usize,
+    length_size: usize,
+}
+
+impl<'a> Iterator for AvccNalUnits<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<&'a [u8]> {
+        let header_end = self.cursor.checked_add(self.length_size)?;
+        if header_end > self.data.len() {
+            return None;
+        }
+        let mut length = 0usize;
+        for byte in &self.data[self.cursor..header_end] {
+            length = (length << 8) | usize::from(*byte);
+        }
+        let end = header_end.checked_add(length)?;
+        if length == 0 || end > self.data.len() {
+            return None;
+        }
+        self.cursor = end;
+        Some(&self.data[header_end..end])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
