@@ -29,8 +29,8 @@ lanplay-video-core = { path = "crates/video-core" }
 clap = { version = "4", features = ["derive"] }
 crossbeam-queue = "0.3"
 getrandom = "0.3"
-libc = "0.2"
 hdrhistogram = { version = "7", default-features = false }
+libc = "0.2"
 parking_lot = "0.12"
 sha2 = "0.10"
 serde = { version = "1", features = ["derive"] }
