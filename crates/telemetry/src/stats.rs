@@ -23,6 +23,46 @@ pub(crate) struct Histograms {
     pub present_interval: Histogram<u32>,
     pub source_interval: Histogram<u32>,
     pub clipped: u64,
+    /// A second set covering only the frames since the last
+    /// [`crate::Telemetry::take_window`].
+    ///
+    /// A cumulative percentile cannot be differenced, so a ten-minute run
+    /// whose middle ten seconds collapsed still reports a healthy p99. The
+    /// only way to see that is to keep a set that gets reset.
+    pub window: WindowHistograms,
+}
+
+pub(crate) struct WindowHistograms {
+    pub local_age: Histogram<u32>,
+    pub present_interval: Histogram<u32>,
+    pub presented: u64,
+}
+
+impl WindowHistograms {
+    fn new() -> Self {
+        WindowHistograms {
+            local_age: new_histogram(),
+            present_interval: new_histogram(),
+            presented: 0,
+        }
+    }
+
+    /// Empties the window so the next one starts clean.
+    pub fn reset(&mut self) {
+        self.local_age.reset();
+        self.present_interval.reset();
+        self.presented = 0;
+    }
+}
+
+/// What happened since the previous [`crate::Telemetry::take_window`].
+#[derive(Clone, Debug)]
+pub struct Window {
+    pub local_age: Percentiles,
+    pub present_interval: Percentiles,
+    pub presented: u64,
+    /// Wall time the window covered.
+    pub span: Nanos,
 }
 
 impl Histograms {
@@ -35,6 +75,7 @@ impl Histograms {
             present_interval: new_histogram(),
             source_interval: new_histogram(),
             clipped: 0,
+            window: WindowHistograms::new(),
         }
     }
 

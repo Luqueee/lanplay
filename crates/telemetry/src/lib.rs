@@ -41,7 +41,7 @@ pub use collector::{Reporter, Telemetry, TelemetryConfig};
 pub use memory::resident_bytes;
 pub use recorder::Recorder;
 pub use stage::{STAGE_COUNT, Stage};
-pub use stats::{Counters, P99_SOAK_FRAMES, Percentiles, Snapshot};
+pub use stats::{Counters, P99_SOAK_FRAMES, Percentiles, Snapshot, Window};
 pub use timeline::{
     FRAME_AGE, FrameTimeline, Mark, SEGMENT_COUNT, Segment, SegmentKind, SegmentSample, Segments,
 };

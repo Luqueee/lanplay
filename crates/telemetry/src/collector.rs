@@ -12,7 +12,7 @@ use parking_lot::{Condvar, Mutex};
 use crate::clock::{ClockDomain, Nanos, Timestamp};
 use crate::recorder::{Channel, Event, Recorder};
 use crate::stage::Stage;
-use crate::stats::{Counters, Histograms, Percentiles, Snapshot};
+use crate::stats::{Counters, Histograms, Percentiles, Snapshot, Window};
 use crate::timeline::{FrameTimeline, Mark, Segment};
 
 /// Called on the collector thread whenever a periodic report is due.
@@ -80,6 +80,8 @@ struct Inner {
     first_present: Option<Timestamp>,
     last_present: Option<Timestamp>,
     last_source: Option<Timestamp>,
+    /// When the current rolling window started.
+    window_opened: Option<Timestamp>,
 }
 
 /// Timelines live inline in the ring on purpose: 256 slots is ~73 KB held for
@@ -127,6 +129,7 @@ impl Telemetry {
                 first_present: None,
                 last_present: None,
                 last_source: None,
+                window_opened: Some(Timestamp::now()),
             }),
             running: AtomicBool::new(true),
             folds: AtomicU64::new(0),
@@ -165,6 +168,34 @@ impl Telemetry {
 
     pub fn snapshot(&self) -> Snapshot {
         self.shared.snapshot(self.dropped())
+    }
+
+    /// Percentiles over the frames finalised since the previous call, then
+    /// starts a fresh window. Cumulative statistics are untouched.
+    ///
+    /// A ten-minute run whose middle ten seconds collapsed still reports a
+    /// healthy cumulative p99, because percentiles cannot be differenced.
+    /// Sampling this on a timer is the only way to see the collapse.
+    pub fn take_window(&self) -> Window {
+        let mut inner = self.shared.inner.lock();
+        let now = Timestamp::now();
+        let span = inner
+            .window_opened
+            .map_or(Nanos::ZERO, |opened| now.saturating_since(opened));
+        inner.window_opened = Some(now);
+
+        let window = &inner.histograms.window;
+        let taken = Window {
+            local_age: Percentiles::from_histogram("local age", &window.local_age),
+            present_interval: Percentiles::from_histogram(
+                "present interval",
+                &window.present_interval,
+            ),
+            presented: window.presented,
+            span,
+        };
+        inner.histograms.window.reset();
+        taken
     }
 
     /// Most recently finalised frame.
@@ -399,6 +430,7 @@ fn fold(shared: &Shared, completed: &mut Vec<FrameTimeline>, pending: &mut Pendi
     for timeline in completed.drain(..) {
         if timeline.is_complete() {
             inner.counters.frames_presented += 1;
+            inner.histograms.window.presented += 1;
         } else {
             inner.counters.frames_incomplete += 1;
         }
@@ -419,6 +451,11 @@ fn fold(shared: &Shared, completed: &mut Vec<FrameTimeline>, pending: &mut Pendi
         }
         if let Some(age) = timeline.local_age(shared.clock_domain) {
             Histograms::record(&mut histograms.local_age, age, &mut histograms.clipped);
+            Histograms::record(
+                &mut histograms.window.local_age,
+                age,
+                &mut histograms.clipped,
+            );
         }
         if let Some(gap) = timeline.unattributed_gap(shared.clock_domain) {
             Histograms::record(
@@ -434,6 +471,11 @@ fn fold(shared: &Shared, completed: &mut Vec<FrameTimeline>, pending: &mut Pendi
             {
                 Histograms::record(
                     &mut histograms.present_interval,
+                    delta,
+                    &mut histograms.clipped,
+                );
+                Histograms::record(
+                    &mut histograms.window.present_interval,
                     delta,
                     &mut histograms.clipped,
                 );

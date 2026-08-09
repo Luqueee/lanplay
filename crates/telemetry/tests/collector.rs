@@ -226,3 +226,78 @@ fn unmeasured_time_is_reported_as_gap_not_absorbed() {
         snapshot.unattributed_gap
     );
 }
+
+#[test]
+fn a_window_sees_a_collapse_that_the_cumulative_view_hides() {
+    // The whole reason windows exist: a run that is healthy for most of its
+    // length and terrible for a moment reports a healthy cumulative p99,
+    // because percentiles cannot be differenced.
+    let telemetry = Telemetry::start(TelemetryConfig {
+        queue_capacity: 1 << 16,
+        ..config()
+    });
+    let recorder = telemetry.recorder();
+
+    let mut present = |frame: u64, age_ms: f64| {
+        let base = Timestamp::from_nanos(frame * 8_333_333);
+        recorder.mark_at(FrameId::new(frame), Stage::FrameCreated, base);
+        recorder.mark_at(
+            FrameId::new(frame),
+            Stage::PresentSubmit,
+            Timestamp::from_nanos(base.as_nanos() + (age_ms * 1_000_000.0) as u64),
+        );
+    };
+
+    // Five thousand good frames, then forty bad ones: a third of a second of
+    // collapse at 120 fps, which is 0.8% of the run and therefore sits below
+    // the cumulative p99 entirely.
+    for frame in 1..=5_000 {
+        present(frame, 5.0);
+    }
+    assert!(telemetry.flush(Duration::from_secs(2)));
+    let healthy = telemetry.take_window();
+    assert_eq!(healthy.presented, 5_000);
+    assert!((healthy.local_age.p99.as_millis_f64() - 5.0).abs() < 0.2);
+
+    for frame in 5_001..=5_040 {
+        present(frame, 90.0);
+    }
+    assert!(telemetry.flush(Duration::from_secs(2)));
+    let collapsed = telemetry.take_window();
+    assert_eq!(collapsed.presented, 40);
+    assert!(
+        collapsed.local_age.p99.as_millis_f64() > 80.0,
+        "the window must show the collapse: {:?}",
+        collapsed.local_age
+    );
+
+    // The cumulative view averages it away, which is exactly the trap.
+    let snapshot = telemetry.shutdown();
+    assert!(
+        snapshot.local_age.p99.as_millis_f64() < 80.0,
+        "cumulative p99 {:?} should hide the 40 bad frames among 1000 good ones",
+        snapshot.local_age
+    );
+}
+
+#[test]
+fn an_empty_window_reports_nothing_rather_than_the_previous_one() {
+    let telemetry = Telemetry::start(config());
+    let recorder = telemetry.recorder();
+    recorder.mark_at(
+        FrameId::new(1),
+        Stage::FrameCreated,
+        Timestamp::from_nanos(0),
+    );
+    recorder.mark_at(
+        FrameId::new(1),
+        Stage::PresentSubmit,
+        Timestamp::from_nanos(5_000_000),
+    );
+    assert!(telemetry.flush(Duration::from_secs(2)));
+
+    assert_eq!(telemetry.take_window().presented, 1);
+    let empty = telemetry.take_window();
+    assert_eq!(empty.presented, 0);
+    assert_eq!(empty.local_age.count, 0);
+}
