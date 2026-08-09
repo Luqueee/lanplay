@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -201,6 +201,15 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
         .name("memory".into())
         .spawn(move || sample_memory(memory_stop))?;
 
+    let counters = LiveCounters::new();
+    // The far end of the measured span. The renderer keeps presenting until
+    // `stop`, which the watchdog only sets two seconds after the sender has
+    // finished, so the run's own end is the wrong mark to count to. Only the
+    // two counters the drain moves are marked: no frame arrives after the
+    // last access unit, so `rendered` and `superseded` cannot advance in it.
+    let spans_end = Arc::new(SpanEnd::default());
+    let stream_ended = Arc::new(AtomicBool::new(false));
+
     let pipeline = match cli.transport {
         crate::Transport::Direct => {
             let feed_stop = Arc::clone(&stop);
@@ -303,6 +312,9 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             // lie about the link. So the run ends when the stream does, and
             // the clock is only a backstop.
             let deadline_stop = Arc::clone(&stop);
+            let watchdog_counters = Arc::clone(&counters);
+            let watchdog_mark = Arc::clone(&spans_end);
+            let watchdog_ended = Arc::clone(&stream_ended);
             let backstop = Duration::from_secs_f64(cli.seconds) + LAN_STARTUP_GRACE + DRAIN_GRACE;
             thread::Builder::new()
                 .name("deadline".into())
@@ -316,6 +328,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                         if seen != last_seen {
                             last_seen = seen;
                             idle = Duration::ZERO;
+                            watchdog_mark.mark(&watchdog_counters);
                         } else if last_seen > 0 {
                             idle += POLL;
                             if idle >= STREAM_IDLE_TIMEOUT {
@@ -323,6 +336,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                             }
                         }
                     }
+                    watchdog_ended.store(true, Ordering::Release);
                     deadline_stop.store(true, Ordering::Release);
                 })?;
 
@@ -333,7 +347,6 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     // The closure below consumes its copy; the original stays for the
     // failure path, where the renderer never calls it.
     let ready_checks = checks.clone();
-    let counters = LiveCounters::new();
     let telemetry = Arc::new(telemetry);
     let sampler_stop = Arc::clone(&stop);
     let sampler = crate::windows::spawn(
@@ -343,14 +356,6 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
         Duration::from_secs_f64(cli.window_seconds.max(1.0)),
         sampler_stop,
     );
-
-    // The renderer counts callbacks from the moment its window opens, which is
-    // before the sender exists and after the run ends. Only the span between
-    // readiness and the end belongs to the measurement, so the baseline is
-    // taken exactly when preflight passes.
-    let callbacks_at_start = Arc::new(std::sync::atomic::AtomicU64::new(0));
-    let baseline = Arc::clone(&callbacks_at_start);
-    let ready_counters = Arc::clone(&counters);
 
     // AppKit owns this thread from here until the run stops. The renderer
     // prints its own preflight items and then calls `on_ready`, which is
@@ -368,10 +373,6 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             counters: Arc::clone(&counters),
             require_clean_environment: cli.require_clean_display.then_some(feed_fps),
             on_ready: Some(Box::new(move || {
-                baseline.store(
-                    ready_counters.callbacks.load(Ordering::Relaxed),
-                    Ordering::Relaxed,
-                );
                 preflight::report(&ready_checks);
             })),
         },
@@ -393,7 +394,16 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     stop.store(true, Ordering::Release);
     let outcome = pipeline.join()?;
     let memory = memory_sampler.join().expect("memory sampler");
-    let slices = sampler.join().expect("window sampler");
+    let mut slices = sampler.join().expect("window sampler");
+    // The renderer draws on into silence for as long as the watchdog takes to
+    // notice the sender has stopped. That drain lands somewhere inside the
+    // last window the sampler emitted, and there is no way to tell from the
+    // outside how much of that window it ate. An unverifiable window has no
+    // place in a report whose whole purpose is that its numbers can be
+    // trusted, so it is dropped rather than explained away.
+    if stream_ended.load(Ordering::Acquire) {
+        slices.pop();
+    }
 
     if !telemetry.flush(Duration::from_secs(5)) {
         return Err("telemetry collector did not catch up".into());
@@ -422,7 +432,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             expected_frames,
             &outcome,
             &render_stats,
-            callbacks_at_start.load(Ordering::Relaxed),
+            &spans_end,
             &snapshot,
             slices,
         );
@@ -698,7 +708,7 @@ fn build_report(
     expected_frames: u64,
     outcome: &RunOutcome,
     render: &RenderStats,
-    callbacks_at_start: u64,
+    span_end: &SpanEnd,
     snapshot: &Snapshot,
     slices: Vec<crate::report::Window>,
 ) -> crate::report::Report {
@@ -761,10 +771,10 @@ fn build_report(
         },
         display: crate::report::Display {
             nominal_hz: render.display_hz,
-            callbacks: render.callbacks.saturating_sub(callbacks_at_start),
+            callbacks: span_end.callbacks(render.callbacks),
             rendered: render.rendered,
             superseded: render.superseded,
-            empty_refreshes: render.empty_ticks,
+            empty_refreshes: span_end.empty_ticks(render.empty_ticks),
             callback_interval_p50_ms: render.callback_interval.p50.as_millis_f64(),
             callback_interval_p95_ms: render.callback_interval.p95.as_millis_f64(),
             callback_interval_p99_ms: render.callback_interval.p99.as_millis_f64(),
@@ -782,5 +792,50 @@ fn build_report(
             app_nap_protection: true,
         },
         windows: slices,
+    }
+}
+
+/// Where the measured span ends.
+///
+/// The renderer stops when the run stops, which is a couple of seconds after
+/// the sender does; every refresh in between finds nothing new, which is true
+/// of the drain and a lie about the link. These are the counters as of one
+/// poll after the final access unit.
+#[derive(Default)]
+struct SpanEnd {
+    marked: AtomicBool,
+    callbacks: AtomicU64,
+    empty_ticks: AtomicU64,
+}
+
+impl SpanEnd {
+    fn mark(&self, counters: &LiveCounters) {
+        self.callbacks.store(
+            counters.callbacks.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+        self.empty_ticks.store(
+            counters.empty_ticks.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+        self.marked.store(true, Ordering::Release);
+    }
+
+    /// The direct and loopback paths stop on the clock rather than on the
+    /// stream, so they have no drain and their raw totals are already the span.
+    fn callbacks(&self, whole_run: u64) -> u64 {
+        if self.marked.load(Ordering::Acquire) {
+            self.callbacks.load(Ordering::Relaxed)
+        } else {
+            whole_run
+        }
+    }
+
+    fn empty_ticks(&self, whole_run: u64) -> u64 {
+        if self.marked.load(Ordering::Acquire) {
+            self.empty_ticks.load(Ordering::Relaxed)
+        } else {
+            whole_run
+        }
     }
 }
