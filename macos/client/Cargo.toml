@@ -16,6 +16,8 @@ lanplay-renderer-metal = { workspace = true }
 lanplay-telemetry = { workspace = true }
 lanplay-transport = { workspace = true }
 lanplay-video-core = { workspace = true }
+objc2 = { workspace = true }
+objc2-foundation = { workspace = true }
 clap = { workspace = true }
 parking_lot = { workspace = true }
 sha2 = { workspace = true }

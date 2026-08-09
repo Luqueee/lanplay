@@ -1,7 +1,10 @@
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{NSBackingStoreType, NSScreen, NSWindow, NSWindowStyleMask};
+use objc2_app_kit::{
+    NSBackingStoreType, NSFloatingWindowLevel, NSScreen, NSWindow, NSWindowCollectionBehavior,
+    NSWindowStyleMask,
+};
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use objc2_metal::{MTLDevice, MTLPixelFormat};
 use objc2_quartz_core::CAMetalLayer;
@@ -51,6 +54,18 @@ impl Surface {
         // SAFETY: matches the ownership assumption above.
         unsafe { window.setReleasedWhenClosed(false) };
         window.setTitle(&NSString::from_str(title));
+
+        // A covered window has its display link suspended: macOS sees nothing
+        // worth drawing and stops calling back. Measured here, that turned a
+        // 120 Hz link into 75 callbacks a second and made a healthy Wi-Fi look
+        // like it was stalling for a second at a time. Floating above other
+        // windows, and following whichever Space is in front, is what keeps a
+        // presentation measurement about presentation.
+        window.setLevel(NSFloatingWindowLevel);
+        window.setCollectionBehavior(
+            NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::FullScreenAuxiliary,
+        );
 
         // The screen's factor, not the window's: `NSWindow` only reports its
         // own once it has been ordered onto a screen, and before that it

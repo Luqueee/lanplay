@@ -8,7 +8,7 @@ use lanplay_telemetry::{Nanos, Recorder, Stage, Timestamp};
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::ProtocolObject;
 use objc2::{AnyThread, DefinedClass, MainThreadOnly, define_class, msg_send};
-use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSEventMask, NSWindow};
+use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSEventMask};
 use objc2_foundation::{
     MainThreadMarker, NSDate, NSDefaultRunLoopMode, NSObject, NSObjectProtocol, NSRunLoop,
 };
@@ -298,8 +298,16 @@ fn burn(delay: Nanos) {
     }
 }
 
-fn should_stop(stop: &AtomicBool, window: &NSWindow, core: &RenderLoop) -> bool {
-    stop.load(Ordering::Relaxed) || core.finished() || !window.isVisible()
+/// Whether the loop should stop.
+///
+/// Deliberately does not consult `isVisible`. That reads false for a window
+/// that is merely hidden, minimised, or on another Space, and using it here
+/// ended runs silently part-way through: a twenty-second run reported twelve
+/// seconds of perfect numbers and nothing to say it had been cut short.
+/// Truncating a measurement is worse than drawing into a window nobody is
+/// looking at, so the run ends when it is told to and not before.
+fn should_stop(stop: &AtomicBool, core: &RenderLoop) -> bool {
+    stop.load(Ordering::Relaxed) || core.finished()
 }
 
 /// Drains the event queue without blocking. Without this the window would not
@@ -325,7 +333,7 @@ fn immediate(
     mut core: RenderLoop,
     config: &RendererConfig,
 ) -> Result<RenderStats, RendererError> {
-    while !should_stop(&config.stop, &surface.window, &core) {
+    while !should_stop(&config.stop, &core) {
         // One pool per iteration: a drawable, an event and a date per pass at
         // over a thousand passes a second is not something to let accumulate.
         let drew = autoreleasepool(|_| {
@@ -381,7 +389,7 @@ fn display_link(
         if let Some(error) = failure {
             break Err(error);
         }
-        if should_stop(&config.stop, &surface.window, &core.borrow()) {
+        if should_stop(&config.stop, &core.borrow()) {
             break Ok(());
         }
     };

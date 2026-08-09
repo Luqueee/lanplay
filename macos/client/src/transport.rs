@@ -193,6 +193,9 @@ pub fn receive_loop(
     recorder: Recorder,
     ledger: Arc<VerifyLedger>,
     sample_interval: Duration,
+    // Bumped for every access unit handed to the decoder, so a watchdog can
+    // tell a live stream from a finished one.
+    progress: Arc<std::sync::atomic::AtomicU64>,
     stop: Arc<AtomicBool>,
 ) -> Result<(ReceiverOutcome, VideoToolboxDecoder), Box<dyn Error + Send + Sync>> {
     socket.set_read_timeout(Some(RECV_TIMEOUT))?;
@@ -249,6 +252,7 @@ pub fn receive_loop(
             }
             decoder.submit(&unit)?;
             outcome.submitted += 1;
+            progress.fetch_add(1, Ordering::Relaxed);
 
             let backlog = decoder.in_flight();
             outcome.max_backlog = outcome.max_backlog.max(backlog);

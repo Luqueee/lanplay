@@ -7,6 +7,7 @@
 //! on top of it can.
 
 mod gate;
+mod nap;
 mod session;
 mod transport;
 

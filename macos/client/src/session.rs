@@ -27,6 +27,10 @@ const SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
 const DRAIN_GRACE: Duration = Duration::from_millis(300);
 /// Extra listening time in LAN mode, to cover launching the remote sender.
 const LAN_STARTUP_GRACE: Duration = Duration::from_secs(25);
+/// How often the LAN watchdog looks at the stream.
+const POLL: Duration = Duration::from_millis(50);
+/// Silence that means the remote sender has finished.
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// What the run produced, whichever path the access units took to the decoder.
 struct RunOutcome {
@@ -115,6 +119,11 @@ impl Pipeline {
 }
 
 pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
+    // Held for the length of the run. Without it macOS throttles this process
+    // whenever its window is occluded, and the throttling reaches the receive
+    // thread rather than just the drawing.
+    let _awake = crate::nap::Awake::begin("lanplay is presenting a live video stream");
+
     let spec = cli.fixture_spec();
     let path = ensure_fixture(&spec, &cli.fixture_dir)?;
     let mut source = FixtureSource::load(&path, cli.fps)?;
@@ -218,6 +227,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                         receive_recorder,
                         receive_ledger,
                         SAMPLE_INTERVAL,
+                        Arc::new(std::sync::atomic::AtomicU64::new(0)),
                         receive_stop,
                     )
                 })?;
@@ -261,7 +271,9 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                 socket.local_addr()?
             );
 
+            let progress = Arc::new(std::sync::atomic::AtomicU64::new(0));
             let receive_stop = Arc::clone(&stop);
+            let receive_progress = Arc::clone(&progress);
             let receiver = thread::Builder::new()
                 .name("rtp-rx".into())
                 .spawn(move || {
@@ -271,24 +283,37 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                         recorder,
                         transport::VerifyLedger::new(false),
                         SAMPLE_INTERVAL,
+                        receive_progress,
                         receive_stop,
                     )
                 })?;
 
-            // Nothing local finishes the run, so a deadline does.
+            // The remote sender is launched by hand after this process starts
+            // listening, so a fixed deadline would either cut the run short or
+            // leave the renderer drawing into silence afterwards. Counting
+            // those idle refreshes as "the link found nothing new" would be a
+            // lie about the link. So the run ends when the stream does, and
+            // the clock is only a backstop.
             let deadline_stop = Arc::clone(&stop);
-            // The remote sender is launched by hand after this process is
-            // listening, so the window has to be wider than the run itself.
-            // Only the deadline grows: the gate still judges against
-            // `--seconds` worth of frames, which is what the sender was asked
-            // for.
-            let run_for = Duration::from_secs_f64(cli.seconds) + LAN_STARTUP_GRACE + DRAIN_GRACE;
+            let backstop = Duration::from_secs_f64(cli.seconds) + LAN_STARTUP_GRACE + DRAIN_GRACE;
             thread::Builder::new()
                 .name("deadline".into())
                 .spawn(move || {
-                    let until = Timestamp::now().add(Nanos(run_for.as_nanos() as u64));
+                    let until = Timestamp::now().add(Nanos(backstop.as_nanos() as u64));
+                    let mut last_seen = 0u64;
+                    let mut idle = Duration::ZERO;
                     while !deadline_stop.load(Ordering::Acquire) && Timestamp::now() < until {
-                        thread::sleep(Duration::from_millis(50));
+                        thread::sleep(POLL);
+                        let seen = progress.load(Ordering::Relaxed);
+                        if seen != last_seen {
+                            last_seen = seen;
+                            idle = Duration::ZERO;
+                        } else if last_seen > 0 {
+                            idle += POLL;
+                            if idle >= STREAM_IDLE_TIMEOUT {
+                                break;
+                            }
+                        }
                     }
                     deadline_stop.store(true, Ordering::Release);
                 })?;
