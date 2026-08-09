@@ -13,15 +13,15 @@
 #   tools/win-session.sh <log-file-on-windows> <command...>
 #
 # The command runs with the repo as its working directory. Paths inside it are
-# Windows paths and must be written as such.
-#
-# Exit code is the task's own, so a caller can branch on it.
+# Windows paths and must be written as such. The exit code is the command's
+# own, so a caller can branch on it.
 
 set -euo pipefail
 
 HOST="${WIN_HOST:-windows}"
 REPO='C:\Users\luque\lanplay-rs'
 TASK="${WIN_TASK:-lanplay-session}"
+WRAPPER='C:\Users\luque\lanplay-run.cmd'
 
 if [ $# -lt 2 ]; then
     echo "usage: $0 <log-file-on-windows> <command...>" >&2
@@ -39,16 +39,22 @@ COMMAND="$*"
 # having been launched.
 SENTINEL="${LOG}.done"
 
-# `cmd /c` rather than PowerShell: the wrapper must not interpret the command,
-# and PowerShell's parsing of a quoted argument string coming through schtasks
-# through ssh through bash is three layers of quoting too many.
-WRAPPER='C:\Users\luque\lanplay-run.cmd'
+# The wrapper is written here and copied, never assembled with nested `echo`
+# through ssh. That route expands `%ERRORLEVEL%` while generating the file, so
+# the sentinel records a literal 0 and every run looks successful whatever it
+# did.
+LOCAL_WRAPPER="$(mktemp -t lanplay-run)"
+trap 'rm -f "$LOCAL_WRAPPER"' EXIT
 
-ssh -o BatchMode=yes "$HOST" "del /q \"$LOG\" \"$SENTINEL\" 2>nul & \
-  (echo @echo off& \
-   echo cd /d $REPO& \
-   echo $COMMAND ^> \"$LOG\" 2^>^&1& \
-   echo echo %ERRORLEVEL% ^> \"$SENTINEL\") > $WRAPPER" >/dev/null
+{
+    printf '@echo off\r\n'
+    printf 'cd /d %s\r\n' "$REPO"
+    printf '%s > "%s" 2>&1\r\n' "$COMMAND" "$LOG"
+    printf 'echo %%ERRORLEVEL%% > "%s"\r\n' "$SENTINEL"
+} > "$LOCAL_WRAPPER"
+
+ssh -o BatchMode=yes "$HOST" "del /q \"$LOG\" \"$SENTINEL\" 2>nul" >/dev/null 2>&1 || true
+scp -q "$LOCAL_WRAPPER" "$HOST:$(printf '%s' "$WRAPPER" | tr '\\' '/')"
 
 ssh -o BatchMode=yes "$HOST" "schtasks /create /tn $TASK /tr \"$WRAPPER\" /sc once /st 23:59 /ru luque /it /f" >/dev/null
 ssh -o BatchMode=yes "$HOST" "schtasks /run /tn $TASK" >/dev/null

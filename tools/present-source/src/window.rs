@@ -71,7 +71,8 @@ impl Window {
         // Failure only means the awareness was already set, which is fine.
         //
         // SAFETY: the context value is one of the documented constants.
-        let _ = unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+        let _ =
+            unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
 
         // SAFETY: the class and window descriptions are fully initialised and
         // every returned handle is checked before use.

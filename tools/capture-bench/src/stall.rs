@@ -27,6 +27,17 @@ pub enum StallClass {
     OverTwoPeriods,
 }
 
+/// The period one source frame occupies at `hz`.
+///
+/// Zero when the rate is unknown, which callers must treat as "the cadence
+/// cannot be judged" rather than as an infinitely fast source.
+pub fn period_for(hz: f64) -> Nanos {
+    if hz <= 0.0 {
+        return Nanos::ZERO;
+    }
+    Nanos((1_000_000_000.0 / hz).round() as u64)
+}
+
 /// Classifies one interval against one source period.
 ///
 /// Free-standing so the injected-stall recovery logic can reuse it without
@@ -152,6 +163,26 @@ mod tests {
 
     /// 100 Hz: the rate of the physical monitor these results come from.
     const PERIOD: Nanos = Nanos(10_000_000);
+
+    #[test]
+    fn the_period_is_the_reciprocal_of_the_measured_rate() {
+        assert_eq!(period_for(100.0), PERIOD);
+        assert_eq!(period_for(120.0), Nanos(8_333_333));
+        assert_eq!(period_for(60_000.0 / 1_001.0), Nanos(16_683_350));
+    }
+
+    #[test]
+    fn a_rate_that_was_never_learned_yields_no_period() {
+        // The caller has to refuse the run rather than judge a cadence
+        // against a period it invented.
+        assert_eq!(period_for(0.0), Nanos::ZERO);
+        assert_eq!(period_for(-1.0), Nanos::ZERO);
+    }
+
+    #[test]
+    fn gdi_rounding_and_the_real_timing_are_not_the_same_period() {
+        assert_ne!(period_for(60_000.0 / 1_001.0), period_for(59.0));
+    }
 
     #[test]
     fn an_interval_inside_the_period_is_on_cadence() {

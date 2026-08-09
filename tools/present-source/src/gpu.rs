@@ -29,8 +29,8 @@ use windows::Win32::Graphics::Dxgi::Common::{
 };
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_FEATURE_PRESENT_ALLOW_TEARING, DXGI_MWA_NO_ALT_ENTER, DXGI_PRESENT,
-    DXGI_PRESENT_ALLOW_TEARING, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1,
-    DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING, DXGI_SWAP_EFFECT_FLIP_DISCARD,
+    DXGI_PRESENT_ALLOW_TEARING, DXGI_PRESENT_PARAMETERS, DXGI_SCALING_STRETCH,
+    DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING, DXGI_SWAP_EFFECT_FLIP_DISCARD,
     DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIFactory2, IDXGIFactory5, IDXGISwapChain1,
 };
 use windows::core::{BOOL, Interface, PCSTR, s};
@@ -95,8 +95,7 @@ impl Gpu {
         // checked before the value behind it is used. The COM objects are
         // reference counted by the `windows` crate.
         unsafe {
-            let factory: IDXGIFactory2 =
-                CreateDXGIFactory1().map_err(api("CreateDXGIFactory1"))?;
+            let factory: IDXGIFactory2 = CreateDXGIFactory1().map_err(api("CreateDXGIFactory1"))?;
 
             let mut chosen = None;
             for index in 0.. {
@@ -112,9 +111,7 @@ impl Gpu {
                 Error::Unsupported(format!("no adapter has a monitor {monitor_index}"))
             })?;
 
-            let adapter_desc = adapter
-                .GetDesc1()
-                .map_err(api("IDXGIAdapter1::GetDesc1"))?;
+            let adapter_desc = adapter.GetDesc1().map_err(api("IDXGIAdapter1::GetDesc1"))?;
             let output_desc = output.GetDesc().map_err(api("IDXGIOutput::GetDesc"))?;
             let bounds = output_desc.DesktopCoordinates;
             let monitor = Monitor {
@@ -144,9 +141,8 @@ impl Gpu {
             )
             .map_err(api("D3D11CreateDevice"))?;
 
-            let device = device.ok_or_else(|| {
-                Error::Unsupported("D3D11CreateDevice returned no device".into())
-            })?;
+            let device = device
+                .ok_or_else(|| Error::Unsupported("D3D11CreateDevice returned no device".into()))?;
             let context = context.ok_or_else(|| {
                 Error::Unsupported("D3D11CreateDevice returned no context".into())
             })?;
@@ -318,9 +314,14 @@ impl SwapChain {
     /// the adapter allows it, the present may tear: neither the panel's
     /// refresh nor DWM's cadence is permitted to set this producer's rate.
     pub fn present(&self) -> Result<(), Error> {
-        // SAFETY: the chain is live for as long as this value is, and no
-        // present parameters are being passed.
-        unsafe { self.chain.Present1(0, self.present_flags, core::ptr::null()) }
+        // Present1 dereferences its parameters block, unlike Present: a null
+        // pointer is an access violation inside dxgi.dll, not a "no parameters"
+        // signal. A zeroed block with no dirty rectangles is how the whole
+        // frame is presented.
+        let parameters = DXGI_PRESENT_PARAMETERS::default();
+        // SAFETY: the chain is live for as long as this value is, and
+        // `parameters` outlives the call.
+        unsafe { self.chain.Present1(0, self.present_flags, &parameters) }
             .ok()
             .map_err(api("IDXGISwapChain1::Present1"))
     }
