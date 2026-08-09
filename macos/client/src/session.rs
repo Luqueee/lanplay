@@ -743,6 +743,10 @@ fn build_report(
 
     crate::report::Report {
         run: crate::report::Run {
+            drive_mode: match cli.mode {
+                crate::Mode::DisplayLink => "display-link",
+                crate::Mode::Immediate => "immediate",
+            },
             seconds: cli.seconds,
             target_fps: feed_fps,
             invalidated: !invalidating.is_empty(),

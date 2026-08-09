@@ -20,6 +20,10 @@ pub struct Report {
 
 #[derive(Serialize)]
 pub struct Run {
+    /// What the callback counters mean. Under `immediate` they count draw
+    /// attempts rather than refreshes, so no rate derived from them is a
+    /// display rate.
+    pub drive_mode: &'static str,
     pub seconds: f64,
     pub target_fps: f64,
     /// True when something changed underneath the run that makes the
@@ -90,6 +94,10 @@ pub struct Environment {
 pub struct Window {
     pub from_s: f64,
     pub to_s: f64,
+    /// Callbacks per second. A refresh rate only under `display-link`: in
+    /// `immediate` mode a callback is a draw attempt from a loop that spins as
+    /// fast as the slot can be read, and the figure runs to thousands. See
+    /// `run.drive_mode` before reading this as a display rate.
     pub callback_hz: f64,
     pub render_hz: f64,
     pub superseded_pct: f64,
