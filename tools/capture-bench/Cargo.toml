@@ -1,0 +1,23 @@
+[package]
+name = "lanplay-capture-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "capture-bench"
+path = "src/main.rs"
+
+[dependencies]
+lanplay-capture = { workspace = true }
+lanplay-telemetry = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# CopyResource, the D3D11 queries that time it, and GetProcessTimes. The
+# capture crate deliberately does not re-export any of these: measuring the
+# cost of ownership is the harness's job, not the backend's.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }

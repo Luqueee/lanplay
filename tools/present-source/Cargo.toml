@@ -1,0 +1,22 @@
+[package]
+name = "lanplay-present-source"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "lanplay_present_source"
+path = "src/lib.rs"
+
+[[bin]]
+name = "present-source"
+path = "src/main.rs"
+
+[dependencies]
+lanplay-protocol = { workspace = true }
+lanplay-telemetry = { workspace = true }
+clap = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }

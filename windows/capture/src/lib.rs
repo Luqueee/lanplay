@@ -23,6 +23,10 @@ pub use backend::{
 };
 
 #[cfg(windows)]
+pub use dda::DesktopDuplication;
+#[cfg(windows)]
 pub use device::{CaptureDevice, DeviceIdentity};
 #[cfg(windows)]
 pub use texture_pool::{PoolHandle, TexturePool};
+#[cfg(windows)]
+pub use wgc::GraphicsCapture;

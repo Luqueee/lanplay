@@ -272,6 +272,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lanplay-capture-bench"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "lanplay-capture",
+ "lanplay-telemetry",
+ "serde",
+ "serde_json",
+ "windows",
+]
+
+[[package]]
 name = "lanplay-client"
 version = "0.1.0"
 dependencies = [
@@ -319,6 +331,16 @@ dependencies = [
  "lanplay-video-core",
  "libc",
  "sha2",
+]
+
+[[package]]
+name = "lanplay-present-source"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "lanplay-protocol",
+ "lanplay-telemetry",
+ "windows",
 ]
 
 [[package]]
