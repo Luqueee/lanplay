@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = ["crates/protocol", "crates/telemetry", "crates/capabilities", "tools/benchmark"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[workspace.dependencies]
+lanplay-protocol = { path = "crates/protocol" }
+lanplay-telemetry = { path = "crates/telemetry" }
+lanplay-capabilities = { path = "crates/capabilities" }
+clap = { version = "4", features = ["derive"] }
+crossbeam-queue = "0.3"
+hdrhistogram = { version = "7", default-features = false }
+parking_lot = "0.12"
+serde = { version = "1", features = ["derive"] }
+
+# Latency work needs symbols in release builds; the pipeline is never profiled in debug.
+[profile.release]
+debug = 1
+lto = "thin"
+codegen-units = 1

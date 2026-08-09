@@ -1,0 +1,14 @@
+//! Vocabulary shared by the Windows host and the macOS client.
+//!
+//! Everything here is either put on the wire or exchanged between crates that
+//! sit on opposite sides of the wire. Nothing in this crate touches an OS API.
+
+mod capabilities;
+mod frame;
+mod video;
+
+pub use capabilities::{
+    ClientCapabilities, DisplayInfo, GpuInfo, GpuVendor, HostCapabilities, NvencInfo,
+};
+pub use frame::{FrameId, FrameIdSource};
+pub use video::{VideoCodec, VideoMode};

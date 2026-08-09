@@ -1,0 +1,12 @@
+[package]
+name = "lanplay-telemetry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+lanplay-protocol = { workspace = true }
+crossbeam-queue = { workspace = true }
+hdrhistogram = { workspace = true }
+parking_lot = { workspace = true }

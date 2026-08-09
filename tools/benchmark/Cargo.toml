@@ -1,0 +1,16 @@
+[package]
+name = "lanplay-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "lanplay-bench"
+path = "src/main.rs"
+
+[dependencies]
+lanplay-capabilities = { workspace = true }
+lanplay-protocol = { workspace = true }
+lanplay-telemetry = { workspace = true }
+clap = { workspace = true }
