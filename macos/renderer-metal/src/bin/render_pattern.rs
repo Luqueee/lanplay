@@ -89,7 +89,7 @@ fn main() {
             .map(|ms| Duration::from_secs_f64(ms / 1_000.0)),
         present_limit: None,
         counters: LiveCounters::new(),
-        require_clean_environment: Some(120.0),
+        require_clean_environment: None,
         on_ready: None,
     };
 
