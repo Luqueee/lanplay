@@ -507,7 +507,7 @@ fn immediate(
     // the only figure available until frames have been presented.
     let environment = surface.environment(surface.nominal_hz);
     preflight(&environment, config.require_clean_environment)?;
-    let mut watcher = Watcher::new(Arc::clone(&config.counters), &environment);
+    let mut watcher = Watcher::new(Arc::clone(&config.counters), &surface.window, &environment);
     if let Some(ready) = on_ready {
         ready();
     }
@@ -559,7 +559,7 @@ fn display_link(
         link.invalidate();
         return Err(error);
     }
-    let mut watcher = Watcher::new(Arc::clone(&config.counters), &environment);
+    let mut watcher = Watcher::new(Arc::clone(&config.counters), &surface.window, &environment);
 
     link.setDelegate(Some(ProtocolObject::from_ref(&*target)));
     let run_loop = NSRunLoop::currentRunLoop();

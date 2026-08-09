@@ -339,9 +339,18 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     let sampler = crate::windows::spawn(
         Arc::clone(&telemetry),
         Arc::clone(&counters),
+        Arc::clone(&slot),
         Duration::from_secs_f64(cli.window_seconds.max(1.0)),
         sampler_stop,
     );
+
+    // The renderer counts callbacks from the moment its window opens, which is
+    // before the sender exists and after the run ends. Only the span between
+    // readiness and the end belongs to the measurement, so the baseline is
+    // taken exactly when preflight passes.
+    let callbacks_at_start = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let baseline = Arc::clone(&callbacks_at_start);
+    let ready_counters = Arc::clone(&counters);
 
     // AppKit owns this thread from here until the run stops. The renderer
     // prints its own preflight items and then calls `on_ready`, which is
@@ -359,6 +368,10 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             counters: Arc::clone(&counters),
             require_clean_environment: cli.require_clean_display.then_some(feed_fps),
             on_ready: Some(Box::new(move || {
+                baseline.store(
+                    ready_counters.callbacks.load(Ordering::Relaxed),
+                    Ordering::Relaxed,
+                );
                 preflight::report(&ready_checks);
             })),
         },
@@ -409,6 +422,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             expected_frames,
             &outcome,
             &render_stats,
+            callbacks_at_start.load(Ordering::Relaxed),
             &snapshot,
             slices,
         );
@@ -684,6 +698,7 @@ fn build_report(
     expected_frames: u64,
     outcome: &RunOutcome,
     render: &RenderStats,
+    callbacks_at_start: u64,
     snapshot: &Snapshot,
     slices: Vec<crate::report::Window>,
 ) -> crate::report::Report {
@@ -746,7 +761,7 @@ fn build_report(
         },
         display: crate::report::Display {
             nominal_hz: render.display_hz,
-            callbacks: render.callbacks,
+            callbacks: render.callbacks.saturating_sub(callbacks_at_start),
             rendered: render.rendered,
             superseded: render.superseded,
             empty_refreshes: render.empty_ticks,

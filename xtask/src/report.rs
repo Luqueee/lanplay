@@ -1,6 +1,8 @@
 //! The client's JSON report, printed as a block a human can read, and the
 //! gate that decides whether the numbers in it mean anything.
 
+use std::fmt::Write;
+
 use serde::Deserialize;
 
 /// How far one ten second window's callback rate may drift from the window
@@ -139,117 +141,148 @@ pub fn sender_totals(log: &str) -> SenderTotals {
     totals
 }
 
-fn row(label: &str, value: &str) {
-    println!("{label:<24}{value:>5}");
+fn row(out: &mut String, label: &str, value: &str) {
+    let _ = writeln!(out, "{label:<24}{value:>5}");
 }
 
-fn count(label: &str, value: u64) {
-    row(label, &value.to_string());
+fn count(out: &mut String, label: &str, value: u64) {
+    row(out, label, &value.to_string());
 }
 
-fn fixed(label: &str, value: f64, decimals: usize) {
-    row(label, &format!("{value:.decimals$}"));
+fn fixed(out: &mut String, label: &str, value: f64, decimals: usize) {
+    row(out, label, &format!("{value:.decimals$}"));
 }
 
-fn heading(name: &str) {
-    println!("\n{name}");
-    println!("{RULE}");
+fn heading(out: &mut String, name: &str) {
+    let _ = writeln!(out, "\n{name}\n{RULE}");
+}
+
+fn yes_no(flag: bool) -> &'static str {
+    if flag { "yes" } else { "no" }
 }
 
 pub fn print(report: &Report, sender: &SenderTotals) {
-    heading("STREAM");
-    count("AU sent", report.stream.expected);
-    count("AU reconstructed", report.stream.reconstructed);
-    count("packet loss", report.stream.packet_loss);
-    count("AU loss", report.stream.au_loss);
-    count("corruption", report.stream.corruption);
-    count("reordered", report.stream.reordered);
-    count("duplicates", report.stream.duplicates);
+    print!("{}", render(report, sender));
+}
 
-    heading("NETWORK");
-    fixed("arrival p50 ms", report.network.arrival_p50_ms, 2);
-    fixed("arrival p95 ms", report.network.arrival_p95_ms, 2);
-    fixed("arrival p99 ms", report.network.arrival_p99_ms, 2);
-    fixed("arrival max ms", report.network.arrival_max_ms, 2);
-    fixed("rtp jitter us", report.network.rtp_jitter_us, 2);
-    row("datagrams sent", &SenderTotals::show(sender.datagrams));
-    row("send errors", &SenderTotals::show(sender.send_errors));
+/// The whole report as one block, built in memory so its shape can be
+/// asserted rather than eyeballed.
+pub fn render(report: &Report, sender: &SenderTotals) -> String {
+    let mut out = String::new();
 
-    heading("DECODE");
-    count("decoded", report.decode.decoded);
-    count("decode errors", report.decode.errors);
-    fixed("decode p50 ms", report.decode.p50_ms, 2);
-    fixed("decode p95 ms", report.decode.p95_ms, 2);
-    fixed("decode p99 ms", report.decode.p99_ms, 2);
-    fixed("backlog slope /min", report.decode.backlog_slope_per_min, 2);
+    heading(&mut out, "STREAM");
+    count(&mut out, "AU sent", report.stream.expected);
+    count(&mut out, "AU reconstructed", report.stream.reconstructed);
+    count(&mut out, "packet loss", report.stream.packet_loss);
+    count(&mut out, "AU loss", report.stream.au_loss);
+    count(&mut out, "corruption", report.stream.corruption);
+    count(&mut out, "reordered", report.stream.reordered);
+    count(&mut out, "duplicates", report.stream.duplicates);
 
-    heading("DISPLAY");
-    fixed("nominal hz", report.display.nominal_hz, 1);
-    count("callbacks", report.display.callbacks);
-    count("rendered", report.display.rendered);
-    count("superseded", report.display.superseded);
-    count("empty refreshes", report.display.empty_refreshes);
+    heading(&mut out, "NETWORK");
+    fixed(&mut out, "arrival p50 ms", report.network.arrival_p50_ms, 2);
+    fixed(&mut out, "arrival p95 ms", report.network.arrival_p95_ms, 2);
+    fixed(&mut out, "arrival p99 ms", report.network.arrival_p99_ms, 2);
+    fixed(&mut out, "arrival max ms", report.network.arrival_max_ms, 2);
+    fixed(&mut out, "rtp jitter us", report.network.rtp_jitter_us, 2);
+    row(
+        &mut out,
+        "datagrams sent",
+        &SenderTotals::show(sender.datagrams),
+    );
+    row(
+        &mut out,
+        "send errors",
+        &SenderTotals::show(sender.send_errors),
+    );
+
+    heading(&mut out, "DECODE");
+    count(&mut out, "decoded", report.decode.decoded);
+    count(&mut out, "decode errors", report.decode.errors);
+    fixed(&mut out, "decode p50 ms", report.decode.p50_ms, 2);
+    fixed(&mut out, "decode p95 ms", report.decode.p95_ms, 2);
+    fixed(&mut out, "decode p99 ms", report.decode.p99_ms, 2);
     fixed(
+        &mut out,
+        "backlog slope /min",
+        report.decode.backlog_slope_per_min,
+        2,
+    );
+
+    let display = &report.display;
+    heading(&mut out, "DISPLAY");
+    fixed(&mut out, "nominal hz", display.nominal_hz, 1);
+    count(&mut out, "callbacks", display.callbacks);
+    count(&mut out, "rendered", display.rendered);
+    count(&mut out, "superseded", display.superseded);
+    count(&mut out, "empty refreshes", display.empty_refreshes);
+    fixed(
+        &mut out,
         "callback p50 ms",
-        report.display.callback_interval_p50_ms,
+        display.callback_interval_p50_ms,
         2,
     );
     fixed(
+        &mut out,
         "callback p95 ms",
-        report.display.callback_interval_p95_ms,
+        display.callback_interval_p95_ms,
         2,
     );
     fixed(
+        &mut out,
         "callback p99 ms",
-        report.display.callback_interval_p99_ms,
+        display.callback_interval_p99_ms,
         2,
     );
     fixed(
+        &mut out,
         "callback max ms",
-        report.display.callback_interval_max_ms,
+        display.callback_interval_max_ms,
         2,
     );
-    fixed("frame age p50 ms", report.display.frame_age_p50_ms, 2);
-    fixed("frame age p95 ms", report.display.frame_age_p95_ms, 2);
-    fixed("frame age p99 ms", report.display.frame_age_p99_ms, 2);
+    fixed(&mut out, "frame age p50 ms", display.frame_age_p50_ms, 2);
+    fixed(&mut out, "frame age p95 ms", display.frame_age_p95_ms, 2);
+    fixed(&mut out, "frame age p99 ms", display.frame_age_p99_ms, 2);
 
-    heading("ENVIRONMENT");
-    count("occlusion changes", report.environment.occlusion_changes);
-    count("space changes", report.environment.space_changes);
-    count("miniaturise events", report.environment.miniaturise_events);
-    count("display changes", report.environment.display_changes);
-    count("link pauses", report.environment.link_pauses);
-    row(
-        "app nap protection",
-        if report.environment.app_nap_protection {
-            "yes"
-        } else {
-            "no"
-        },
-    );
-
-    heading("RUN");
-    fixed("seconds", report.run.seconds, 1);
-    fixed("target fps", report.run.target_fps, 1);
-    row(
-        "invalidated",
-        if report.run.invalidated { "yes" } else { "no" },
-    );
+    let environment = &report.environment;
+    heading(&mut out, "ENVIRONMENT");
+    count(&mut out, "occlusion changes", environment.occlusion_changes);
+    count(&mut out, "space changes", environment.space_changes);
     count(
+        &mut out,
+        "miniaturise events",
+        environment.miniaturise_events,
+    );
+    count(&mut out, "display changes", environment.display_changes);
+    count(&mut out, "link pauses", environment.link_pauses);
+    row(
+        &mut out,
+        "app nap protection",
+        yes_no(environment.app_nap_protection),
+    );
+
+    heading(&mut out, "RUN");
+    fixed(&mut out, "seconds", report.run.seconds, 1);
+    fixed(&mut out, "target fps", report.run.target_fps, 1);
+    row(&mut out, "invalidated", yes_no(report.run.invalidated));
+    count(
+        &mut out,
         "invalidating events",
         report.run.invalidating_events.len() as u64,
     );
     for event in &report.run.invalidating_events {
-        println!("  {event}");
+        let _ = writeln!(out, "  {event}");
     }
 
-    heading("WINDOWS");
-    println!(
+    heading(&mut out, "WINDOWS");
+    let _ = writeln!(
+        out,
         "{:>8}{:>10}{:>13}{:>11}{:>13}{:>18}",
         "from_s", "to_s", "callback_hz", "render_hz", "superseded_%", "frame_age_p99_ms"
     );
     for window in &report.windows {
-        println!(
+        let _ = writeln!(
+            out,
             "{:>8.1}{:>10.1}{:>13.1}{:>11.1}{:>13.2}{:>18.2}",
             window.from_s,
             window.to_s,
@@ -259,6 +292,7 @@ pub fn print(report: &Report, sender: &SenderTotals) {
             window.frame_age_p99_ms
         );
     }
+    out
 }
 
 /// Every reason the run may not be trusted. Empty means the gate passes.
@@ -392,6 +426,101 @@ mod tests {
     #[test]
     fn the_contract_shape_parses_and_a_clean_run_passes() {
         assert!(evaluate(&parse(&clean())).is_empty());
+    }
+
+    #[test]
+    fn the_block_has_the_columns_the_gate_specifies() {
+        let mut value = clean();
+        value["stream"]["expected"] = serde_json::json!(72000);
+        value["stream"]["reconstructed"] = serde_json::json!(72000);
+        let totals = SenderTotals {
+            datagrams: Some(72000),
+            send_errors: Some(0),
+        };
+        let rendered = render(&parse(&value), &totals);
+        let lines: Vec<&str> = rendered.lines().collect();
+
+        assert!(lines.contains(&"STREAM"), "{rendered}");
+        assert!(lines.contains(&RULE), "{rendered}");
+        assert!(
+            lines.contains(&"AU sent                 72000"),
+            "{rendered}"
+        );
+        assert!(
+            lines.contains(&"AU reconstructed        72000"),
+            "{rendered}"
+        );
+        assert!(
+            lines.contains(&"packet loss                 0"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn every_field_of_the_contract_reaches_the_block() {
+        let rendered = render(&parse(&clean()), &SenderTotals::default());
+        for label in [
+            "STREAM",
+            "NETWORK",
+            "DECODE",
+            "DISPLAY",
+            "ENVIRONMENT",
+            "RUN",
+            "WINDOWS",
+            "AU sent",
+            "AU reconstructed",
+            "packet loss",
+            "AU loss",
+            "corruption",
+            "reordered",
+            "duplicates",
+            "arrival p50 ms",
+            "arrival p95 ms",
+            "arrival p99 ms",
+            "arrival max ms",
+            "rtp jitter us",
+            "datagrams sent",
+            "send errors",
+            "decoded",
+            "decode errors",
+            "decode p50 ms",
+            "decode p95 ms",
+            "decode p99 ms",
+            "backlog slope /min",
+            "nominal hz",
+            "callbacks",
+            "rendered",
+            "superseded",
+            "empty refreshes",
+            "callback p50 ms",
+            "callback p95 ms",
+            "callback p99 ms",
+            "callback max ms",
+            "frame age p50 ms",
+            "frame age p95 ms",
+            "frame age p99 ms",
+            "occlusion changes",
+            "space changes",
+            "miniaturise events",
+            "display changes",
+            "link pauses",
+            "app nap protection",
+            "seconds",
+            "target fps",
+            "invalidated",
+            "invalidating events",
+            "from_s",
+            "to_s",
+            "callback_hz",
+            "render_hz",
+            "superseded_%",
+            "frame_age_p99_ms",
+        ] {
+            assert!(rendered.contains(label), "{label} is missing:\n{rendered}");
+        }
+        // One row per ten second window, both of them.
+        assert!(rendered.contains("10.0"), "{rendered}");
+        assert!(rendered.contains("20.0"), "{rendered}");
     }
 
     #[test]

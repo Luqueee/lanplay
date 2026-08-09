@@ -32,6 +32,9 @@ pub fn remote_fixture() -> String {
 /// Records preflight outcomes and decides whether the run may start.
 pub struct Preflight {
     failures: usize,
+    /// Failures already announced, so a second `finish` after the client's
+    /// own items stays quiet about the ones it already reported.
+    announced: usize,
     keep_going: bool,
 }
 
@@ -39,6 +42,7 @@ impl Preflight {
     pub fn new(keep_going: bool) -> Self {
         Self {
             failures: 0,
+            announced: 0,
             keep_going,
         }
     }
@@ -73,16 +77,19 @@ impl Preflight {
         }
     }
 
-    pub fn finish(&self) -> Result<(), Abort> {
+    pub fn finish(&mut self) -> Result<(), Abort> {
         if self.failures == 0 {
             return Ok(());
         }
         if self.keep_going {
-            eprintln!(
-                "gate-1c: continuing past {} failed preflight item(s); \
-                 this run cannot be a baseline",
-                self.failures
-            );
+            if self.failures > self.announced {
+                eprintln!(
+                    "gate-1c: continuing past {} failed preflight item(s); \
+                     this run cannot be a baseline",
+                    self.failures
+                );
+                self.announced = self.failures;
+            }
             return Ok(());
         }
         Err(Abort::new(format!(

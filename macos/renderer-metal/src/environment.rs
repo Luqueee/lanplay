@@ -12,7 +12,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use objc2_app_kit::{NSWindow, NSWindowOcclusionState};
+use objc2::rc::Retained;
+use objc2_app_kit::{NSScreen, NSWindow, NSWindowOcclusionState};
+use objc2_foundation::NSString;
 
 /// Counters a supervising thread can read while the renderer runs.
 ///
@@ -171,12 +173,7 @@ pub(crate) struct WindowState {
     pub(crate) miniaturised: bool,
     /// `None` when AppKit places the window on no screen at all, which is what
     /// it reports for a miniaturised or fully off-screen window.
-    pub(crate) screen: Option<ScreenState>,
-}
-
-pub(crate) struct ScreenState {
-    pub(crate) name: String,
-    pub(crate) maximum_frames_per_second: f64,
+    pub(crate) screen: Option<Retained<NSScreen>>,
 }
 
 impl WindowState {
@@ -193,10 +190,7 @@ impl WindowState {
             occluded,
             on_active_space: window.isOnActiveSpace(),
             miniaturised: window.isMiniaturized(),
-            screen: window.screen().map(|screen| ScreenState {
-                name: screen.localizedName().to_string(),
-                maximum_frames_per_second: screen.maximumFramesPerSecond() as f64,
-            }),
+            screen: window.screen(),
         }
     }
 }
@@ -214,17 +208,27 @@ pub(crate) struct Watcher {
     occluded: bool,
     on_active_space: bool,
     miniaturised: bool,
-    display_name: String,
+    /// Held as the framework's own string rather than a `String`, so comparing
+    /// it once per refresh for ten minutes costs no allocation at all.
+    display_name: Retained<NSString>,
 }
 
 impl Watcher {
-    pub(crate) fn new(counters: Arc<LiveCounters>, start: &Environment) -> Watcher {
+    pub(crate) fn new(
+        counters: Arc<LiveCounters>,
+        window: &NSWindow,
+        start: &Environment,
+    ) -> Watcher {
+        let display_name = window.screen().map_or_else(
+            || NSString::from_str(&start.display_name),
+            |screen| screen.localizedName(),
+        );
         Watcher {
             counters,
             occluded: start.occluded,
             on_active_space: start.on_active_space,
             miniaturised: start.miniaturised,
-            display_name: start.display_name.clone(),
+            display_name,
         }
     }
 
@@ -252,8 +256,9 @@ impl Watcher {
         // or occlusion, and treating it as a display change would double-count
         // one event as two.
         if let Some(screen) = state.screen {
-            if screen.name != self.display_name {
-                self.display_name = screen.name;
+            let name = screen.localizedName();
+            if name != self.display_name {
+                self.display_name = name;
                 bump(&self.counters.display_changes);
             }
         }

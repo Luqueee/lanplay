@@ -114,15 +114,14 @@ impl Surface {
     pub(crate) fn environment(&self, display_hz: f64) -> Environment {
         let state = WindowState::read(&self.window);
         Environment {
-            display_name: state
-                .screen
-                .as_ref()
-                .map_or_else(|| self.display_name.clone(), |screen| screen.name.clone()),
+            display_name: state.screen.as_ref().map_or_else(
+                || self.display_name.clone(),
+                |screen| screen.localizedName().to_string(),
+            ),
             display_hz,
-            maximum_frames_per_second: state
-                .screen
-                .as_ref()
-                .map_or(self.nominal_hz, |screen| screen.maximum_frames_per_second),
+            maximum_frames_per_second: state.screen.as_ref().map_or(self.nominal_hz, |screen| {
+                screen.maximumFramesPerSecond() as f64
+            }),
             on_active_space: state.on_active_space,
             occluded: state.occluded,
             miniaturised: state.miniaturised,

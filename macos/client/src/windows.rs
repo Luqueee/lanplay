@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use lanplay_renderer_metal::LiveCounters;
+use lanplay_renderer_metal::{LatestFrameSlot, LiveCounters};
 use lanplay_telemetry::{Nanos, Telemetry, Timestamp, wait_until};
 
 use crate::report::Window;
@@ -22,6 +22,7 @@ use crate::report::Window;
 pub fn sample(
     telemetry: &Telemetry,
     counters: &Arc<LiveCounters>,
+    slot: &Arc<LatestFrameSlot>,
     every: Duration,
     stop: &Arc<AtomicBool>,
 ) -> Vec<Window> {
@@ -30,6 +31,7 @@ pub fn sample(
     let period = Nanos(every.as_nanos() as u64);
     let mut last_callbacks = counters.callbacks.load(Ordering::Relaxed);
     let mut last_rendered = counters.rendered.load(Ordering::Relaxed);
+    let mut last_superseded = slot.superseded();
     let mut index = 1u64;
 
     while !stop.load(Ordering::Acquire) {
@@ -44,24 +46,28 @@ pub fn sample(
         let seconds = taken.span.as_secs_f64().max(f64::EPSILON);
 
         let drawn = rendered - last_rendered;
-        // Presented frames the renderer never saw are ones the producer
-        // replaced: the difference between what arrived and what was shown.
-        let superseded = taken.presented.saturating_sub(drawn);
+        // Read from the slot, not inferred from presented frames: a presented
+        // frame is by definition one that was not superseded, so subtracting
+        // the two can only ever produce zero.
+        let superseded_now = slot.superseded();
+        let superseded = superseded_now - last_superseded;
+        let offered = drawn + superseded;
         windows.push(Window {
             from_s: (index - 1) as f64 * every.as_secs_f64(),
             to_s: index as f64 * every.as_secs_f64(),
             callback_hz: (callbacks - last_callbacks) as f64 / seconds,
             render_hz: drawn as f64 / seconds,
-            superseded_pct: if taken.presented == 0 {
+            superseded_pct: if offered == 0 {
                 0.0
             } else {
-                superseded as f64 * 100.0 / taken.presented as f64
+                superseded as f64 * 100.0 / offered as f64
             },
             frame_age_p99_ms: taken.local_age.p99.as_millis_f64(),
         });
 
         last_callbacks = callbacks;
         last_rendered = rendered;
+        last_superseded = superseded_now;
         index += 1;
     }
     windows
@@ -82,12 +88,13 @@ pub fn worst_callback_drop(windows: &[Window]) -> f64 {
 pub fn spawn(
     telemetry: Arc<Telemetry>,
     counters: Arc<LiveCounters>,
+    slot: Arc<LatestFrameSlot>,
     every: Duration,
     stop: Arc<AtomicBool>,
 ) -> thread::JoinHandle<Vec<Window>> {
     thread::Builder::new()
         .name("windows".into())
-        .spawn(move || sample(&telemetry, &counters, every, &stop))
+        .spawn(move || sample(&telemetry, &counters, &slot, every, &stop))
         .expect("spawn window sampler")
 }
 
