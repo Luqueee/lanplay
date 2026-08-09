@@ -12,8 +12,7 @@
 
 use windows::Win32::Foundation::{HMODULE, HWND};
 use windows::Win32::Graphics::Direct3D::Fxc::{
-    D3DCOMPILE_ENABLE_STRICTNESS, D3DCOMPILE_OPTIMIZATION_LEVEL3, D3DCOMPILE_WARNINGS_ARE_ERRORS,
-    D3DCompile,
+    D3DCOMPILE_ENABLE_STRICTNESS, D3DCOMPILE_OPTIMIZATION_LEVEL3, D3DCompile,
 };
 use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
@@ -29,11 +28,12 @@ use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_ALPHA_MODE_IGNORE, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC,
 };
 use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory1, DXGI_MWA_NO_ALT_ENTER, DXGI_PRESENT, DXGI_SCALING_STRETCH,
-    DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_FLIP_DISCARD, DXGI_USAGE_RENDER_TARGET_OUTPUT,
-    IDXGIFactory2, IDXGISwapChain1,
+    CreateDXGIFactory1, DXGI_FEATURE_PRESENT_ALLOW_TEARING, DXGI_MWA_NO_ALT_ENTER, DXGI_PRESENT,
+    DXGI_PRESENT_ALLOW_TEARING, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1,
+    DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING, DXGI_SWAP_EFFECT_FLIP_DISCARD,
+    DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIFactory2, IDXGIFactory5, IDXGISwapChain1,
 };
-use windows::core::{PCSTR, s};
+use windows::core::{BOOL, Interface, PCSTR, s};
 
 use crate::{Error, api};
 
@@ -79,6 +79,13 @@ pub struct Gpu {
     factory: IDXGIFactory2,
     monitor: Monitor,
     adapter_name: String,
+    /// Whether the swap chain may present without waiting for a vblank.
+    ///
+    /// Without it, a windowed flip chain with `SyncInterval` 0 still stalls in
+    /// `Present` once its buffers are all queued, so DWM ends up pacing the
+    /// producer at the refresh rate. That would silently turn `--fps 240` on a
+    /// 120 Hz panel into 120 fps: the one case this tool exists to produce.
+    tearing: bool,
 }
 
 impl Gpu {
@@ -147,6 +154,7 @@ impl Gpu {
             Ok(Gpu {
                 device,
                 context,
+                tearing: tearing_supported(&factory),
                 factory,
                 monitor,
                 adapter_name: String::from_utf16_lossy(trim_nul(&adapter_desc.Description)),
@@ -166,6 +174,13 @@ impl Gpu {
         &self.adapter_name
     }
 
+    /// Whether presents will be allowed to tear, and so to exceed the refresh
+    /// rate. Worth printing: a run without it cannot honour an `--fps` above
+    /// the panel's.
+    pub fn tearing(&self) -> bool {
+        self.tearing
+    }
+
     /// Builds the flip-model swap chain for `hwnd`.
     pub fn swap_chain(&self, hwnd: HWND, width: u32, height: u32) -> Result<SwapChain, Error> {
         let desc = DXGI_SWAP_CHAIN_DESC1 {
@@ -178,14 +193,27 @@ impl Gpu {
                 Quality: 0,
             },
             BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
-            // Two buffers is the flip model's minimum. More would let the
-            // driver queue presents ahead, which is exactly the latency this
-            // producer must not add on top of what capture costs.
-            BufferCount: 2,
+            // Three, not the flip model's minimum of two: at more than one
+            // present per vblank the producer would otherwise block waiting
+            // for the single spare buffer, and the rate it reports would be
+            // the panel's rather than the one asked for.
+            BufferCount: 3,
             Scaling: DXGI_SCALING_STRETCH,
             SwapEffect: DXGI_SWAP_EFFECT_FLIP_DISCARD,
             AlphaMode: DXGI_ALPHA_MODE_IGNORE,
-            Flags: 0,
+            Flags: if self.tearing {
+                DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING.0 as u32
+            } else {
+                0
+            },
+        };
+
+        // Tearing has to be asked for on the chain and again on every present;
+        // asking on only one of the two is an error, not a downgrade.
+        let present_flags = if self.tearing {
+            DXGI_PRESENT_ALLOW_TEARING
+        } else {
+            DXGI_PRESENT(0)
         };
 
         // SAFETY: `hwnd` is a live window owned by the caller, the description
@@ -218,6 +246,7 @@ impl Gpu {
                 target,
                 width,
                 height,
+                present_flags,
             })
         }
     }
@@ -273,6 +302,7 @@ pub struct SwapChain {
     target: ID3D11RenderTargetView,
     width: u32,
     height: u32,
+    present_flags: DXGI_PRESENT,
 }
 
 impl SwapChain {
@@ -284,11 +314,13 @@ impl SwapChain {
         self.height
     }
 
-    /// Hands the back buffer to the compositor without waiting for a vblank.
+    /// Hands the back buffer to the compositor. `SyncInterval` is 0 and, where
+    /// the adapter allows it, the present may tear: neither the panel's
+    /// refresh nor DWM's cadence is permitted to set this producer's rate.
     pub fn present(&self) -> Result<(), Error> {
         // SAFETY: the chain is live for as long as this value is, and no
         // present parameters are being passed.
-        unsafe { self.chain.Present1(0, DXGI_PRESENT(0), core::ptr::null()) }
+        unsafe { self.chain.Present1(0, self.present_flags, core::ptr::null()) }
             .ok()
             .map_err(api("IDXGISwapChain1::Present1"))
     }
@@ -346,10 +378,33 @@ impl Pipeline {
     }
 }
 
+/// Whether this adapter and DWM will let a windowed flip chain present without
+/// waiting for a vblank.
+///
+/// A pre-Windows-10-1703 factory has no `IDXGIFactory5` at all, so a failed
+/// cast is a plain no, not an error worth stopping the run over.
+fn tearing_supported(factory: &IDXGIFactory2) -> bool {
+    let Ok(factory) = factory.cast::<IDXGIFactory5>() else {
+        return false;
+    };
+    let mut allowed = BOOL(0);
+    // SAFETY: the out-pointer is a live `BOOL` and the size passed matches it,
+    // which is what `DXGI_FEATURE_PRESENT_ALLOW_TEARING` expects.
+    let queried = unsafe {
+        factory.CheckFeatureSupport(
+            DXGI_FEATURE_PRESENT_ALLOW_TEARING,
+            (&raw mut allowed).cast(),
+            size_of::<BOOL>() as u32,
+        )
+    };
+    queried.is_ok() && allowed.as_bool()
+}
+
 fn compile(entry: PCSTR, target: PCSTR) -> Result<ID3DBlob, Error> {
-    let flags = D3DCOMPILE_ENABLE_STRICTNESS
-        | D3DCOMPILE_WARNINGS_ARE_ERRORS
-        | D3DCOMPILE_OPTIMIZATION_LEVEL3;
+    // Not `WARNINGS_ARE_ERRORS`: a diagnostic that fxc considers cosmetic
+    // would then refuse to start the producer at all. Warnings are printed
+    // below instead, once, before any frame is drawn.
+    let flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3;
 
     let mut code = None;
     let mut errors = None;
@@ -374,10 +429,17 @@ fn compile(entry: PCSTR, target: PCSTR) -> Result<ID3DBlob, Error> {
     if let Err(error) = result {
         // The compiler's own diagnostics are the only useful thing here; the
         // HRESULT alone says nothing about which line was wrong.
-        return Err(match errors {
-            Some(blob) => Error::ShaderCompile(blob_text(&blob)),
-            None => return Err(api("D3DCompile")(error)),
-        });
+        return match errors {
+            Some(blob) => Err(Error::ShaderCompile(blob_text(&blob))),
+            None => Err(api("D3DCompile")(error)),
+        };
+    }
+
+    if let Some(blob) = errors {
+        let warnings = blob_text(&blob);
+        if !warnings.is_empty() {
+            eprintln!("present-source: shader warnings:\n{warnings}");
+        }
     }
 
     code.ok_or_else(|| Error::Unsupported("D3DCompile succeeded but produced no bytecode".into()))

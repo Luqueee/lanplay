@@ -48,7 +48,7 @@ pub fn run(options: Options) -> Result<Report, Error> {
     // nothing else, so a capture run can consume it without parsing around a
     // banner.
     eprintln!(
-        "present-source: {}x{} at {} fps on {} ({}){}",
+        "present-source: {}x{} at {} fps on {} ({}){}{}",
         chain.width(),
         chain.height(),
         options.fps,
@@ -58,6 +58,11 @@ pub fn run(options: Options) -> Result<Report, Error> {
             ", borderless full screen"
         } else {
             ""
+        },
+        if gpu.tearing() {
+            ""
+        } else {
+            ", no tearing support: rates above the refresh will not be reached"
         },
     );
 
@@ -79,9 +84,12 @@ pub fn run(options: Options) -> Result<Report, Error> {
         // A deadline already in the past means the previous frame overran it.
         // Waiting would be a no-op, so the loop goes straight on and the
         // schedule pulls the rate back by itself; only the count is kept.
-        if Timestamp::now() > deadline {
+        // Frame 0 is exempt: its deadline is the instant the schedule started,
+        // and no producer can be late for that.
+        if index > 0 && Timestamp::now() > deadline {
             missed += 1;
         } else {
+            // Already past it, for frame 0, means waiting returns at once.
             wait_until(deadline);
         }
 

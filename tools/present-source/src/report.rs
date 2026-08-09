@@ -61,3 +61,34 @@ impl fmt::Display for Report {
         writeln!(f, "missed deadlines: {}", self.missed_deadlines)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The report is parsed by whatever runs the producer, so its shape is a
+    /// contract: seven lines, in this order, `name: value`.
+    #[test]
+    fn renders_one_labelled_line_per_statistic() {
+        let report = Report {
+            frames_presented: 14_400,
+            requested_fps: 120,
+            achieved_fps: 119.9713,
+            interval_p50: Nanos(8_335_000),
+            interval_p99: Nanos(9_119_000),
+            interval_max: Nanos(15_402_000),
+            missed_deadlines: 3,
+        };
+
+        assert_eq!(
+            report.to_string(),
+            "frames presented: 14400\n\
+             requested fps: 120\n\
+             achieved fps: 119.97\n\
+             present interval p50 ms: 8.335\n\
+             present interval p99 ms: 9.119\n\
+             present interval max ms: 15.402\n\
+             missed deadlines: 3\n"
+        );
+    }
+}
