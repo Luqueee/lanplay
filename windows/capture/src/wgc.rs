@@ -24,7 +24,7 @@
 
 #![cfg(windows)]
 
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -71,6 +71,11 @@ struct Shared {
     /// redundant look in an empty pool.
     arrived: Mutex<bool>,
     wake: Condvar,
+    /// Every `FrameArrived`, not just the ones a consumer was waiting for.
+    /// The flag above coalesces, so it cannot answer the one question that
+    /// separates a slow consumer from a slow producer: whether the pool
+    /// offered a frame we failed to take, or never offered it at all.
+    signals: AtomicU64,
     /// Set by the item's `Closed` event: the monitor went away, the session
     /// was torn down under us, or the mode changed. Expected, not an error.
     lost: AtomicBool,
@@ -99,6 +104,7 @@ impl Shared {
     }
 
     fn signal(&self) {
+        self.signals.fetch_add(1, Ordering::Relaxed);
         let mut arrived = self.arrived.lock().unwrap_or_else(PoisonError::into_inner);
         *arrived = true;
         drop(arrived);
@@ -269,6 +275,13 @@ impl GraphicsCapture {
 
     /// How many times the item resized under us and the pool was rebuilt in
     /// place.
+    /// Every `FrameArrived` the pool raised, whether or not a frame was taken
+    /// for it. Compared against `delivered`, this is what tells a slow
+    /// consumer apart from a pool that never offered the frame.
+    pub fn signals(&self) -> u64 {
+        self.shared.signals.load(Ordering::Relaxed)
+    }
+
     pub fn pool_recreations(&self) -> u64 {
         self.counters.pool_recreations
     }

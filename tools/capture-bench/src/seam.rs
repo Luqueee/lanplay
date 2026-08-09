@@ -77,6 +77,10 @@ pub struct Extras {
     pub superseded: u64,
     pub delivered: u64,
     pub drained_total: u64,
+    /// WGC only: every `FrameArrived` raised, taken or not. Compared with
+    /// `delivered` it separates a consumer that missed frames from a pool that
+    /// never offered them.
+    pub signals: u64,
     pub pool_recreations: u64,
     pub access_lost: u64,
     pub accumulated_over_one: u64,
@@ -95,6 +99,7 @@ impl Extras {
             superseded: self.superseded.saturating_sub(baseline.superseded),
             delivered: self.delivered.saturating_sub(baseline.delivered),
             drained_total: self.drained_total.saturating_sub(baseline.drained_total),
+            signals: self.signals.saturating_sub(baseline.signals),
             pool_recreations: self
                 .pool_recreations
                 .saturating_sub(baseline.pool_recreations),
@@ -114,6 +119,7 @@ impl Extras {
             superseded: self.superseded + other.superseded,
             delivered: self.delivered + other.delivered,
             drained_total: self.drained_total + other.drained_total,
+            signals: self.signals + other.signals,
             pool_recreations: self.pool_recreations + other.pool_recreations,
             access_lost: self.access_lost + other.access_lost,
             accumulated_over_one: self.accumulated_over_one + other.accumulated_over_one,
@@ -134,6 +140,7 @@ impl Capture {
                 superseded: backend.superseded(),
                 delivered: backend.delivered(),
                 drained_total: backend.drained_total(),
+                signals: backend.signals(),
                 pool_recreations: backend.pool_recreations(),
                 border_suppressed: Some(backend.border_suppressed()),
                 api: "Direct3D11CaptureFramePool::CreateFreeThreaded",

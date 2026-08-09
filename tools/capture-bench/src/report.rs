@@ -88,6 +88,9 @@ pub struct CaptureReport {
     /// WGC only: frames the pool discarded because we were not draining fast
     /// enough.
     pub drained: u64,
+    /// WGC only: `FrameArrived` events raised during the window. Zero for a
+    /// backend that has no such notification.
+    pub signals: u64,
     /// Which event the source clock marked, in the API's own terms.
     pub source_mark: String,
     /// Source mark to acquire return, per frame.

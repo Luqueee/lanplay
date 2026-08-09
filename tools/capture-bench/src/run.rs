@@ -674,6 +674,7 @@ impl<'device> Harness<'device> {
         report.capture = self.stats.capture_report(subject.source_hz, source_mark);
         report.capture.superseded = self.extras.superseded;
         report.capture.drained = self.extras.drained_total;
+        report.capture.signals = self.extras.signals;
 
         report.stability = self.stats.stability_report();
         report.stability.pool_recreations = self.extras.pool_recreations;

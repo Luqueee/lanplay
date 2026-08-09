@@ -108,6 +108,17 @@ fn capture(out: &mut impl Write, report: &RunReport) -> fmt::Result {
         "  timeouts              {:>9}   duplicates {}   superseded {}   drained {}",
         capture.timeouts, capture.duplicates, capture.superseded, capture.drained
     )?;
+    if capture.signals > 0 {
+        // The pool's own notification rate. If this matches the source and
+        // `frames` does not, the consumer lost them; if this matches `frames`
+        // and both fall short, the pool never offered them.
+        writeln!(
+            out,
+            "  frame-arrived events  {:>9}   = {:.2}/s",
+            capture.signals,
+            capture.signals as f64 / capture.window_s.max(f64::EPSILON)
+        )?;
+    }
     distribution(out, "accumulated frames", &capture.accumulated_frames)?;
     distribution(out, "pool pressure", &capture.pending_frames)?;
     writeln!(out)?;

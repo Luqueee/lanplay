@@ -245,6 +245,7 @@ impl Stats {
             duplicates: self.duplicates,
             superseded: 0,
             drained: 0,
+            signals: 0,
             source_mark: source_mark.to_owned(),
             delivery_delay: self.delivery.summary(),
             delivery_delay_unusable: self.delivery_unusable,
