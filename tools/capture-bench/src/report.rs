@@ -166,6 +166,10 @@ pub struct StabilityReport {
     pub api_resets: u64,
     pub restart_failures: u64,
     pub frames_after_last_restart: u64,
+    /// Intervals classified at all, so a count of late ones can be read as a
+    /// fraction. Without it, "1012 late" says nothing about whether the run
+    /// was bad or merely long.
+    pub intervals_measured: u64,
     pub intervals_over_1x: u64,
     pub intervals_over_2x: u64,
     pub max_interval_ms: f64,

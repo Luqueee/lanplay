@@ -262,6 +262,7 @@ impl Stats {
             api_resets: self.api_resets,
             restart_failures: self.restart_failures,
             frames_after_last_restart: self.frames_after_last_restart,
+            intervals_measured: stalls.observed,
             intervals_over_1x: stalls.over_one_period,
             intervals_over_2x: stalls.over_two_periods,
             max_interval_ms: stalls.max.as_millis_f64(),

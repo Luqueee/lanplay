@@ -271,10 +271,19 @@ fn stability(out: &mut impl Write, report: &RunReport) -> fmt::Result {
         "  API resets            {:>9}   access lost {}   restart failures {}",
         stability.api_resets, stability.access_lost, stability.restart_failures
     )?;
+    // Two different things used to share the word "stall". At a steady rate
+    // roughly half of all intervals land just above the period, so calling
+    // those stalls reports a thousand of them in a run that missed nothing.
+    // Only the second number means a source frame went by unacquired.
     writeln!(
         out,
-        "  capture stalls        {:>9} over one period, {} over two (period {:.3} ms)",
-        stability.intervals_over_1x, stability.intervals_over_2x, stability.period_ms
+        "  intervals late        {:>9} of {} (period {:.3} ms)",
+        stability.intervals_over_1x, stability.intervals_measured, stability.period_ms
+    )?;
+    writeln!(
+        out,
+        "  frames missed         {:>9} intervals ran over two periods",
+        stability.intervals_over_2x
     )?;
     writeln!(
         out,
