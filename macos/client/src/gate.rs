@@ -80,8 +80,22 @@ pub struct TransportInputs {
     pub overhead_ratio: f64,
 }
 
+/// Who a failing check indicts.
+///
+/// The client is permanently on Wi-Fi while the host is wired, so a run can
+/// fail for two completely different reasons and only one of them is ours to
+/// fix. Reporting a single verdict would hide which.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Owner {
+    /// Our code: the decoder, the renderer, the transport implementation.
+    Pipeline,
+    /// The link between the two machines.
+    Link,
+}
+
 pub struct Check {
     pub name: &'static str,
+    pub owner: Owner,
     pub passed: bool,
     pub detail: String,
 }
@@ -93,8 +107,26 @@ pub struct Verdict {
 }
 
 impl Verdict {
+    fn all(&self, owner: Owner) -> bool {
+        self.checks
+            .iter()
+            .filter(|check| check.owner == owner)
+            .all(|check| check.passed)
+    }
+
+    /// Whether our code did its job. This is the one that gates the phase.
+    pub fn pipeline_passed(&self) -> bool {
+        self.all(Owner::Pipeline)
+    }
+
+    /// Whether the link delivered on cadence. Informative: a Wi-Fi client can
+    /// fail this without anything being wrong with the software.
+    pub fn link_passed(&self) -> bool {
+        self.all(Owner::Link)
+    }
+
     pub fn passed(&self) -> bool {
-        self.checks.iter().all(|check| check.passed)
+        self.pipeline_passed() && self.link_passed()
     }
 }
 
@@ -103,8 +135,12 @@ impl fmt::Display for Verdict {
         for check in &self.checks {
             writeln!(
                 f,
-                "  [{}] {:<24} {}",
+                "  [{}] {:<8} {:<24} {}",
                 if check.passed { "pass" } else { "FAIL" },
+                match check.owner {
+                    Owner::Pipeline => "pipeline",
+                    Owner::Link => "link",
+                },
                 check.name,
                 check.detail
             )?;
@@ -112,12 +148,21 @@ impl fmt::Display for Verdict {
         if !self.soaked {
             writeln!(
                 f,
-                "  [note] {:<24} run is shorter than the {P99_SOAK_FRAMES}-frame soak; \
+                "  [note] {:<8} {:<24} run is shorter than the {P99_SOAK_FRAMES}-frame soak; \
                  tail numbers are indicative only",
-                "soak"
+                "", "soak"
             )?;
         }
-        write!(f, "gate: {}", if self.passed() { "PASS" } else { "FAIL" })
+        write!(
+            f,
+            "gate: pipeline {}, link {}",
+            if self.pipeline_passed() {
+                "PASS"
+            } else {
+                "FAIL"
+            },
+            if self.link_passed() { "PASS" } else { "FAIL" },
+        )
     }
 }
 
@@ -125,8 +170,21 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
     let mut checks = Vec::new();
     let snapshot = &inputs.snapshot;
 
+    // Whether the frames came from another machine decides who is to blame
+    // when they do not turn up.
+    let remote_sender = inputs
+        .transport
+        .as_ref()
+        .is_some_and(|transport| transport.tx.access_units == 0);
+    let delivery_owner = if remote_sender {
+        Owner::Link
+    } else {
+        Owner::Pipeline
+    };
+
     checks.push(Check {
         name: "hardware decoder",
+        owner: Owner::Pipeline,
         passed: inputs.hardware_decoder,
         detail: if inputs.hardware_decoder {
             "VTDecompressionSession reports hardware acceleration".to_owned()
@@ -137,6 +195,7 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
 
     checks.push(Check {
         name: "input sustained",
+        owner: delivery_owner,
         passed: inputs.submitted >= inputs.expected_frames,
         detail: format!(
             "{} access units submitted, {} expected at {:.0} fps",
@@ -149,6 +208,7 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
         && inputs.decoder_dropped == 0;
     checks.push(Check {
         name: "decode throughput",
+        owner: Owner::Pipeline,
         passed: lossless_decode,
         detail: format!(
             "{} decoded of {} submitted, {} errors, {} dropped",
@@ -163,6 +223,7 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
         && growth.is_some_and(|slope| slope <= MAX_BACKLOG_GROWTH);
     checks.push(Check {
         name: "decoder backlog",
+        owner: Owner::Pipeline,
         passed: backlog_ok,
         detail: match growth {
             Some(slope) => format!(
@@ -183,6 +244,7 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
     let accounted = inputs.rendered + inputs.superseded + inputs.still_in_slot;
     checks.push(Check {
         name: "frames accounted",
+        owner: Owner::Pipeline,
         passed: accounted == inputs.decoded,
         detail: format!(
             "{} decoded = {} rendered + {} superseded + {} held",
@@ -190,19 +252,31 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
         ),
     });
 
-    // Starvation is a statement about the decoder, and the bar it must clear
-    // is the rate that can actually reach the screen: the lower of the source
-    // rate and the refresh rate. A 60 fps source on a 120 Hz panel leaves half
-    // the refreshes with nothing new by arithmetic, and calling that
-    // starvation would condemn a perfectly healthy pipeline.
+    // Two different failures used to share one check. Separating them is the
+    // whole point now that the client is permanently on Wi-Fi: the decoder
+    // falling behind is ours to fix, and the link delivering in bursts is not.
     //
-    // The empty-refresh share is therefore judged against what the rate
-    // difference already predicts, and only when a tick is a refresh at all:
-    // a decoder-driven renderer polls, so its empty ticks count spin
-    // iterations and say nothing about anything.
+    // The bar the decoder must clear is the rate that can actually reach the
+    // screen: the lower of the source rate and the refresh rate. A 60 fps
+    // source on a 120 Hz panel leaves half the refreshes with nothing new by
+    // arithmetic, and calling that starvation would condemn a healthy
+    // pipeline.
     let decoded_per_second = inputs.decoded as f64 / inputs.run_seconds.max(f64::EPSILON);
     let deliverable = inputs.target_fps.min(inputs.display_hz);
-    let keeps_up = decoded_per_second >= deliverable * 0.99;
+    checks.push(Check {
+        name: "decoder keeps up",
+        owner: Owner::Pipeline,
+        passed: decoded_per_second >= deliverable * 0.99,
+        detail: format!(
+            "decoded {decoded_per_second:.1}/s against {deliverable:.1}/s deliverable \
+             on a {:.1} Hz display",
+            inputs.display_hz
+        ),
+    });
+
+    // A refresh with nothing new is only meaningful when a tick is a refresh:
+    // a decoder-driven renderer polls, so its empty ticks count spin
+    // iterations and say nothing about anything.
     let ticks = inputs.rendered + inputs.empty_ticks;
     let empty_fraction = if ticks == 0 {
         1.0
@@ -212,28 +286,38 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
     let predicted_empty =
         (1.0 - (inputs.target_fps / inputs.display_hz.max(1.0)).min(1.0)).max(0.0);
     let unexplained_empty = empty_fraction - predicted_empty;
-    checks.push(Check {
-        name: "no decoder starvation",
-        passed: keeps_up
-            && (!inputs.display_driven || unexplained_empty <= MAX_EMPTY_TICK_FRACTION),
-        detail: if inputs.display_driven {
-            format!(
-                "decoder produced {decoded_per_second:.1}/s against {deliverable:.1}/s \
-                 deliverable on a {:.1} Hz display; {:.2}% of {ticks} refreshes empty, \
-                 {:.2}% predicted by the rate difference, {} superseded",
-                inputs.display_hz,
+    if inputs.display_driven {
+        checks.push(Check {
+            name: "link holds cadence",
+            owner: Owner::Link,
+            passed: unexplained_empty <= MAX_EMPTY_TICK_FRACTION,
+            detail: format!(
+                "{:.2}% of {ticks} refreshes found nothing new, {:.2}% predicted by the \
+                 rate difference; source interval p50 {} p99 {} max {} against a {} period",
                 empty_fraction * 100.0,
                 predicted_empty * 100.0,
-                inputs.superseded,
-            )
-        } else {
-            format!(
-                "decoder produced {decoded_per_second:.1}/s against {deliverable:.1}/s \
-                 deliverable on a {:.1} Hz display; {} superseded \
-                 ({} idle polls, not display refreshes)",
-                inputs.display_hz, inputs.superseded, inputs.empty_ticks,
-            )
-        },
+                snapshot.source_interval.p50,
+                snapshot.source_interval.p99,
+                snapshot.source_interval.max,
+                Nanos::from_millis_f64(1000.0 / deliverable.max(1.0)),
+            ),
+        });
+    }
+
+    // Whatever the link does, the client must not make it worse. Presenting no
+    // less regularly than frames arrive is the honest test of that, and it
+    // holds on a jittery link as well as a clean one.
+    let arrival_p99 = snapshot.source_interval.p99;
+    let present_p99 = snapshot.present_interval.p99;
+    let period = Nanos::from_millis_f64(1000.0 / deliverable.max(1.0));
+    checks.push(Check {
+        name: "presentation tracks arrival",
+        owner: Owner::Pipeline,
+        passed: present_p99.get() <= arrival_p99.get() + period.get(),
+        detail: format!(
+            "present interval p99 {present_p99} against arrival p99 {arrival_p99} \
+             plus one {period} period"
+        ),
     });
 
     // Judged against the period presents actually have, which is set by the
@@ -254,11 +338,12 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
     let inherited = worst_interval <= worst_source_gap;
     checks.push(Check {
         name: "no present stalls",
+        owner: Owner::Pipeline,
         passed: worst_interval <= stall_limit || inherited,
         detail: format!(
             "worst present interval {worst_interval} against a {stall_limit} limit \
-             ({STALL_MULTIPLE:.0}x the {present_period} present period); \
-             worst source gap {worst_source_gap}{}",
+         ({STALL_MULTIPLE:.0}x the {present_period} present period); \
+         worst source gap {worst_source_gap}{}",
             if worst_interval > stall_limit && inherited {
                 " - the stall came in with the source, not from the presenter"
             } else {
@@ -273,6 +358,7 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
     let steady_memory = inputs.memory.after_warmup(MEMORY_WARMUP);
     checks.push(Check {
         name: "memory stable",
+        owner: Owner::Pipeline,
         passed: steady_memory.is_stable(MAX_MEMORY_GROWTH),
         detail: match (
             steady_memory.slope_per_minute(),
@@ -280,7 +366,7 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
         ) {
             (Some(steady), Some(whole)) => format!(
                 "{:+.2} MB/min in steady state ({} samples after {MEMORY_WARMUP}), \
-                 {:+.2} MB/min including warm-up, peak {:.1} MB",
+             {:+.2} MB/min including warm-up, peak {:.1} MB",
                 steady / 1_048_576.0,
                 steady_memory.count(),
                 whole / 1_048_576.0,
@@ -296,6 +382,7 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
 
     checks.push(Check {
         name: "instrumentation intact",
+        owner: Owner::Pipeline,
         passed: snapshot.marks_intact(),
         detail: format!(
             "{} dropped marks, {} duplicate, {} late",
@@ -312,19 +399,16 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
         .counters
         .frames_incomplete
         .saturating_sub(inputs.superseded + inputs.still_in_slot);
-    checks.push(Check {
-        name: "drops explained",
-        passed: unexplained == 0,
-        detail: format!(
-            "{} frames never presented, {} superseded + {} held explain them ({unexplained} unexplained)",
-            snapshot.counters.frames_incomplete, inputs.superseded, inputs.still_in_slot
-        ),
-    });
+    checks.push(Check { name: "drops explained", owner: Owner::Pipeline, passed: unexplained == 0, detail: format!(
+        "{} frames never presented, {} superseded + {} held explain them ({unexplained} unexplained)",
+        snapshot.counters.frames_incomplete, inputs.superseded, inputs.still_in_slot
+    ) });
 
     // The gap is allowed to be non-zero here: this pipeline has no capture or
     // network stages to mark. It is not allowed to be unmeasured.
     checks.push(Check {
         name: "gap instrumented",
+        owner: Owner::Pipeline,
         passed: snapshot.unattributed_gap.count == snapshot.counters.frames_presented
             && snapshot.counters.frames_presented > 0,
         detail: format!(
@@ -337,15 +421,17 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
 
     checks.push(Check {
         name: "zero copy path",
+        owner: Owner::Pipeline,
         passed: inputs.zero_copy_render_path && inputs.metal_texture_cache,
         detail: "structural: CVMetalTextureCache textures over VideoToolbox pixel buffers, \
-                 no CPU plane access on the render path"
+             no CPU plane access on the render path"
             .to_owned(),
     });
 
     let decode = snapshot.segment(Segment::Decode);
     checks.push(Check {
         name: "decode measured",
+        owner: Owner::Pipeline,
         passed: decode.count > 0,
         detail: format!(
             "p50 {} p95 {} p99 {} max {} over {} frames",
@@ -368,6 +454,7 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
         };
         checks.push(Check {
             name: "access units intact",
+            owner: delivery_owner,
             passed: transport.rx.access_units_completed == expected && transport.mismatched == 0,
             detail: format!(
                 "{expected} {source}, {} reconstructed, {} verified byte-for-byte, {} mismatched",
@@ -388,10 +475,11 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
             && transport.tx.send_errors == 0;
         checks.push(Check {
             name: "transport clean",
+            owner: delivery_owner,
             passed: clean,
             detail: format!(
                 "{} lost, {} malformed, {} dropped AUs, {} missing fragments, \
-                 {} send errors, {} duplicates, {} reordered",
+             {} send errors, {} duplicates, {} reordered",
                 rx.lost,
                 rx.malformed,
                 rx.access_units_dropped,
@@ -405,10 +493,11 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
         // Not pass or fail: the number this phase exists to produce.
         checks.push(Check {
             name: "transport cost",
+            owner: Owner::Pipeline,
             passed: true,
             detail: format!(
                 "{} packets ({} single NAL, {} FU-A), {:.1} bytes on the wire per byte of \
-                 access unit, RFC 3550 jitter {}",
+             access unit, RFC 3550 jitter {}",
                 transport.tx.packets,
                 transport.tx.single_nal,
                 transport.tx.fu_a,
@@ -682,17 +771,16 @@ mod tests {
         assert!(!check.passed, "{}", check.detail);
     }
 
-    fn starvation_check(inputs: &GateInputs) -> Check {
-        let verdict = evaluate(inputs);
-        verdict
+    fn named(inputs: &GateInputs, name: &str) -> Check {
+        evaluate(inputs)
             .checks
             .into_iter()
-            .find(|check| check.name == "no decoder starvation")
-            .expect("starvation check")
+            .find(|check| check.name == name)
+            .unwrap_or_else(|| panic!("no check named {name}"))
     }
 
     #[test]
-    fn a_source_that_outruns_the_panel_is_not_starvation() {
+    fn a_source_that_outruns_the_panel_starves_nothing() {
         // 240 fps into a 120 Hz display: half the frames are thrown away by
         // design, and the decoder is nowhere near behind.
         let mut inputs = healthy(4_800);
@@ -705,8 +793,8 @@ mod tests {
             supersede_every: Some(2),
             ..Run::of(4_800)
         });
-        let check = starvation_check(&inputs);
-        assert!(check.passed, "{}", check.detail);
+        assert!(named(&inputs, "decoder keeps up").passed);
+        assert!(named(&inputs, "link holds cadence").passed);
     }
 
     #[test]
@@ -719,7 +807,7 @@ mod tests {
         inputs.rendered = 3_591;
         inputs.superseded = 9;
         inputs.empty_ticks = 3_626;
-        let check = starvation_check(&inputs);
+        let check = named(&inputs, "link holds cadence");
         assert!(check.passed, "{}", check.detail);
     }
 
@@ -738,30 +826,31 @@ mod tests {
             period_ms: 16.667,
             ..Run::of(3_600)
         });
-        let verdict = evaluate(&inputs);
-        let check = verdict
-            .checks
-            .iter()
-            .find(|check| check.name == "no present stalls")
-            .unwrap();
+        let check = named(&inputs, "no present stalls");
         assert!(check.passed, "{}", check.detail);
     }
 
     #[test]
-    fn a_decoder_that_falls_behind_the_panel_is_starvation() {
+    fn a_decoder_that_falls_behind_the_panel_is_our_failure() {
         let mut inputs = healthy(4_000);
         // 4000 frames over 60 s is 67/s against a 120 Hz panel.
         inputs.run_seconds = 60.0;
-        let check = starvation_check(&inputs);
+        let check = named(&inputs, "decoder keeps up");
         assert!(!check.passed, "{}", check.detail);
+        assert_eq!(check.owner, Owner::Pipeline);
     }
 
     #[test]
-    fn empty_ticks_beyond_phase_noise_still_fail() {
+    fn a_bursty_link_fails_the_link_and_not_the_pipeline() {
+        // What Wi-Fi actually did: every access unit arrived and decoded, but
+        // in bursts, so refreshes went empty. Blaming the decoder for that
+        // would send the next investigation to the wrong machine.
         let mut inputs = healthy(4_000);
         inputs.empty_ticks = 1_000;
-        let check = starvation_check(&inputs);
-        assert!(!check.passed, "{}", check.detail);
+        let verdict = evaluate(&inputs);
+        assert!(!verdict.link_passed());
+        assert!(verdict.pipeline_passed(), "{verdict}");
+        assert_eq!(named(&inputs, "link holds cadence").owner, Owner::Link);
     }
 
     #[test]
