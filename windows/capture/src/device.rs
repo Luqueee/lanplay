@@ -23,7 +23,8 @@ use windows::Win32::Graphics::Direct3D11::{
     ID3D11DeviceContext,
 };
 use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory1, IDXGIOutput,
+    CreateDXGIFactory1, DXGI_ERROR_INVALID_CALL, IDXGIAdapter1, IDXGIDevice, IDXGIFactory1,
+    IDXGIOutput,
 };
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
@@ -31,6 +32,7 @@ use windows::Win32::UI::HiDpi::{
 use windows::core::Interface;
 
 use crate::backend::CaptureError;
+use crate::trace;
 
 /// Which GPU, which driver, which output. Printed with every result.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -98,19 +100,52 @@ impl CaptureDevice {
         // SAFETY: every call below takes valid pointers and its result is
         // checked before use; the COM objects are refcounted by `windows`.
         unsafe {
-            let factory: IDXGIFactory1 = CreateDXGIFactory1().map_err(|e| CaptureError::Api {
-                call: "CreateDXGIFactory1",
-                hresult: e.code().0,
-            })?;
+            let span = trace::begin("create_factory", "api=CreateDXGIFactory1");
+            let factory: IDXGIFactory1 = match CreateDXGIFactory1() {
+                Ok(factory) => {
+                    span.ok("api=CreateDXGIFactory1");
+                    factory
+                }
+                Err(error) => {
+                    span.error(error.code().0, "api=CreateDXGIFactory1");
+                    return Err(CaptureError::Api {
+                        call: "CreateDXGIFactory1",
+                        hresult: error.code().0,
+                    });
+                }
+            };
 
             let mut chosen = None;
             for index in 0.. {
-                let Ok(adapter) = factory.EnumAdapters1(index) else {
-                    break;
+                let span = trace::begin("enumerate_adapter", format_args!("index={index}"));
+                let adapter = match factory.EnumAdapters1(index) {
+                    Ok(adapter) => {
+                        span.ok(format_args!("index={index}"));
+                        adapter
+                    }
+                    Err(error) => {
+                        span.error(error.code().0, format_args!("index={index}"));
+                        break;
+                    }
                 };
-                if let Ok(output) = adapter.EnumOutputs(output_index) {
-                    chosen = Some((adapter, output));
-                    break;
+                let span = trace::begin(
+                    "enumerate_output",
+                    format_args!("adapter_index={index} output_index={output_index}"),
+                );
+                match adapter.EnumOutputs(output_index) {
+                    Ok(output) => {
+                        span.ok(format_args!(
+                            "adapter_index={index} output_index={output_index}"
+                        ));
+                        chosen = Some((adapter, output));
+                        break;
+                    }
+                    Err(error) => {
+                        span.error(
+                            error.code().0,
+                            format_args!("adapter_index={index} output_index={output_index}"),
+                        );
+                    }
                 }
             }
             let (adapter, output) = chosen.ok_or_else(|| {
@@ -131,7 +166,11 @@ impl CaptureDevice {
             let mut level = D3D_FEATURE_LEVEL::default();
             // BGRA support is required: both backends are pinned to
             // B8G8R8A8_UNORM so that the comparison is not between formats.
-            D3D11CreateDevice(
+            let span = trace::begin(
+                "d3d11_create_device",
+                format_args!("adapter_luid={}", luid_as_i64(adapter_desc.AdapterLuid)),
+            );
+            let outcome = D3D11CreateDevice(
                 &adapter,
                 D3D_DRIVER_TYPE_UNKNOWN,
                 HMODULE::default(),
@@ -141,11 +180,22 @@ impl CaptureDevice {
                 Some(&mut device),
                 Some(&mut level),
                 Some(&mut context),
-            )
-            .map_err(|e| CaptureError::Api {
-                call: "D3D11CreateDevice",
-                hresult: e.code().0,
-            })?;
+            );
+            if let Err(error) = outcome {
+                span.error(
+                    error.code().0,
+                    format_args!("adapter_luid={}", luid_as_i64(adapter_desc.AdapterLuid)),
+                );
+                return Err(CaptureError::Api {
+                    call: "D3D11CreateDevice",
+                    hresult: error.code().0,
+                });
+            }
+            span.ok(format_args!(
+                "adapter_luid={} feature_level=0x{:X}",
+                luid_as_i64(adapter_desc.AdapterLuid),
+                level.0
+            ));
 
             let device = device.ok_or_else(|| {
                 CaptureError::Unsupported("D3D11CreateDevice returned no device".into())
@@ -153,6 +203,53 @@ impl CaptureDevice {
             let context = context.ok_or_else(|| {
                 CaptureError::Unsupported("D3D11CreateDevice returned no context".into())
             })?;
+
+            let dxgi_device = device
+                .cast::<IDXGIDevice>()
+                .map_err(|error| CaptureError::Api {
+                    call: "ID3D11Device::QueryInterface(IDXGIDevice)",
+                    hresult: error.code().0,
+                })?;
+            let device_adapter = dxgi_device
+                .GetAdapter()
+                .map_err(|error| CaptureError::Api {
+                    call: "IDXGIDevice::GetAdapter",
+                    hresult: error.code().0,
+                })?
+                .cast::<IDXGIAdapter1>()
+                .map_err(|error| CaptureError::Api {
+                    call: "IDXGIAdapter::QueryInterface(IDXGIAdapter1)",
+                    hresult: error.code().0,
+                })?;
+            let device_adapter_desc =
+                device_adapter
+                    .GetDesc1()
+                    .map_err(|error| CaptureError::Api {
+                        call: "IDXGIAdapter1::GetDesc1(device adapter)",
+                        hresult: error.code().0,
+                    })?;
+            let output_luid = luid_as_i64(adapter_desc.AdapterLuid);
+            let device_luid = luid_as_i64(device_adapter_desc.AdapterLuid);
+            let span = trace::begin(
+                "validate_adapter",
+                format_args!(
+                    "output_adapter_luid={output_luid} d3d11_device_adapter_luid={device_luid}"
+                ),
+            );
+            if output_luid != device_luid {
+                span.error(
+                    DXGI_ERROR_INVALID_CALL.0,
+                    format_args!(
+                        "output_adapter_luid={output_luid} d3d11_device_adapter_luid={device_luid} match=no"
+                    ),
+                );
+                return Err(CaptureError::Unsupported(format!(
+                    "output adapter LUID {output_luid} does not match D3D11 device adapter LUID {device_luid}"
+                )));
+            }
+            span.ok(format_args!(
+                "output_adapter_luid={output_luid} d3d11_device_adapter_luid={device_luid} match=yes"
+            ));
 
             let identity = DeviceIdentity {
                 adapter: String::from_utf16_lossy(trim_nul(&adapter_desc.Description)),

@@ -18,6 +18,8 @@ pub mod display_mode;
 #[cfg(windows)]
 pub mod texture_pool;
 #[cfg(windows)]
+mod trace;
+#[cfg(windows)]
 pub mod wgc;
 
 pub use backend::{

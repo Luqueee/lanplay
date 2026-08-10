@@ -28,6 +28,7 @@ use crate::backend::{
     Acquired, CaptureBackend, CaptureConfig, CaptureError, CapturedFrame, FrameMetadata, SourceMark,
 };
 use crate::device::CaptureDevice;
+use crate::trace;
 
 /// Which entry point creates the duplication.
 ///
@@ -65,16 +66,37 @@ impl DesktopDuplication {
     /// [`CaptureDevice::open`] picks the adapter from the output, so the
     /// pairing holds by construction and there is nothing to check here.
     pub fn new(device: &CaptureDevice) -> Result<DesktopDuplication, CaptureError> {
-        let (duplicator, api) = match device.output_as::<IDXGIOutput5>() {
-            Ok(output) => (Duplicator::WithFormatList(output), "DuplicateOutput1"),
-            // Only the cast falling back is a fallback. A `DuplicateOutput1`
-            // that fails on a supported cast is a real failure and is
-            // reported, not papered over with a call that would silently
-            // give us a different format.
-            Err(_) => (
-                Duplicator::Legacy(device.output_as::<IDXGIOutput1>()?),
-                "DuplicateOutput",
+        let span = trace::begin(
+            "query_output5",
+            format_args!(
+                "adapter_luid={} output={} format={DXGI_FORMAT_B8G8R8A8_UNORM:?}",
+                device.identity().luid,
+                device.identity().output,
             ),
+        );
+        let (duplicator, api) = match device.output().cast::<IDXGIOutput5>() {
+            Ok(output) => {
+                span.ok(format_args!(
+                    "adapter_luid={} output={} supported=yes",
+                    device.identity().luid,
+                    device.identity().output,
+                ));
+                (Duplicator::WithFormatList(output), "DuplicateOutput1")
+            }
+            Err(error) => {
+                span.error(
+                    error.code().0,
+                    format_args!(
+                        "adapter_luid={} output={} supported=no fallback=DuplicateOutput",
+                        device.identity().luid,
+                        device.identity().output,
+                    ),
+                );
+                (
+                    Duplicator::Legacy(device.output_as::<IDXGIOutput1>()?),
+                    "DuplicateOutput",
+                )
+            }
         };
 
         Ok(DesktopDuplication {
@@ -110,19 +132,46 @@ impl DesktopDuplication {
     }
 
     fn duplicate(&self) -> Result<IDXGIOutputDuplication, CaptureError> {
+        let format = match self.duplicator {
+            Duplicator::WithFormatList(_) => "B8G8R8A8_UNORM",
+            Duplicator::Legacy(_) => "driver-selected",
+        };
+        let span = trace::begin(
+            "duplicate_output",
+            format_args!("api={} format={format}", self.api),
+        );
         // SAFETY: both calls take a live device interface and, for the format
         // list, a slice whose length the binding derives itself. The returned
         // duplication is refcounted by `windows`.
-        unsafe {
+        let outcome = unsafe {
             match &self.duplicator {
-                Duplicator::WithFormatList(output) => output
+                Duplicator::WithFormatList(output) => {
                     // The flags argument is documented as reserved and must be
-                    // zero.
-                    .DuplicateOutput1(&self.device, 0, &[DXGI_FORMAT_B8G8R8A8_UNORM])
-                    .map_err(|e| creation_error("IDXGIOutput5::DuplicateOutput1", e)),
-                Duplicator::Legacy(output) => output
-                    .DuplicateOutput(&self.device)
-                    .map_err(|e| creation_error("IDXGIOutput1::DuplicateOutput", e)),
+                    // zero. The one-element list deliberately removes format
+                    // negotiation from this diagnostic.
+                    output.DuplicateOutput1(&self.device, 0, &[DXGI_FORMAT_B8G8R8A8_UNORM])
+                }
+                Duplicator::Legacy(output) => output.DuplicateOutput(&self.device),
+            }
+        };
+        match outcome {
+            Ok(duplication) => {
+                span.ok(format_args!("api={} format={format}", self.api));
+                Ok(duplication)
+            }
+            Err(error) => {
+                span.error(
+                    error.code().0,
+                    format_args!("api={} format={format}", self.api),
+                );
+                Err(creation_error(
+                    if self.api == "DuplicateOutput1" {
+                        "IDXGIOutput5::DuplicateOutput1"
+                    } else {
+                        "IDXGIOutput1::DuplicateOutput"
+                    },
+                    error,
+                ))
             }
         }
     }
@@ -175,15 +224,33 @@ impl CaptureBackend for DesktopDuplication {
         // duplication surface, and that cost lands on the machine running the
         // game we are trying not to disturb. Microsoft asks for the gap to be
         // minimal; this is where that is honoured.
+        let span = trace::begin(
+            "acquire_next_frame",
+            format_args!("timeout_ms={} holding={holding}", config.acquire_timeout_ms),
+        );
         let outcome = unsafe {
             if holding {
                 // A release that fails means the frame is already gone. The
                 // acquire below is what decides whether the duplication still
                 // works, so its result is the one that matters.
-                let _ = duplication.ReleaseFrame();
+                let release = trace::begin("release_frame", "reason=next_acquire");
+                match duplication.ReleaseFrame() {
+                    Ok(()) => release.ok("reason=next_acquire"),
+                    Err(error) => release.error(error.code().0, "reason=next_acquire"),
+                }
             }
             duplication.AcquireNextFrame(config.acquire_timeout_ms, &mut info, &mut resource)
         };
+        match &outcome {
+            Ok(()) => span.ok(format_args!(
+                "timeout_ms={} accumulated_frames={}",
+                config.acquire_timeout_ms, info.AccumulatedFrames
+            )),
+            Err(error) => span.error(
+                error.code().0,
+                format_args!("timeout_ms={}", config.acquire_timeout_ms),
+            ),
+        }
 
         if let Err(err) = outcome {
             return match err.code() {
@@ -220,8 +287,14 @@ impl CaptureBackend for DesktopDuplication {
                 // outstanding would fail every subsequent acquire.
                 if let Some(duplication) = self.duplication.as_ref() {
                     // SAFETY: live duplication, no arguments.
+                    let span = trace::begin("release_frame", "reason=invalid_resource");
                     unsafe {
-                        let _ = duplication.ReleaseFrame();
+                        match duplication.ReleaseFrame() {
+                            Ok(()) => span.ok("reason=invalid_resource"),
+                            Err(error) => {
+                                span.error(error.code().0, "reason=invalid_resource");
+                            }
+                        }
                     }
                 }
                 return Err(err);
@@ -269,8 +342,12 @@ impl CaptureBackend for DesktopDuplication {
         if self.held.take().is_some() {
             if let Some(duplication) = self.duplication.as_ref() {
                 // SAFETY: live duplication, no arguments.
+                let span = trace::begin("release_frame", "reason=stop");
                 unsafe {
-                    let _ = duplication.ReleaseFrame();
+                    match duplication.ReleaseFrame() {
+                        Ok(()) => span.ok("reason=stop"),
+                        Err(error) => span.error(error.code().0, "reason=stop"),
+                    }
                 }
             }
         }
