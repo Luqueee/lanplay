@@ -349,7 +349,10 @@ dependencies = [
  "lanplay-capture",
  "lanplay-encoder-nvenc",
  "lanplay-present-source",
+ "lanplay-protocol",
  "lanplay-telemetry",
+ "lanplay-transport",
+ "lanplay-video-core",
  "windows",
 ]
 

@@ -1,0 +1,72 @@
+;
+; IddSampleDriver.inf
+;
+
+[Version]
+PnpLockDown=1
+Signature="$Windows NT$"
+ClassGUID = {4D36E968-E325-11CE-BFC1-08002BE10318}
+Class = Display
+ClassVer = 2.0
+Provider=%ManufacturerName%
+CatalogFile=LanPlayIddLab.cat
+DriverVer=08/10/2026,0.1.0.0
+
+[Manufacturer]
+%ManufacturerName%=Standard,NT$ARCH$.10.0...22000
+
+[Standard.NT$ARCH$.10.0...22000]
+%DeviceName%=MyDevice_Install, Root\LanPlayIddLab
+%DeviceName%=MyDevice_Install, LanPlayIddLab
+
+[SourceDisksFiles]
+LanPlayIddLab.dll=1
+
+[SourceDisksNames]
+1 = %DiskName%
+
+; =================== UMDF Device ==================================
+
+[MyDevice_Install.NT]
+Include=WUDFRD.inf
+Needs=WUDFRD.NT
+CopyFiles=UMDriverCopy
+
+[MyDevice_Install.NT.hw]
+Include=WUDFRD.inf
+Needs=WUDFRD.NT.HW
+AddReg = MyDevice_HardwareDeviceSettings
+
+[MyDevice_HardwareDeviceSettings]
+HKR,, "UpperFilters",  %REG_MULTI_SZ%, "IndirectKmd"
+HKR, "WUDF", "DeviceGroupId", %REG_SZ%, "LanPlayIddLabGroup"
+
+[MyDevice_Install.NT.Services]
+Include=WUDFRD.inf
+Needs=WUDFRD.NT.Services
+
+[MyDevice_Install.NT.Wdf]
+UmdfService=LanPlayIddLab,LanPlayIddLab_Install
+UmdfServiceOrder=LanPlayIddLab
+UmdfKernelModeClientPolicy = AllowKernelModeClients
+
+[LanPlayIddLab_Install]
+UmdfLibraryVersion=$UMDFVERSION$
+ServiceBinary=%12%\UMDF\LanPlayIddLab.dll
+UmdfExtensions = IddCx0102
+
+[DestinationDirs]
+UMDriverCopy=12,UMDF ; copy to drivers\umdf
+
+[UMDriverCopy]
+LanPlayIddLab.dll
+
+; =================== Generic ==================================
+
+[Strings]
+ManufacturerName="LanPlay"
+DiskName = "LanPlay IDD-LAB Installation Disk"
+DeviceName="LanPlay IDD-LAB 1080p120"
+
+REG_MULTI_SZ  = 0x00010000
+REG_SZ        = 0x00000000

@@ -35,6 +35,68 @@ const VERIFY_WINDOW: usize = 1024;
 /// How long the receive loop blocks before checking whether it should stop.
 const RECV_TIMEOUT: Duration = Duration::from_millis(100);
 
+/// How many frames back the arrival marks remember having been emitted.
+///
+/// Sized against the depacketiser's reorder window: a packet older than the
+/// window is discarded rather than reassembled, so a frame that has fallen
+/// out of this ring can no longer produce a mark either.
+const MARKED_FRAMES: usize = 64;
+
+/// Which frames have already had their arrival marks recorded.
+///
+/// A reordered packet can arrive after the next frame has started, so "is
+/// this frame new?" cannot be answered by remembering only the last id: on a
+/// link that reorders, the older frame would be marked a second time and the
+/// collector would count a duplicate. A fixed ring costs one linear scan of
+/// 64 `u64`s per packet, allocates nothing, and never grows.
+struct MarkedFrames {
+    /// Ring of ids; `FrameId::NONE` is the empty slot.
+    ids: [FrameId; MARKED_FRAMES],
+    /// Set for a frame whose marker packet has been seen.
+    ended: [bool; MARKED_FRAMES],
+    next: usize,
+}
+
+impl MarkedFrames {
+    fn new() -> Self {
+        MarkedFrames {
+            ids: [FrameId::NONE; MARKED_FRAMES],
+            ended: [false; MARKED_FRAMES],
+            next: 0,
+        }
+    }
+
+    fn slot(&self, frame: FrameId) -> Option<usize> {
+        self.ids.iter().position(|id| *id == frame)
+    }
+
+    /// Whether this packet is the first sighting of its frame.
+    fn arrived(&mut self, frame: FrameId) -> bool {
+        if self.slot(frame).is_some() {
+            return false;
+        }
+        self.ids[self.next] = frame;
+        self.ended[self.next] = false;
+        self.next = (self.next + 1) % MARKED_FRAMES;
+        true
+    }
+
+    /// Whether this is the first marker packet seen for its frame. A
+    /// duplicated marker is the other way the same mark arrives twice.
+    fn ended(&mut self, frame: FrameId) -> bool {
+        let Some(slot) = self.slot(frame) else {
+            // Evicted between its first packet and its marker: too old to
+            // mark, and reassembly will have discarded it as well.
+            return false;
+        };
+        if self.ended[slot] {
+            return false;
+        }
+        self.ended[slot] = true;
+        true
+    }
+}
+
 pub struct TransportOutcome {
     pub tx: TxStats,
     pub rx: RxStats,
@@ -206,7 +268,7 @@ pub fn receive_loop(
     });
 
     let mut datagram = [0u8; MAX_UDP_PAYLOAD];
-    let mut in_flight: Option<FrameId> = None;
+    let mut marked = MarkedFrames::new();
     let mut outcome = ReceiverOutcome {
         rx: RxStats::default(),
         jitter: Nanos::ZERO,
@@ -234,11 +296,10 @@ pub fn receive_loop(
         if let Ok(packet) = parse_packet(bytes)
             && let Some(frame) = packet.header.frame_id
         {
-            if in_flight != Some(frame) {
+            if marked.arrived(frame) {
                 recorder.mark(frame, Stage::NetworkReceiveFirst);
-                in_flight = Some(frame);
             }
-            if packet.header.marker {
+            if packet.header.marker && marked.ended(frame) {
                 recorder.mark(frame, Stage::NetworkReceiveLast);
             }
         }
@@ -327,5 +388,40 @@ mod tests {
         ledger.record(FrameId::new(1), b"one");
         assert!(ledger.entries.lock().is_empty());
         assert_eq!(ledger.check(FrameId::new(1), b"one"), None);
+    }
+
+    /// The failure this exists to stop: on a link that reorders, a late
+    /// packet of an earlier frame must not mark that frame's arrival twice.
+    #[test]
+    fn a_reordered_packet_does_not_mark_its_frame_a_second_time() {
+        let mut marked = MarkedFrames::new();
+        assert!(marked.arrived(FrameId::new(1)));
+        assert!(marked.arrived(FrameId::new(2)));
+        // A straggler from frame 1, arriving after frame 2 started.
+        assert!(!marked.arrived(FrameId::new(1)));
+        assert!(!marked.arrived(FrameId::new(2)));
+    }
+
+    #[test]
+    fn only_the_first_marker_packet_ends_a_frame() {
+        let mut marked = MarkedFrames::new();
+        marked.arrived(FrameId::new(9));
+        assert!(marked.ended(FrameId::new(9)));
+        // A duplicated marker packet is the other way the mark doubles.
+        assert!(!marked.ended(FrameId::new(9)));
+        // Never seen: too old to be reassembled, so too old to be marked.
+        assert!(!marked.ended(FrameId::new(10)));
+    }
+
+    #[test]
+    fn the_ring_forgets_frames_older_than_the_reorder_window() {
+        let mut marked = MarkedFrames::new();
+        for index in 1..=(MARKED_FRAMES as u64 + 1) {
+            assert!(marked.arrived(FrameId::new(index)));
+        }
+        // Frame 1 was evicted by frame 65, so it reads as new again. That is
+        // the bound: memory is fixed, and a frame that old is unreassemblable.
+        assert!(marked.arrived(FrameId::new(1)));
+        assert!(!marked.arrived(FrameId::new(MARKED_FRAMES as u64 + 1)));
     }
 }

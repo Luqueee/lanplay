@@ -9,6 +9,9 @@ license.workspace = true
 lanplay-capture = { workspace = true }
 lanplay-encoder-nvenc = { workspace = true }
 lanplay-present-source = { workspace = true }
+lanplay-protocol = { workspace = true }
+lanplay-transport = { workspace = true }
+lanplay-video-core = { workspace = true }
 lanplay-telemetry = { workspace = true }
 clap = { workspace = true }
 

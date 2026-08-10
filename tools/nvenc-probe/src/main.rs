@@ -103,6 +103,20 @@ struct Args {
     mode: RunMode,
     #[arg(long, value_enum, default_value_t = ContentSource::Flat)]
     source: ContentSource,
+    /// Which DXGI output to capture. Synthetic sources still create their
+    /// D3D11/NVENC device on the adapter that owns this output.
+    #[arg(long, default_value_t = 0)]
+    output: u32,
+    /// Send each completed H.264 access unit as RTP/UDP to this receiver.
+    #[arg(long)]
+    send_to: Option<std::net::SocketAddr>,
+    /// RTP datagram size, including headers.
+    #[arg(long, default_value_t = lanplay_transport::MAX_UDP_PAYLOAD)]
+    mtu: usize,
+    /// Send every packet of an access unit immediately. Useful only when the
+    /// encoded rate is already far below link capacity.
+    #[arg(long)]
+    burst_rtp: bool,
     /// Overrides `--frames`; intended for paced soak runs.
     #[arg(long)]
     seconds: Option<u64>,
@@ -127,6 +141,102 @@ struct Surface {
 struct SourceSample {
     wait_ns: u64,
     accumulated_frames: u32,
+    update: lanplay_capture::FrameUpdate,
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, Default)]
+struct NetworkSample {
+    packets: u32,
+    bytes: u64,
+    errors: u64,
+    send_ns: u64,
+}
+
+#[cfg(windows)]
+struct MediaSender {
+    socket: std::net::UdpSocket,
+    packetizer: lanplay_transport::Packetizer,
+    fps: u32,
+    nanos_per_wire_byte: f64,
+    next_send: std::time::Instant,
+}
+
+#[cfg(windows)]
+impl MediaSender {
+    fn new(
+        target: std::net::SocketAddr,
+        fps: u32,
+        mtu: usize,
+        bitrate_mbps: u32,
+        burst: bool,
+    ) -> Result<Self, String> {
+        let socket = std::net::UdpSocket::bind("0.0.0.0:0")
+            .map_err(|error| format!("bind RTP sender: {error}"))?;
+        socket
+            .connect(target)
+            .map_err(|error| format!("connect RTP sender to {target}: {error}"))?;
+        let packetizer = lanplay_transport::Packetizer::new(
+            lanplay_transport::Ssrc(lanplay_transport::random_u32()),
+            lanplay_transport::RtpClock::new(
+                lanplay_transport::H264_CLOCK_RATE,
+                lanplay_transport::random_u32(),
+            ),
+            lanplay_transport::H264_PAYLOAD_TYPE,
+            mtu,
+        );
+        Ok(Self {
+            socket,
+            packetizer,
+            fps,
+            nanos_per_wire_byte: if burst {
+                0.0
+            } else {
+                8_000.0 / f64::from(bitrate_mbps)
+            },
+            next_send: std::time::Instant::now(),
+        })
+    }
+
+    fn send(&mut self, frame: u64, is_idr: bool, data: Vec<u8>) -> Result<NetworkSample, String> {
+        let started = std::time::Instant::now();
+        let unit = lanplay_video_core::EncodedAccessUnit {
+            id: lanplay_protocol::FrameId::new(frame + 1),
+            pts: lanplay_video_core::VideoTimestamp::from_frame_index(frame, self.fps, 1),
+            is_idr,
+            data,
+        };
+        self.next_send = self.next_send.max(started);
+        let mut sent = 0u64;
+        let mut errors = 0u64;
+        let socket = &self.socket;
+        let next_send = &mut self.next_send;
+        let nanos_per_wire_byte = self.nanos_per_wire_byte;
+        let packetized = self
+            .packetizer
+            .packetize(&unit, |datagram| {
+                if nanos_per_wire_byte > 0.0 {
+                    wait_until(*next_send);
+                }
+                match socket.send(datagram) {
+                    Ok(bytes) => sent += bytes as u64,
+                    Err(_) => errors += 1,
+                }
+                if nanos_per_wire_byte > 0.0 {
+                    // IPv4 and UDP add 28 bytes not present in the datagram.
+                    *next_send += std::time::Duration::from_nanos(
+                        ((datagram.len() as u64 + 28) as f64 * nanos_per_wire_byte) as u64,
+                    );
+                }
+            })
+            .map_err(|error| format!("packetize frame {frame}: {error}"))?;
+        Ok(NetworkSample {
+            packets: packetized.packets,
+            bytes: sent,
+            errors,
+            send_ns: started.elapsed().as_nanos() as u64,
+        })
+    }
 }
 
 #[cfg(windows)]
@@ -224,6 +334,7 @@ fn capture_into_surface<B: lanplay_capture::CaptureBackend>(
                     return Ok(SourceSample {
                         wait_ns: started.elapsed().as_nanos() as u64,
                         accumulated_frames: accumulated,
+                        update: captured.metadata.update,
                     });
                 }
                 lanplay_capture::Acquired::Timeout => false,
@@ -245,6 +356,7 @@ struct Work<'a> {
     preprocess_ns: u64,
     source_wait_ns: u64,
     accumulated_frames: u32,
+    update: lanplay_capture::FrameUpdate,
     submitted: lanplay_encoder_nvenc::SubmittedFrame<'a>,
     admitted: std::time::Instant,
     admission_wait_ns: u64,
@@ -261,6 +373,7 @@ struct FrameMetrics {
     preprocess_gpu_ns: Option<u64>,
     source_wait_ns: u64,
     accumulated_frames: u32,
+    update: lanplay_capture::FrameUpdate,
     bytes: usize,
     admission_wait_ns: u64,
     map_ns: u64,
@@ -271,6 +384,7 @@ struct FrameMetrics {
     unlock_ns: u64,
     residency_ns: u64,
     slot_residency_ns: u64,
+    network: NetworkSample,
 }
 
 #[cfg(windows)]
@@ -304,7 +418,7 @@ fn windows_main() -> Result<(), String> {
         .checked_mul(1_000_000)
         .ok_or_else(|| "bitrate overflows u32".to_owned())?;
 
-    let device = lanplay_capture::CaptureDevice::open(0).map_err(|e| e.to_string())?;
+    let device = lanplay_capture::CaptureDevice::open(args.output).map_err(|e| e.to_string())?;
     println!("device {}", device.identity());
     let mut surfaces = Vec::with_capacity(SLOT_COUNT);
     for _ in 0..SLOT_COUNT {
@@ -399,6 +513,18 @@ fn windows_main() -> Result<(), String> {
         }
     });
 
+    let sender = args
+        .send_to
+        .map(|target| {
+            MediaSender::new(
+                target,
+                args.fps,
+                args.mtu,
+                args.bitrate_mbps,
+                args.burst_rtp,
+            )
+        })
+        .transpose()?;
     let run = run_pipeline(
         &session,
         device.context(),
@@ -414,6 +540,7 @@ fn windows_main() -> Result<(), String> {
         args.warmup,
         frames,
         args.idr_interval,
+        sender,
     );
     memory_stop.store(true, Ordering::Release);
     let memory = memory_samples
@@ -440,6 +567,7 @@ fn run_pipeline<'a>(
     first_frame: u64,
     frames: u64,
     idr_interval: u64,
+    sender: Option<MediaSender>,
 ) -> Result<(Vec<FrameMetrics>, std::time::Duration, u64), String> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -464,6 +592,7 @@ fn run_pipeline<'a>(
     let outcome = std::thread::scope(|scope| -> Result<Vec<FrameMetrics>, String> {
         let completion_failed = Arc::clone(&failed);
         let completion = scope.spawn(move || {
+            let mut sender = sender;
             while let Ok(work) = work_rx.recv() {
                 let slot = work.slot;
                 let result = if completion_failed.load(Ordering::Acquire) {
@@ -472,7 +601,7 @@ fn run_pipeline<'a>(
                         work.submitted.frame_index()
                     ))
                 } else {
-                    complete_work(session, work)
+                    complete_work(session, work, sender.as_mut())
                 };
                 if result.is_err() {
                     completion_failed.store(true, Ordering::Release);
@@ -541,6 +670,7 @@ fn run_pipeline<'a>(
                     preprocess_ns,
                     source_wait_ns: source.wait_ns,
                     accumulated_frames: source.accumulated_frames,
+                    update: source.update,
                     submitted,
                     admitted,
                     admission_wait_ns,
@@ -599,6 +729,7 @@ fn run_pipeline<'a>(
 fn complete_work(
     session: &lanplay_encoder_nvenc::NvencSession,
     work: Work<'_>,
+    mut sender: Option<&mut MediaSender>,
 ) -> Result<FrameMetrics, String> {
     let frame = work.submitted.frame_index();
     let is_idr = work.submitted.is_idr();
@@ -612,21 +743,34 @@ fn complete_work(
         .map_err(|e| format!("lock frame {frame}: {e}"))?;
     let lock_return = std::time::Instant::now();
     validate_bitstream(locked.bytes(), frame)?;
-    let bytes = locked.bytes().to_vec();
+    let bytes = if sender.is_some() {
+        lanplay_video_core::to_avcc(
+            lanplay_video_core::split_annex_b(locked.bytes()),
+            lanplay_transport::NAL_LENGTH_SIZE,
+        )
+    } else {
+        locked.bytes().to_vec()
+    };
+    let encoded_bytes = bytes.len();
     let copy_end = std::time::Instant::now();
     let unlock_start = std::time::Instant::now();
     locked
         .unlock()
         .map_err(|e| format!("unlock frame {frame}: {e}"))?;
     let unlock_end = std::time::Instant::now();
+    let network = match sender.as_deref_mut() {
+        Some(sender) => sender.send(frame, is_idr, bytes)?,
+        None => NetworkSample::default(),
+    };
     Ok(FrameMetrics {
         frame,
         is_idr,
         preprocess_ns: work.preprocess_ns,
         source_wait_ns: work.source_wait_ns,
         accumulated_frames: work.accumulated_frames,
+        update: work.update,
         preprocess_gpu_ns: None,
-        bytes: bytes.len(),
+        bytes: encoded_bytes,
         admission_wait_ns: work.admission_wait_ns,
         map_ns: work.map_ns,
         submit_ns: work.submit_ns,
@@ -636,6 +780,7 @@ fn complete_work(
         unlock_ns: (unlock_end - unlock_start).as_nanos() as u64,
         residency_ns: (copy_end - work.submit_end).as_nanos() as u64,
         slot_residency_ns: (unlock_end - work.admitted).as_nanos() as u64,
+        network,
     })
 }
 
@@ -691,11 +836,35 @@ fn report(
     );
     if matches!(args.source, ContentSource::Dda | ContentSource::Wgc) {
         print_stage("capture acquire", metrics.iter().map(|m| m.source_wait_ns));
-        let accumulated: u64 = metrics
+    }
+    if args.source == ContentSource::Dda {
+        let (desktop, pointer_only, other) =
+            capture_update_counts(metrics.iter().map(|metric| metric.update));
+        let accumulated =
+            CountDistribution::new(metrics.iter().map(|metric| metric.accumulated_frames));
+        println!(
+            "DDA AcquireNextFrame S_OK {} = {:.2}/s",
+            metrics.len(),
+            metrics.len() as f64 / elapsed.as_secs_f64()
+        );
+        println!(
+            "DDA desktop updates (LastPresentTime != 0) {desktop} = {:.2}/s",
+            desktop as f64 / elapsed.as_secs_f64()
+        );
+        println!(
+            "DDA pointer-only (LastPresentTime == 0, LastMouseUpdateTime != 0) {pointer_only} = {:.2}/s",
+            pointer_only as f64 / elapsed.as_secs_f64()
+        );
+        println!(
+            "DDA other updates (both timestamps zero) {other} = {:.2}/s",
+            other as f64 / elapsed.as_secs_f64()
+        );
+        println!("DDA AccumulatedFrames {accumulated}");
+        let accumulated_while_busy: u64 = metrics
             .iter()
-            .map(|m| u64::from(m.accumulated_frames.saturating_sub(1)))
+            .map(|metric| u64::from(metric.accumulated_frames.saturating_sub(1)))
             .sum();
-        println!("capture newer frames accumulated while busy: {accumulated}");
+        println!("capture newer frames accumulated while busy: {accumulated_while_busy}");
     }
     print_stage(
         "admission wait",
@@ -707,6 +876,16 @@ fn report(
     print_stage("lock after event", metrics.iter().map(|m| m.lock_ns));
     print_stage("bitstream copy", metrics.iter().map(|m| m.copy_ns));
     print_stage("unlock", metrics.iter().map(|m| m.unlock_ns));
+    if args.send_to.is_some() {
+        print_stage("network send", metrics.iter().map(|m| m.network.send_ns));
+        let packets: u64 = metrics
+            .iter()
+            .map(|metric| u64::from(metric.network.packets))
+            .sum();
+        let bytes: u64 = metrics.iter().map(|metric| metric.network.bytes).sum();
+        let errors: u64 = metrics.iter().map(|metric| metric.network.errors).sum();
+        println!("RTP/UDP sent {packets} packets, {bytes} bytes, {errors} errors");
+    }
     print_stage("RGB->NV12 CPU", metrics.iter().map(|m| m.preprocess_ns));
     let gpu_conversion: Vec<u64> = metrics.iter().filter_map(|m| m.preprocess_gpu_ns).collect();
     if !gpu_conversion.is_empty() {
@@ -771,11 +950,13 @@ fn report(
     let ordered = metrics
         .windows(2)
         .all(|pair| pair[1].frame == pair[0].frame + 1);
+    let network_errors: u64 = metrics.iter().map(|metric| metric.network.errors).sum();
     let passed = metrics.len() as u64 == frames
         && completion.p99() <= period_ns
         && total_bytes > 0
         && ordered
-        && paced_ok;
+        && paced_ok
+        && network_errors == 0;
     println!(
         "gate: {} (completed {}/{}, ordered {}, completion p99 {:.3}/{:.3} ms, pool exhausted {})",
         if passed { "PASS" } else { "FAIL" },
@@ -880,6 +1061,53 @@ fn validate_bitstream(bytes: &[u8], frame: u64) -> Result<(), String> {
 }
 
 #[cfg(windows)]
+fn capture_update_counts(
+    updates: impl IntoIterator<Item = lanplay_capture::FrameUpdate>,
+) -> (u64, u64, u64) {
+    updates.into_iter().fold(
+        (0, 0, 0),
+        |(desktop, pointer_only, other), update| match update {
+            lanplay_capture::FrameUpdate::Desktop => (desktop + 1, pointer_only, other),
+            lanplay_capture::FrameUpdate::PointerOnly => (desktop, pointer_only + 1, other),
+            lanplay_capture::FrameUpdate::Other => (desktop, pointer_only, other + 1),
+        },
+    )
+}
+
+#[cfg(windows)]
+struct CountDistribution {
+    values: Vec<u64>,
+}
+
+#[cfg(windows)]
+impl CountDistribution {
+    fn new(values: impl IntoIterator<Item = u32>) -> Self {
+        let mut values: Vec<_> = values.into_iter().map(u64::from).collect();
+        values.sort_unstable();
+        Self { values }
+    }
+
+    fn percentile(&self, percentile: usize) -> u64 {
+        let index = (self.values.len() - 1) * percentile / 100;
+        self.values[index]
+    }
+}
+
+#[cfg(windows)]
+impl std::fmt::Display for CountDistribution {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "p50 {} p95 {} p99 {} max {}",
+            self.percentile(50),
+            self.percentile(95),
+            self.percentile(99),
+            self.values[self.values.len() - 1],
+        )
+    }
+}
+
+#[cfg(windows)]
 struct Distribution {
     values: Vec<u64>,
 }
@@ -916,5 +1144,29 @@ impl std::fmt::Display for Distribution {
             self.percentile(99) as f64 / 1_000_000.0,
             self.max() as f64 / 1_000_000.0,
         )
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capture_audit_separates_desktop_pointer_and_other_updates() {
+        let updates = [
+            lanplay_capture::FrameUpdate::Desktop,
+            lanplay_capture::FrameUpdate::PointerOnly,
+            lanplay_capture::FrameUpdate::Desktop,
+            lanplay_capture::FrameUpdate::Other,
+        ];
+
+        assert_eq!(capture_update_counts(updates), (2, 1, 1));
+    }
+
+    #[test]
+    fn accumulated_frame_distribution_reports_raw_frame_counts() {
+        let distribution = CountDistribution::new([1, 1, 1, 2, 5]);
+
+        assert_eq!(distribution.to_string(), "p50 1 p95 2 p99 2 max 5");
     }
 }

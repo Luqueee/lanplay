@@ -23,7 +23,8 @@ mod trace;
 pub mod wgc;
 
 pub use backend::{
-    Acquired, CaptureBackend, CaptureConfig, CaptureError, CapturedFrame, FrameMetadata, SourceMark,
+    Acquired, CaptureBackend, CaptureConfig, CaptureError, CapturedFrame, FrameMetadata,
+    FrameUpdate, SourceMark,
 };
 
 #[cfg(windows)]
