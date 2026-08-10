@@ -320,6 +320,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lanplay-encoder-nvenc"
+version = "0.1.0"
+dependencies = [
+ "nvenc-sys",
+ "windows",
+]
+
+[[package]]
 name = "lanplay-net-bench"
 version = "0.1.0"
 dependencies = [
@@ -331,6 +339,14 @@ dependencies = [
  "lanplay-video-core",
  "libc",
  "sha2",
+]
+
+[[package]]
+name = "lanplay-nvenc-probe"
+version = "0.1.0"
+dependencies = [
+ "lanplay-capture",
+ "lanplay-encoder-nvenc",
 ]
 
 [[package]]
@@ -429,6 +445,11 @@ checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
 ]
+
+[[package]]
+name = "nvenc-sys"
+version = "0.1.0"
+source = "git+https://github.com/legion-labs/nvenc-sys.git?rev=996be4ceac8112e14ae127adcf8c699bcc1618f5#996be4ceac8112e14ae127adcf8c699bcc1618f5"
 
 [[package]]
 name = "objc2"

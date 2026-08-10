@@ -12,7 +12,9 @@ members = [
     "tools/capture-bench",
     "tools/net-bench",
     "tools/present-source",
+    "tools/nvenc-probe",
     "windows/capture",
+    "windows/encoder-nvenc",
     "xtask",
 ]
 
@@ -25,6 +27,7 @@ license = "MIT"
 [workspace.dependencies]
 lanplay-capabilities = { path = "crates/capabilities" }
 lanplay-capture = { path = "windows/capture" }
+lanplay-encoder-nvenc = { path = "windows/encoder-nvenc" }
 lanplay-decoder-videotoolbox = { path = "macos/decoder-videotoolbox" }
 lanplay-protocol = { path = "crates/protocol" }
 lanplay-renderer-metal = { path = "macos/renderer-metal" }

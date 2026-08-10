@@ -1,0 +1,10 @@
+[package]
+name = "lanplay-encoder-nvenc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+nvenc-sys = { git = "https://github.com/legion-labs/nvenc-sys.git", rev = "996be4ceac8112e14ae127adcf8c699bcc1618f5" }
+windows = { workspace = true }
