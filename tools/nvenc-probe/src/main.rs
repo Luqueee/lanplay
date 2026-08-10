@@ -76,7 +76,9 @@ enum ContentSource {
     /// GPU-generated motion, high-frequency detail, and frame-wide scene changes.
     Pattern,
     /// Live Desktop Duplication copied into the encoder-owned slot.
-    Capture,
+    Dda,
+    /// Live Windows.Graphics.Capture copied into the encoder-owned slot.
+    Wgc,
 }
 
 #[cfg(windows)]
@@ -131,7 +133,8 @@ struct SourceSample {
 enum Content {
     Flat,
     Pattern(lanplay_present_source::gpu::Pipeline),
-    Capture(lanplay_capture::DesktopDuplication),
+    Dda(lanplay_capture::DesktopDuplication),
+    Wgc(lanplay_capture::GraphicsCapture),
 }
 
 #[cfg(windows)]
@@ -142,20 +145,15 @@ impl Content {
             ContentSource::Pattern => lanplay_present_source::gpu::Pipeline::new(device.device())
                 .map(Self::Pattern)
                 .map_err(|error| error.to_string()),
-            ContentSource::Capture => {
-                let mut capture =
+            ContentSource::Dda => {
+                let capture =
                     lanplay_capture::DesktopDuplication::new(device).map_err(|e| e.to_string())?;
-                lanplay_capture::CaptureBackend::start(
-                    &mut capture,
-                    lanplay_capture::CaptureConfig {
-                        output: 0,
-                        buffers: 2,
-                        acquire_timeout_ms: 100,
-                        cursor: false,
-                    },
-                )
-                .map_err(|e| e.to_string())?;
-                Ok(Self::Capture(capture))
+                start_capture(capture).map(Self::Dda)
+            }
+            ContentSource::Wgc => {
+                let capture =
+                    lanplay_capture::GraphicsCapture::new(device).map_err(|e| e.to_string())?;
+                start_capture(capture).map(Self::Wgc)
             }
         }
     }
@@ -177,46 +175,66 @@ impl Content {
                 pipeline.draw_target(context, &surface.target, width, height, frame as u32);
                 Ok(SourceSample::default())
             }
-            Self::Capture(capture) => {
-                let started = std::time::Instant::now();
-                let deadline = started + std::time::Duration::from_secs(1);
-                loop {
-                    let restart = {
-                        match lanplay_capture::CaptureBackend::acquire(capture)
-                            .map_err(|e| e.to_string())?
-                        {
-                            lanplay_capture::Acquired::Frame(captured) => {
-                                if captured.width != width || captured.height != height {
-                                    return Err(format!(
-                                        "capture is {}x{}, encoder is {width}x{height}",
-                                        captured.width, captured.height
-                                    ));
-                                }
-                                let accumulated = captured.metadata.accumulated_frames.unwrap_or(1);
-                                // SAFETY: both textures belong to the same
-                                // device, have identical dimensions/format,
-                                // and remain alive through command submission.
-                                unsafe {
-                                    context.CopyResource(&surface.texture, captured.texture);
-                                }
-                                return Ok(SourceSample {
-                                    wait_ns: started.elapsed().as_nanos() as u64,
-                                    accumulated_frames: accumulated,
-                                });
-                            }
-                            lanplay_capture::Acquired::Timeout => false,
-                            lanplay_capture::Acquired::Lost => true,
-                        }
-                    };
-                    if restart {
-                        lanplay_capture::CaptureBackend::restart(capture)
-                            .map_err(|e| e.to_string())?;
+            Self::Dda(capture) => capture_into_surface(capture, context, surface, width, height),
+            Self::Wgc(capture) => capture_into_surface(capture, context, surface, width, height),
+        }
+    }
+}
+
+#[cfg(windows)]
+fn start_capture<B: lanplay_capture::CaptureBackend>(mut capture: B) -> Result<B, String> {
+    capture
+        .start(lanplay_capture::CaptureConfig {
+            output: 0,
+            buffers: 2,
+            acquire_timeout_ms: 100,
+            cursor: false,
+        })
+        .map_err(|error| error.to_string())?;
+    Ok(capture)
+}
+
+#[cfg(windows)]
+fn capture_into_surface<B: lanplay_capture::CaptureBackend>(
+    capture: &mut B,
+    context: &windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext,
+    surface: &Surface,
+    width: u32,
+    height: u32,
+) -> Result<SourceSample, String> {
+    let started = std::time::Instant::now();
+    let deadline = started + std::time::Duration::from_secs(1);
+    loop {
+        let restart = {
+            match capture.acquire().map_err(|error| error.to_string())? {
+                lanplay_capture::Acquired::Frame(captured) => {
+                    if captured.width != width || captured.height != height {
+                        return Err(format!(
+                            "capture is {}x{}, encoder is {width}x{height}",
+                            captured.width, captured.height
+                        ));
                     }
-                    if std::time::Instant::now() >= deadline {
-                        return Err("capture produced no frame for one second".into());
+                    let accumulated = captured.metadata.accumulated_frames.unwrap_or(1);
+                    // SAFETY: both textures belong to the same device, have
+                    // identical dimensions/format, and remain alive through
+                    // command submission.
+                    unsafe {
+                        context.CopyResource(&surface.texture, captured.texture);
                     }
+                    return Ok(SourceSample {
+                        wait_ns: started.elapsed().as_nanos() as u64,
+                        accumulated_frames: accumulated,
+                    });
                 }
+                lanplay_capture::Acquired::Timeout => false,
+                lanplay_capture::Acquired::Lost => true,
             }
+        };
+        if restart {
+            capture.restart().map_err(|error| error.to_string())?;
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err("capture produced no frame for one second".into());
         }
     }
 }
@@ -671,7 +689,7 @@ fn report(
         throughput,
         pool_exhaustions
     );
-    if args.source == ContentSource::Capture {
+    if matches!(args.source, ContentSource::Dda | ContentSource::Wgc) {
         print_stage("capture acquire", metrics.iter().map(|m| m.source_wait_ns));
         let accumulated: u64 = metrics
             .iter()
