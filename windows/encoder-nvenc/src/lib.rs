@@ -14,11 +14,13 @@ use core::mem;
 use core::ptr;
 
 use nvenc_sys::{
-    GUID, NV_ENC_BUFFER_FORMAT, NV_ENC_BUFFER_USAGE, NV_ENC_CODEC_H264_GUID, NV_ENC_CONFIG_VER,
+    GUID, NV_ENC_BUFFER_FORMAT, NV_ENC_BUFFER_USAGE, NV_ENC_CAPS, NV_ENC_CAPS_PARAM,
+    NV_ENC_CAPS_PARAM_VER, NV_ENC_CODEC_H264_GUID, NV_ENC_CONFIG_VER,
     NV_ENC_CREATE_BITSTREAM_BUFFER, NV_ENC_CREATE_BITSTREAM_BUFFER_VER, NV_ENC_DEVICE_TYPE,
-    NV_ENC_H264_PROFILE_HIGH_GUID, NV_ENC_INITIALIZE_PARAMS, NV_ENC_INITIALIZE_PARAMS_VER,
-    NV_ENC_INPUT_RESOURCE_TYPE, NV_ENC_LOCK_BITSTREAM, NV_ENC_LOCK_BITSTREAM_VER,
-    NV_ENC_MAP_INPUT_RESOURCE, NV_ENC_MAP_INPUT_RESOURCE_VER, NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS,
+    NV_ENC_EVENT_PARAMS, NV_ENC_EVENT_PARAMS_VER, NV_ENC_H264_PROFILE_HIGH_GUID,
+    NV_ENC_INITIALIZE_PARAMS, NV_ENC_INITIALIZE_PARAMS_VER, NV_ENC_INPUT_RESOURCE_TYPE,
+    NV_ENC_LOCK_BITSTREAM, NV_ENC_LOCK_BITSTREAM_VER, NV_ENC_MAP_INPUT_RESOURCE,
+    NV_ENC_MAP_INPUT_RESOURCE_VER, NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS,
     NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER, NV_ENC_PARAMS_RC_MODE, NV_ENC_PIC_FLAGS,
     NV_ENC_PIC_PARAMS, NV_ENC_PIC_PARAMS_VER, NV_ENC_PIC_STRUCT, NV_ENC_PRESET_CONFIG,
     NV_ENC_PRESET_CONFIG_VER, NV_ENC_PRESET_P1_GUID, NV_ENC_REGISTER_RESOURCE,
@@ -26,7 +28,9 @@ use nvenc_sys::{
     NV_ENCODE_API_FUNCTION_LIST, NV_ENCODE_API_FUNCTION_LIST_VER, NVENC_INFINITE_GOPLENGTH,
     NVENCAPI_VERSION, NVENCSTATUS, NvEncodeApiCreateInstanceFn,
 };
+use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, WAIT_FAILED, WAIT_OBJECT_0};
 use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11Texture2D};
+use windows::Win32::System::Threading::{CreateEventW, INFINITE, WaitForSingleObject};
 use windows::core::Interface;
 
 #[allow(non_snake_case)]
@@ -46,6 +50,7 @@ pub enum NvencError {
     Unavailable(&'static str),
     NotInitialized,
     Api { call: &'static str, status: i32 },
+    Win32 { call: &'static str, code: u32 },
     InvalidApiFunction(&'static str),
     InvalidCount(&'static str, u32),
     InvalidOutput(&'static str),
@@ -58,6 +63,9 @@ impl fmt::Display for NvencError {
             NvencError::NotInitialized => f.write_str("NVENC encoder is not initialized"),
             NvencError::Api { call, status } => {
                 write!(f, "{call} failed with status {status}")
+            }
+            NvencError::Win32 { call, code } => {
+                write!(f, "{call} failed with Win32 error {code}")
             }
             NvencError::InvalidApiFunction(name) => write!(f, "NVENC function missing: {name}"),
             NvencError::InvalidCount(name, count) => {
@@ -141,8 +149,8 @@ impl Drop for Api {
     }
 }
 
-/// One synchronous H.264 result. The bytes are the Annex-B payload returned
-/// by NVENC; the network boundary will convert NAL boundaries to AVCC/RTP.
+/// One owned H.264 result. The bytes are the Annex-B payload returned by
+/// NVENC; the network boundary converts its NAL boundaries to RTP.
 #[derive(Debug)]
 pub struct EncodedFrame {
     pub frame_index: u64,
@@ -150,11 +158,35 @@ pub struct EncodedFrame {
     pub data: Vec<u8>,
 }
 
+pub struct MappedInput<'a> {
+    session: &'a NvencSession,
+    input: &'a RegisteredInput<'a>,
+    mapped: *mut c_void,
+    format: NV_ENC_BUFFER_FORMAT,
+}
+
 pub struct SubmittedFrame<'a> {
     session: &'a NvencSession,
-    mapped: *mut c_void,
+    _mapped: MappedInput<'a>,
+    output: &'a OutputBuffer<'a>,
     frame_index: u64,
     is_idr: bool,
+}
+impl SubmittedFrame<'_> {
+    pub fn frame_index(&self) -> u64 {
+        self.frame_index
+    }
+
+    pub fn is_idr(&self) -> bool {
+        self.is_idr
+    }
+}
+
+pub struct LockedBitstream<'a> {
+    submitted: SubmittedFrame<'a>,
+    bytes: *const u8,
+    len: usize,
+    locked: bool,
 }
 
 /// A D3D11 texture registered for this session.
@@ -166,22 +198,23 @@ pub struct RegisteredInput<'a> {
     registered: NV_ENC_REGISTERED_PTR,
 }
 
-/// A reusable system-memory bitstream buffer owned by this session.
-pub struct BitstreamBuffer<'a> {
+/// One reusable bitstream buffer and, in async mode, its registered event.
+pub struct OutputBuffer<'a> {
     session: &'a NvencSession,
     output: *mut c_void,
+    event: Option<HANDLE>,
 }
 
 /// An opened NVENC session bound to one D3D11 device.
 ///
-/// This type does not copy or retain a frame. Resource registration and
-/// encode submission are the next layer; keeping that distinction explicit
-/// prevents a borrowed capture surface from accidentally outliving its API
-/// ownership.
+/// Registered inputs and output slots borrow this session. A submitted frame
+/// owns its per-frame mapping until the bitstream is unlocked, which makes
+/// premature texture/output reuse unrepresentable at this interface.
 pub struct NvencSession {
     api: Api,
     encoder: *mut c_void,
     initialized: bool,
+    async_mode: bool,
     width: u32,
     height: u32,
 }
@@ -220,6 +253,7 @@ impl NvencSession {
             api,
             encoder,
             initialized: false,
+            async_mode: false,
             width: 0,
             height: 0,
         })
@@ -300,10 +334,33 @@ impl NvencSession {
         Ok(formats)
     }
 
+    pub fn supports_async(&self) -> Result<bool, NvencError> {
+        let mut params = NV_ENC_CAPS_PARAM {
+            version: NV_ENC_CAPS_PARAM_VER,
+            capsToQuery: NV_ENC_CAPS::NV_ENC_CAPS_ASYNC_ENCODE_SUPPORT,
+            ..Default::default()
+        };
+        let mut supported = 0;
+        let get_caps = self
+            .api
+            .functions
+            .nvEncGetEncodeCaps
+            .ok_or(NvencError::InvalidApiFunction("nvEncGetEncodeCaps"))?;
+        status(
+            unsafe {
+                get_caps(
+                    self.encoder,
+                    NV_ENC_CODEC_H264_GUID,
+                    &mut params,
+                    &mut supported,
+                )
+            },
+            "nvEncGetEncodeCaps",
+        )?;
+        Ok(supported != 0)
+    }
+
     /// Configures H.264 P1 ultra-low-latency CBR with no B-frames.
-    ///
-    /// Synchronous mode is deliberate for the first isolated benchmark: it
-    /// makes encode completion measurable without Windows event plumbing.
     pub fn initialize_h264(
         &mut self,
         width: u32,
@@ -311,6 +368,7 @@ impl NvencSession {
         fps_num: u32,
         fps_den: u32,
         bitrate: u32,
+        async_mode: bool,
     ) -> Result<(), NvencError> {
         if self.initialized {
             return Err(NvencError::InvalidOutput("session initialized twice"));
@@ -318,6 +376,11 @@ impl NvencSession {
         if width == 0 || height == 0 || fps_num == 0 || fps_den == 0 || bitrate == 0 {
             return Err(NvencError::InvalidOutput(
                 "zero encoder configuration value",
+            ));
+        }
+        if async_mode && !self.supports_async()? {
+            return Err(NvencError::Unavailable(
+                "the selected encoder does not support asynchronous mode",
             ));
         }
 
@@ -367,7 +430,7 @@ impl NvencSession {
             darHeight: height,
             frameRateNum: fps_num,
             frameRateDen: fps_den,
-            enableEncodeAsync: 0,
+            enableEncodeAsync: u32::from(async_mode),
             enablePTD: 1,
             encodeConfig: config,
             maxEncodeWidth: width,
@@ -385,6 +448,7 @@ impl NvencSession {
             "nvEncInitializeEncoder",
         )?;
         self.initialized = true;
+        self.async_mode = async_mode;
         self.width = width;
         self.height = height;
         Ok(())
@@ -427,8 +491,8 @@ impl NvencSession {
         })
     }
 
-    /// Allocates one reusable output buffer.
-    pub fn create_bitstream_buffer(&self) -> Result<BitstreamBuffer<'_>, NvencError> {
+    /// Allocates one reusable output slot, including its async event when used.
+    pub fn create_output_buffer(&self) -> Result<OutputBuffer<'_>, NvencError> {
         if !self.initialized {
             return Err(NvencError::NotInitialized);
         }
@@ -448,23 +512,62 @@ impl NvencSession {
         if create.bitstreamBuffer.is_null() {
             return Err(NvencError::InvalidOutput("null bitstream buffer"));
         }
-        Ok(BitstreamBuffer {
+
+        let event = if self.async_mode {
+            let handle = unsafe { CreateEventW(None, false, false, None) }.map_err(|error| {
+                if let Some(destroy) = self.api.functions.nvEncDestroyBitstreamBuffer {
+                    unsafe { destroy(self.encoder, create.bitstreamBuffer) };
+                }
+                NvencError::Win32 {
+                    call: "CreateEventW",
+                    code: error.code().0 as u32,
+                }
+            })?;
+            let mut params = NV_ENC_EVENT_PARAMS {
+                version: NV_ENC_EVENT_PARAMS_VER,
+                completionEvent: handle.0,
+                ..Default::default()
+            };
+            let register = self
+                .api
+                .functions
+                .nvEncRegisterAsyncEvent
+                .ok_or(NvencError::InvalidApiFunction("nvEncRegisterAsyncEvent"));
+            let registered = register.and_then(|register| {
+                status(
+                    unsafe { register(self.encoder, &mut params) },
+                    "nvEncRegisterAsyncEvent",
+                )
+            });
+            if let Err(error) = registered {
+                unsafe {
+                    let _ = CloseHandle(handle);
+                }
+                if let Some(destroy) = self.api.functions.nvEncDestroyBitstreamBuffer {
+                    unsafe { destroy(self.encoder, create.bitstreamBuffer) };
+                }
+                return Err(error);
+            }
+            Some(handle)
+        } else {
+            None
+        };
+
+        Ok(OutputBuffer {
             session: self,
             output: create.bitstreamBuffer,
+            event,
         })
     }
 
-    /// Maps and submits one texture without locking its output buffer.
-    pub fn submit_bgra<'a>(
+    /// Maps one registered texture. Dropping it unmaps the NVENC resource.
+    pub fn map_input<'a>(
         &'a self,
-        input: &RegisteredInput<'_>,
-        output: &BitstreamBuffer<'_>,
-        frame_index: u64,
-        force_idr: bool,
-    ) -> Result<SubmittedFrame<'a>, NvencError> {
-        if !core::ptr::eq(self, input.session) || !core::ptr::eq(self, output.session) {
+        input: &'a RegisteredInput<'a>,
+    ) -> Result<MappedInput<'a>, NvencError> {
+        if !core::ptr::eq(self, input.session) {
             return Err(NvencError::InvalidOutput(
-                "resource belongs to another NVENC session",
+                "input belongs to another NVENC session",
             ));
         }
         let mut map = NV_ENC_MAP_INPUT_RESOURCE {
@@ -484,7 +587,27 @@ impl NvencSession {
         if map.mappedResource.is_null() {
             return Err(NvencError::InvalidOutput("null mapped resource"));
         }
+        Ok(MappedInput {
+            session: self,
+            input,
+            mapped: map.mappedResource,
+            format: map.mappedBufferFmt,
+        })
+    }
 
+    /// Submits a mapped texture without waiting for its completion event.
+    pub fn encode_submit<'a>(
+        &'a self,
+        mapped: MappedInput<'a>,
+        output: &'a OutputBuffer<'a>,
+        frame_index: u64,
+        force_idr: bool,
+    ) -> Result<SubmittedFrame<'a>, NvencError> {
+        if !core::ptr::eq(self, mapped.session) || !core::ptr::eq(self, output.session) {
+            return Err(NvencError::InvalidOutput(
+                "resource belongs to another NVENC session",
+            ));
+        }
         let flags = if force_idr {
             NV_ENC_PIC_FLAGS::NV_ENC_PIC_FLAG_FORCEIDR as u32
                 | NV_ENC_PIC_FLAGS::NV_ENC_PIC_FLAG_OUTPUT_SPSPPS as u32
@@ -500,9 +623,10 @@ impl NvencSession {
             frameIdx: frame_index as u32,
             inputTimeStamp: frame_index,
             inputDuration: 1,
-            inputBuffer: map.mappedResource,
+            inputBuffer: mapped.mapped,
             outputBitstream: output.output,
-            bufferFmt: map.mappedBufferFmt,
+            completionEvent: output.event.map_or(ptr::null_mut(), |event| event.0),
+            bufferFmt: mapped.format,
             pictureStruct: NV_ENC_PIC_STRUCT::NV_ENC_PIC_STRUCT_FRAME,
             ..Default::default()
         };
@@ -511,39 +635,63 @@ impl NvencSession {
             .functions
             .nvEncEncodePicture
             .ok_or(NvencError::InvalidApiFunction("nvEncEncodePicture"))?;
-        if let Err(error) = status(
+        status(
             unsafe { encode(self.encoder, &mut picture) },
             "nvEncEncodePicture",
-        ) {
-            if let Some(unmap) = self.api.functions.nvEncUnmapInputResource {
-                unsafe { unmap(self.encoder, map.mappedResource) };
-            }
-            return Err(error);
-        }
+        )?;
         Ok(SubmittedFrame {
             session: self,
-            mapped: map.mappedResource,
+            _mapped: mapped,
+            output,
             frame_index,
             is_idr: force_idr,
         })
     }
 
-    /// Waits for one submitted output and copies its Annex-B bytes.
-    pub fn lock_bitstream(
-        &self,
-        output: &BitstreamBuffer<'_>,
-        submitted: SubmittedFrame<'_>,
-    ) -> Result<EncodedFrame, NvencError> {
-        if !core::ptr::eq(self, output.session) || !core::ptr::eq(self, submitted.session) {
+    /// Waits for the hardware event. Synchronous sessions have no event.
+    pub fn wait_completion(&self, submitted: &SubmittedFrame<'_>) -> Result<(), NvencError> {
+        if !core::ptr::eq(self, submitted.session) {
             return Err(NvencError::InvalidOutput(
-                "bitstream belongs to another NVENC session",
+                "submission belongs to another NVENC session",
+            ));
+        }
+        let Some(event) = submitted.output.event else {
+            return Ok(());
+        };
+        let result = unsafe { WaitForSingleObject(event, INFINITE) };
+        if result == WAIT_OBJECT_0 {
+            Ok(())
+        } else {
+            let code = if result == WAIT_FAILED {
+                unsafe { GetLastError().0 }
+            } else {
+                result.0
+            };
+            Err(NvencError::Win32 {
+                call: "WaitForSingleObject",
+                code,
+            })
+        }
+    }
+
+    /// Locks a completed output. The returned view unlocks on drop.
+    pub fn lock_bitstream<'a>(
+        &'a self,
+        submitted: SubmittedFrame<'a>,
+    ) -> Result<LockedBitstream<'a>, NvencError> {
+        if !core::ptr::eq(self, submitted.session) {
+            return Err(NvencError::InvalidOutput(
+                "submission belongs to another NVENC session",
             ));
         }
         let mut lock = NV_ENC_LOCK_BITSTREAM {
             version: NV_ENC_LOCK_BITSTREAM_VER,
-            outputBitstream: output.output,
+            outputBitstream: submitted.output.output,
             ..Default::default()
         };
+        if self.async_mode {
+            lock.set_doNotWait(1);
+        }
         let lock_fn = self
             .api
             .functions
@@ -553,43 +701,32 @@ impl NvencSession {
             unsafe { lock_fn(self.encoder, &mut lock) },
             "nvEncLockBitstream",
         )?;
-        let result = if lock.bitstreamBufferPtr.is_null() {
-            Err(NvencError::InvalidOutput("null locked bitstream"))
-        } else {
-            let bytes = unsafe {
-                core::slice::from_raw_parts(
-                    lock.bitstreamBufferPtr.cast::<u8>(),
-                    lock.bitstreamSizeInBytes as usize,
-                )
-            };
-            Ok(EncodedFrame {
-                frame_index: submitted.frame_index,
-                is_idr: submitted.is_idr,
-                data: bytes.to_vec(),
-            })
-        };
-        let unlock = self
-            .api
-            .functions
-            .nvEncUnlockBitstream
-            .ok_or(NvencError::InvalidApiFunction("nvEncUnlockBitstream"))?;
-        status(
-            unsafe { unlock(self.encoder, output.output) },
-            "nvEncUnlockBitstream",
-        )?;
-        result
+        if lock.bitstreamBufferPtr.is_null() {
+            if let Some(unlock) = self.api.functions.nvEncUnlockBitstream {
+                unsafe { unlock(self.encoder, submitted.output.output) };
+            }
+            return Err(NvencError::InvalidOutput("null locked bitstream"));
+        }
+        Ok(LockedBitstream {
+            submitted,
+            bytes: lock.bitstreamBufferPtr.cast(),
+            len: lock.bitstreamSizeInBytes as usize,
+            locked: true,
+        })
     }
 
-    /// Convenience path for callers that do not need separate submit timing.
+    /// Serial convenience path used by small capability probes.
     pub fn encode_bgra(
         &self,
         input: &RegisteredInput<'_>,
-        output: &BitstreamBuffer<'_>,
+        output: &OutputBuffer<'_>,
         frame_index: u64,
         force_idr: bool,
     ) -> Result<EncodedFrame, NvencError> {
-        let submitted = self.submit_bgra(input, output, frame_index, force_idr)?;
-        self.lock_bitstream(output, submitted)
+        let mapped = self.map_input(input)?;
+        let submitted = self.encode_submit(mapped, output, frame_index, force_idr)?;
+        self.wait_completion(&submitted)?;
+        self.lock_bitstream(submitted)?.copy_frame()
     }
 
     pub fn h264_codec_guid() -> GUID {
@@ -603,8 +740,62 @@ impl NvencSession {
     }
 }
 
-impl Drop for SubmittedFrame<'_> {
+impl LockedBitstream<'_> {
+    pub fn bytes(&self) -> &[u8] {
+        unsafe { core::slice::from_raw_parts(self.bytes, self.len) }
+    }
+
+    pub fn frame_index(&self) -> u64 {
+        self.submitted.frame_index
+    }
+
+    pub fn is_idr(&self) -> bool {
+        self.submitted.is_idr
+    }
+
+    pub fn copy_frame(mut self) -> Result<EncodedFrame, NvencError> {
+        let frame = EncodedFrame {
+            frame_index: self.frame_index(),
+            is_idr: self.is_idr(),
+            data: self.bytes().to_vec(),
+        };
+        self.unlock_inner()?;
+        Ok(frame)
+    }
+
+    pub fn unlock(mut self) -> Result<(), NvencError> {
+        self.unlock_inner()
+    }
+
+    fn unlock_inner(&mut self) -> Result<(), NvencError> {
+        self.locked = false;
+        let unlock = self
+            .submitted
+            .session
+            .api
+            .functions
+            .nvEncUnlockBitstream
+            .ok_or(NvencError::InvalidApiFunction("nvEncUnlockBitstream"))?;
+        status(
+            unsafe { unlock(self.submitted.session.encoder, self.submitted.output.output) },
+            "nvEncUnlockBitstream",
+        )
+    }
+}
+
+impl Drop for LockedBitstream<'_> {
     fn drop(&mut self) {
+        if self.locked {
+            if let Some(unlock) = self.submitted.session.api.functions.nvEncUnlockBitstream {
+                unsafe { unlock(self.submitted.session.encoder, self.submitted.output.output) };
+            }
+        }
+    }
+}
+
+impl Drop for MappedInput<'_> {
+    fn drop(&mut self) {
+        let _ = self.input;
         if let Some(unmap) = self.session.api.functions.nvEncUnmapInputResource {
             unsafe { unmap(self.session.encoder, self.mapped) };
         }
@@ -613,34 +804,47 @@ impl Drop for SubmittedFrame<'_> {
 
 impl Drop for RegisteredInput<'_> {
     fn drop(&mut self) {
-        // A submitted frame borrows this registration, so Rust prevents this
-        // destructor from running until its per-frame mapping is gone.
         if let Some(unregister) = self.session.api.functions.nvEncUnregisterResource {
             unsafe { unregister(self.session.encoder, self.registered) };
         }
     }
 }
 
-impl Drop for BitstreamBuffer<'_> {
+impl Drop for OutputBuffer<'_> {
     fn drop(&mut self) {
+        if let Some(event) = self.event {
+            let mut params = NV_ENC_EVENT_PARAMS {
+                version: NV_ENC_EVENT_PARAMS_VER,
+                completionEvent: event.0,
+                ..Default::default()
+            };
+            if let Some(unregister) = self.session.api.functions.nvEncUnregisterAsyncEvent {
+                unsafe { unregister(self.session.encoder, &mut params) };
+            }
+            unsafe {
+                let _ = CloseHandle(event);
+            }
+        }
         if let Some(destroy) = self.session.api.functions.nvEncDestroyBitstreamBuffer {
             unsafe { destroy(self.session.encoder, self.output) };
         }
     }
 }
 
+// NVIDIA's async contract explicitly requires one submit thread and one
+// completion/bitstream thread for a single session. Every mutable resource is
+// transferred between those threads by SubmittedFrame, never aliased.
+unsafe impl Sync for NvencSession {}
+unsafe impl Sync for RegisteredInput<'_> {}
+unsafe impl Sync for OutputBuffer<'_> {}
+unsafe impl Send for SubmittedFrame<'_> {}
+
 impl Drop for NvencSession {
     fn drop(&mut self) {
         if !self.encoder.is_null() {
             if let Some(destroy) = self.api.functions.nvEncDestroyEncoder {
-                // SAFETY: the handle was returned by nvEncOpenEncodeSessionEx
-                // and this Drop is the unique owner.
                 unsafe { destroy(self.encoder) };
             }
         }
     }
 }
-
-// The raw session handle is confined to the encode thread. Do not make this
-// Send or Sync: NVENC's session functions are documented as thread-affine for
-// several operations, and the benchmark owns one session per producer thread.

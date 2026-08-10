@@ -1,4 +1,7 @@
-//! Isolated D3D11-to-NVENC capability and throughput benchmark.
+//! Isolated D3D11-to-NVENC latency, throughput, and cadence benchmark.
+
+#[cfg(windows)]
+const SLOT_COUNT: usize = 4;
 
 fn main() {
     #[cfg(windows)]
@@ -14,6 +17,13 @@ fn main() {
 }
 
 #[cfg(windows)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum RunMode {
+    Uncapped,
+    Paced,
+}
+
+#[cfg(windows)]
 #[derive(clap::Parser)]
 #[command(name = "lanplay-nvenc-probe")]
 struct Args {
@@ -25,15 +35,58 @@ struct Args {
     fps: u32,
     #[arg(long, default_value_t = 50)]
     bitrate_mbps: u32,
+    #[arg(long, value_enum, default_value_t = RunMode::Uncapped)]
+    mode: RunMode,
+    /// Overrides `--frames`; intended for paced soak runs.
+    #[arg(long)]
+    seconds: Option<u64>,
     /// Frames discarded before measurement.
     #[arg(long, default_value_t = 120)]
     warmup: u64,
     #[arg(long, default_value_t = 1200)]
     frames: u64,
+    /// Force an IDR every N measured frames; zero means only the first.
+    #[arg(long, default_value_t = 0)]
+    idr_interval: u64,
+}
+
+#[cfg(windows)]
+struct Surface {
+    texture: windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
+    target: windows::Win32::Graphics::Direct3D11::ID3D11RenderTargetView,
+}
+
+#[cfg(windows)]
+struct Work<'a> {
+    slot: usize,
+    submitted: lanplay_encoder_nvenc::SubmittedFrame<'a>,
+    admitted: std::time::Instant,
+    admission_wait_ns: u64,
+    map_ns: u64,
+    submit_ns: u64,
+    submit_end: std::time::Instant,
+}
+
+#[cfg(windows)]
+struct FrameMetrics {
+    frame: u64,
+    is_idr: bool,
+    bytes: usize,
+    admission_wait_ns: u64,
+    map_ns: u64,
+    submit_ns: u64,
+    completion_ns: u64,
+    lock_ns: u64,
+    copy_ns: u64,
+    unlock_ns: u64,
+    residency_ns: u64,
+    slot_residency_ns: u64,
 }
 
 #[cfg(windows)]
 fn windows_main() -> Result<(), String> {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Instant;
 
     use clap::Parser;
@@ -47,6 +100,15 @@ fn windows_main() -> Result<(), String> {
     {
         return Err("dimensions, rate, bitrate, and frame count must be non-zero".into());
     }
+    let frames = match args.seconds {
+        Some(seconds) => seconds
+            .checked_mul(u64::from(args.fps))
+            .ok_or_else(|| "soak frame count overflows u64".to_owned())?,
+        None => args.frames,
+    };
+    if frames == 0 {
+        return Err("measured frame count must be non-zero".into());
+    }
     let bitrate = args
         .bitrate_mbps
         .checked_mul(1_000_000)
@@ -54,7 +116,10 @@ fn windows_main() -> Result<(), String> {
 
     let device = lanplay_capture::CaptureDevice::open(0).map_err(|e| e.to_string())?;
     println!("device {}", device.identity());
-    let (texture, target) = benchmark_surface(device.device(), args.width, args.height)?;
+    let mut surfaces = Vec::with_capacity(SLOT_COUNT);
+    for _ in 0..SLOT_COUNT {
+        surfaces.push(benchmark_surface(device.device(), args.width, args.height)?);
+    }
 
     let mut session =
         lanplay_encoder_nvenc::NvencSession::open(device.device()).map_err(|e| e.to_string())?;
@@ -63,89 +128,395 @@ fn windows_main() -> Result<(), String> {
     if !codecs.contains(&h264) {
         return Err("the selected NVENC session does not expose H.264".into());
     }
+    if !session.supports_async().map_err(|e| e.to_string())? {
+        return Err("the selected NVENC session does not support async encoding".into());
+    }
     let formats = session.input_formats(h264).map_err(|e| e.to_string())?;
     println!("H.264 input formats: {formats:?}");
     session
-        .initialize_h264(args.width, args.height, args.fps, 1, bitrate)
-        .map_err(|e| e.to_string())?;
-    let input = session.register_bgra(&texture).map_err(|e| e.to_string())?;
-    let output = session
-        .create_bitstream_buffer()
+        .initialize_h264(args.width, args.height, args.fps, 1, bitrate, true)
         .map_err(|e| e.to_string())?;
 
+    let mut inputs = Vec::with_capacity(SLOT_COUNT);
+    let mut outputs = Vec::with_capacity(SLOT_COUNT);
+    for surface in &surfaces {
+        inputs.push(
+            session
+                .register_bgra(&surface.texture)
+                .map_err(|e| e.to_string())?,
+        );
+        outputs.push(session.create_output_buffer().map_err(|e| e.to_string())?);
+    }
+
     for frame in 0..args.warmup {
-        clear_surface(device.context(), &target, frame);
+        let slot = frame as usize % SLOT_COUNT;
+        clear_surface(device.context(), &surfaces[slot].target, frame);
         let encoded = session
-            .encode_bgra(&input, &output, frame, frame == 0)
+            .encode_bgra(&inputs[slot], &outputs[slot], frame, frame == 0)
             .map_err(|e| format!("warm-up frame {frame}: {e}"))?;
         validate_bitstream(&encoded.data, frame)?;
     }
 
-    let mut submit_ns = Vec::with_capacity(args.frames as usize);
-    let mut complete_ns = Vec::with_capacity(args.frames as usize);
-    let mut total_bytes = 0u64;
-    let mut max_bytes = 0usize;
-    let started = Instant::now();
-    for offset in 0..args.frames {
-        let frame = args.warmup + offset;
-        clear_surface(device.context(), &target, frame);
-        let before_submit = Instant::now();
-        let submitted = session
-            .submit_bgra(&input, &output, frame, offset == 0)
-            .map_err(|e| format!("submit frame {frame}: {e}"))?;
-        let after_submit = Instant::now();
-        let encoded = session
-            .lock_bitstream(&output, submitted)
-            .map_err(|e| format!("complete frame {frame}: {e}"))?;
-        let completed = Instant::now();
-        validate_bitstream(&encoded.data, frame)?;
-        submit_ns.push((after_submit - before_submit).as_nanos() as u64);
-        complete_ns.push((completed - after_submit).as_nanos() as u64);
-        total_bytes = total_bytes.saturating_add(encoded.data.len() as u64);
-        max_bytes = max_bytes.max(encoded.data.len());
-    }
-    let elapsed = started.elapsed();
-    let throughput = args.frames as f64 / elapsed.as_secs_f64();
-    let total_ns = submit_ns
-        .iter()
-        .zip(&complete_ns)
-        .map(|(submit, complete)| submit.saturating_add(*complete))
-        .collect();
-    let submit = Distribution::new(submit_ns);
-    let complete = Distribution::new(complete_ns);
-    let total = Distribution::new(total_ns);
+    let memory_stop = Arc::new(AtomicBool::new(false));
+    let memory_samples = std::thread::spawn({
+        let stop = Arc::clone(&memory_stop);
+        move || {
+            let mut samples = Vec::new();
+            while !stop.load(Ordering::Acquire) {
+                if let Some(bytes) = lanplay_telemetry::resident_bytes() {
+                    samples.push((Instant::now(), bytes));
+                }
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+            if let Some(bytes) = lanplay_telemetry::resident_bytes() {
+                samples.push((Instant::now(), bytes));
+            }
+            samples
+        }
+    });
 
+    let run = run_pipeline(
+        &session,
+        device.context(),
+        &surfaces,
+        &inputs,
+        &outputs,
+        args.mode,
+        args.fps,
+        args.warmup,
+        frames,
+        args.idr_interval,
+    );
+    memory_stop.store(true, Ordering::Release);
+    let memory = memory_samples
+        .join()
+        .map_err(|_| "memory sampler panicked".to_owned())?;
+    let (metrics, elapsed, pool_exhaustions) = run?;
+    report(&args, frames, &metrics, elapsed, pool_exhaustions, &memory)
+}
+
+#[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
+fn run_pipeline<'a>(
+    session: &'a lanplay_encoder_nvenc::NvencSession,
+    context: &windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext,
+    surfaces: &[Surface],
+    inputs: &'a [lanplay_encoder_nvenc::RegisteredInput<'a>],
+    outputs: &'a [lanplay_encoder_nvenc::OutputBuffer<'a>],
+    mode: RunMode,
+    fps: u32,
+    first_frame: u64,
+    frames: u64,
+    idr_interval: u64,
+) -> Result<(Vec<FrameMetrics>, std::time::Duration, u64), String> {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::{TryRecvError, sync_channel};
+    use std::time::{Duration, Instant};
+
+    let (work_tx, work_rx) = sync_channel::<Work<'a>>(SLOT_COUNT);
+    let (free_tx, free_rx) = sync_channel::<usize>(SLOT_COUNT);
+    let (result_tx, result_rx) = std::sync::mpsc::channel::<Result<FrameMetrics, String>>();
+    for slot in 0..SLOT_COUNT {
+        free_tx
+            .send(slot)
+            .map_err(|_| "failed to seed the free-slot queue".to_owned())?;
+    }
+    let failed = Arc::new(AtomicBool::new(false));
+    let period = Duration::from_secs_f64(1.0 / f64::from(fps));
+    let started = Instant::now();
+    let mut pool_exhaustions = 0u64;
+    let mut submitted_count = 0u64;
+
+    let outcome = std::thread::scope(|scope| -> Result<Vec<FrameMetrics>, String> {
+        let completion_failed = Arc::clone(&failed);
+        let completion = scope.spawn(move || {
+            while let Ok(work) = work_rx.recv() {
+                let slot = work.slot;
+                let result = if completion_failed.load(Ordering::Acquire) {
+                    Err(format!(
+                        "frame {} aborted after prior failure",
+                        work.submitted.frame_index()
+                    ))
+                } else {
+                    complete_work(session, work)
+                };
+                if result.is_err() {
+                    completion_failed.store(true, Ordering::Release);
+                }
+                let _ = result_tx.send(result);
+                let _ = free_tx.send(slot);
+            }
+        });
+
+        for offset in 0..frames {
+            if failed.load(Ordering::Acquire) {
+                break;
+            }
+            if mode == RunMode::Paced {
+                wait_until(started + period.mul_f64(offset as f64));
+            }
+            let wait_start = Instant::now();
+            let slot = match free_rx.try_recv() {
+                Ok(slot) => slot,
+                Err(TryRecvError::Empty) => {
+                    pool_exhaustions += 1;
+                    loop {
+                        if failed.load(Ordering::Acquire) {
+                            break usize::MAX;
+                        }
+                        match free_rx.try_recv() {
+                            Ok(slot) => break slot,
+                            Err(TryRecvError::Empty) => std::thread::yield_now(),
+                            Err(TryRecvError::Disconnected) => break usize::MAX,
+                        }
+                    }
+                }
+                Err(TryRecvError::Disconnected) => usize::MAX,
+            };
+            if slot == usize::MAX {
+                break;
+            }
+            let admitted = Instant::now();
+            let admission_wait_ns = (admitted - wait_start).as_nanos() as u64;
+            let frame = first_frame + offset;
+            clear_surface(context, &surfaces[slot].target, frame);
+
+            let map_start = Instant::now();
+            let mapped = session
+                .map_input(&inputs[slot])
+                .map_err(|e| format!("map frame {frame}: {e}"))?;
+            let map_end = Instant::now();
+            let force_idr = offset == 0 || (idr_interval != 0 && offset % idr_interval == 0);
+            let submit_start = Instant::now();
+            let submitted = session
+                .encode_submit(mapped, &outputs[slot], frame, force_idr)
+                .map_err(|e| format!("submit frame {frame}: {e}"))?;
+            let submit_end = Instant::now();
+            work_tx
+                .send(Work {
+                    slot,
+                    submitted,
+                    admitted,
+                    admission_wait_ns,
+                    map_ns: (map_end - map_start).as_nanos() as u64,
+                    submit_ns: (submit_end - submit_start).as_nanos() as u64,
+                    submit_end,
+                })
+                .map_err(|_| "completion thread stopped accepting work".to_owned())?;
+            submitted_count += 1;
+        }
+        drop(work_tx);
+        completion
+            .join()
+            .map_err(|_| "completion thread panicked".to_owned())?;
+
+        let mut metrics = Vec::with_capacity(submitted_count as usize);
+        let mut first_error = None;
+        for _ in 0..submitted_count {
+            match result_rx
+                .recv()
+                .map_err(|_| "completion result channel closed".to_owned())?
+            {
+                Ok(frame) => metrics.push(frame),
+                Err(error) if first_error.is_none() => first_error = Some(error),
+                Err(_) => {}
+            }
+        }
+        if let Some(error) = first_error {
+            Err(error)
+        } else if submitted_count != frames {
+            Err(format!(
+                "submitted {submitted_count} of {frames} requested frames"
+            ))
+        } else {
+            Ok(metrics)
+        }
+    });
+    let elapsed = started.elapsed();
+    outcome.map(|metrics| (metrics, elapsed, pool_exhaustions))
+}
+
+#[cfg(windows)]
+fn complete_work(
+    session: &lanplay_encoder_nvenc::NvencSession,
+    work: Work<'_>,
+) -> Result<FrameMetrics, String> {
+    let frame = work.submitted.frame_index();
+    let is_idr = work.submitted.is_idr();
+    session
+        .wait_completion(&work.submitted)
+        .map_err(|e| format!("completion event frame {frame}: {e}"))?;
+    let completed = std::time::Instant::now();
+    let lock_start = std::time::Instant::now();
+    let locked = session
+        .lock_bitstream(work.submitted)
+        .map_err(|e| format!("lock frame {frame}: {e}"))?;
+    let lock_return = std::time::Instant::now();
+    validate_bitstream(locked.bytes(), frame)?;
+    let bytes = locked.bytes().to_vec();
+    let copy_end = std::time::Instant::now();
+    let unlock_start = std::time::Instant::now();
+    locked
+        .unlock()
+        .map_err(|e| format!("unlock frame {frame}: {e}"))?;
+    let unlock_end = std::time::Instant::now();
+    Ok(FrameMetrics {
+        frame,
+        is_idr,
+        bytes: bytes.len(),
+        admission_wait_ns: work.admission_wait_ns,
+        map_ns: work.map_ns,
+        submit_ns: work.submit_ns,
+        completion_ns: (completed - work.submit_end).as_nanos() as u64,
+        lock_ns: (lock_return - lock_start).as_nanos() as u64,
+        copy_ns: (copy_end - lock_return).as_nanos() as u64,
+        unlock_ns: (unlock_end - unlock_start).as_nanos() as u64,
+        residency_ns: (copy_end - work.submit_end).as_nanos() as u64,
+        slot_residency_ns: (unlock_end - work.admitted).as_nanos() as u64,
+    })
+}
+
+#[cfg(windows)]
+fn wait_until(deadline: std::time::Instant) {
+    use std::time::Duration;
+
+    const SPIN: Duration = Duration::from_micros(200);
+    loop {
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return;
+        }
+        let remaining = deadline - now;
+        if remaining > SPIN {
+            std::thread::sleep(remaining - SPIN);
+        } else {
+            std::hint::spin_loop();
+        }
+    }
+}
+
+#[cfg(windows)]
+fn report(
+    args: &Args,
+    frames: u64,
+    metrics: &[FrameMetrics],
+    elapsed: std::time::Duration,
+    pool_exhaustions: u64,
+    memory: &[(std::time::Instant, u64)],
+) -> Result<(), String> {
+    let throughput = frames as f64 / elapsed.as_secs_f64();
     println!(
-        "config {}x{} @ {} fps, {} Mbps, P1 ULL CBR, BGRA direct",
-        args.width, args.height, args.fps, args.bitrate_mbps
+        "config {}x{} @ {} fps, {} Mbps, P1 ULL CBR, BGRA direct, async {} slots, {:?}",
+        args.width, args.height, args.fps, args.bitrate_mbps, SLOT_COUNT, args.mode
     );
     println!(
-        "frames {} in {:.3} s = {:.2} frames/s, {:.2} Mbit/s output, max frame {} bytes",
-        args.frames,
+        "frames {} in {:.3} s = {:.2} frames/s, pool exhaustions {}",
+        frames,
         elapsed.as_secs_f64(),
         throughput,
-        total_bytes as f64 * 8.0 / elapsed.as_secs_f64() / 1_000_000.0,
-        max_bytes
+        pool_exhaustions
     );
-    println!("submit       {}", submit);
-    println!("complete+copy {}", complete);
-    println!("total         {}", total);
+    print_stage(
+        "admission wait",
+        metrics.iter().map(|m| m.admission_wait_ns),
+    );
+    print_stage("map input", metrics.iter().map(|m| m.map_ns));
+    print_stage("submit CPU", metrics.iter().map(|m| m.submit_ns));
+    print_stage("HW completion", metrics.iter().map(|m| m.completion_ns));
+    print_stage("lock after event", metrics.iter().map(|m| m.lock_ns));
+    print_stage("bitstream copy", metrics.iter().map(|m| m.copy_ns));
+    print_stage("unlock", metrics.iter().map(|m| m.unlock_ns));
+    print_stage("encoder residency", metrics.iter().map(|m| m.residency_ns));
+    print_stage(
+        "slot residency",
+        metrics.iter().map(|m| m.slot_residency_ns),
+    );
+
+    let p_sizes: Vec<u64> = metrics
+        .iter()
+        .filter(|m| !m.is_idr)
+        .map(|m| m.bytes as u64)
+        .collect();
+    let idr_sizes: Vec<u64> = metrics
+        .iter()
+        .filter(|m| m.is_idr)
+        .map(|m| m.bytes as u64)
+        .collect();
+    print_size("P frame", &p_sizes);
+    print_size("IDR", &idr_sizes);
+    let total_bytes: u64 = metrics.iter().map(|m| m.bytes as u64).sum();
+    println!(
+        "output {:.2} Mbit/s, {} bytes over {} frames",
+        total_bytes as f64 * 8.0 / elapsed.as_secs_f64() / 1_000_000.0,
+        total_bytes,
+        frames
+    );
+    if let (Some(first), Some(last)) = (memory.first(), memory.last()) {
+        let peak = memory
+            .iter()
+            .map(|(_, bytes)| *bytes)
+            .max()
+            .unwrap_or(last.1);
+        let delta = last.1 as i128 - first.1 as i128;
+        println!(
+            "resident memory start {:.1} MB end {:.1} MB peak {:.1} MB delta {:+.1} MB",
+            first.1 as f64 / 1e6,
+            last.1 as f64 / 1e6,
+            peak as f64 / 1e6,
+            delta as f64 / 1e6
+        );
+    }
 
     let period_ns = 1_000_000_000u64 / u64::from(args.fps);
-    let passed = throughput >= f64::from(args.fps) && total.p99() <= period_ns && total_bytes > 0;
+    let completion = Distribution::new(metrics.iter().map(|m| m.completion_ns).collect());
+    let paced_ok = args.mode != RunMode::Paced
+        || (pool_exhaustions == 0 && throughput >= f64::from(args.fps) * 0.99);
+    let ordered = metrics
+        .windows(2)
+        .all(|pair| pair[1].frame == pair[0].frame + 1);
+    let passed = metrics.len() as u64 == frames
+        && completion.p99() <= period_ns
+        && total_bytes > 0
+        && ordered
+        && paced_ok;
     println!(
-        "gate: {} (throughput {:.2}/{}, total p99 {:.3}/{:.3} ms)",
+        "gate: {} (completed {}/{}, ordered {}, completion p99 {:.3}/{:.3} ms, pool exhausted {})",
         if passed { "PASS" } else { "FAIL" },
-        throughput,
-        args.fps,
-        total.p99() as f64 / 1_000_000.0,
-        period_ns as f64 / 1_000_000.0
+        metrics.len(),
+        frames,
+        ordered,
+        completion.p99() as f64 / 1_000_000.0,
+        period_ns as f64 / 1_000_000.0,
+        pool_exhaustions
     );
     if passed {
         Ok(())
     } else {
-        Err("encoder cannot sustain the requested frame rate without serialized backlog".into())
+        Err("async encoder gate failed".into())
     }
+}
+
+#[cfg(windows)]
+fn print_stage(name: &str, values: impl Iterator<Item = u64>) {
+    println!("{name:18} {}", Distribution::new(values.collect()));
+}
+
+#[cfg(windows)]
+fn print_size(name: &str, values: &[u64]) {
+    if values.is_empty() {
+        println!("{name:18} none");
+        return;
+    }
+    let distribution = Distribution::new(values.to_vec());
+    println!(
+        "{name:18} n={} p50 {} B p95 {} B p99 {} B max {} B",
+        values.len(),
+        distribution.percentile(50),
+        distribution.percentile(95),
+        distribution.percentile(99),
+        distribution.max()
+    );
 }
 
 #[cfg(windows)]
@@ -153,13 +524,7 @@ fn benchmark_surface(
     device: &windows::Win32::Graphics::Direct3D11::ID3D11Device,
     width: u32,
     height: u32,
-) -> Result<
-    (
-        windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
-        windows::Win32::Graphics::Direct3D11::ID3D11RenderTargetView,
-    ),
-    String,
-> {
+) -> Result<Surface, String> {
     use windows::Win32::Graphics::Direct3D11::{
         D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_RESOURCE_MISC_SHARED,
         D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
@@ -192,7 +557,7 @@ fn benchmark_surface(
             .CreateRenderTargetView(&texture, None, Some(&mut target))
             .map_err(|e| format!("CreateRenderTargetView: {e}"))?;
         let target = target.ok_or_else(|| "CreateRenderTargetView returned null".to_owned())?;
-        Ok((texture, target))
+        Ok(Surface { texture, target })
     }
 }
 
@@ -238,6 +603,10 @@ impl Distribution {
     fn p99(&self) -> u64 {
         self.percentile(99)
     }
+
+    fn max(&self) -> u64 {
+        self.values[self.values.len() - 1]
+    }
 }
 
 #[cfg(windows)]
@@ -249,7 +618,7 @@ impl std::fmt::Display for Distribution {
             self.percentile(50) as f64 / 1_000_000.0,
             self.percentile(95) as f64 / 1_000_000.0,
             self.percentile(99) as f64 / 1_000_000.0,
-            self.values[self.values.len() - 1] as f64 / 1_000_000.0,
+            self.max() as f64 / 1_000_000.0,
         )
     }
 }
