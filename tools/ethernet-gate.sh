@@ -53,6 +53,21 @@ echo "route     $WIRED_IP -> $WIN_IP reachable"
 
 [ -x "$CLIENT" ] || fail "build the client first: cargo build --release -p lanplay-client"
 
+# ---- GPU power state ------------------------------------------------------
+# A desktop stream is a light load: 32% GPU, 26% NVENC. The driver reads that
+# as idle and drops the card to 300-495 MHz core and 810 MHz memory, at which
+# point capture, conversion and encode no longer fit in 8.33 ms and the run
+# settles at 110 Hz with an encode p99 of 14 ms. Nothing thermal - 41 C, 14 W;
+# clocks_throttle_reasons reads GpuIdle. Locking clears it: encode p99 falls
+# from 14.4 ms to 2.3 ms and every window holds 120.0 Hz.
+#
+# It is stated here rather than left as a setting someone remembers, because
+# a measurement whose conditions are not part of the run is not reproducible.
+ssh -o BatchMode=yes windows "nvidia-smi -lgc 2000,2700 && nvidia-smi -lmc 9001" >/dev/null 2>&1 ||
+    fail "could not lock GPU clocks on the host"
+restore_clocks() { ssh -o BatchMode=yes windows "nvidia-smi -rgc && nvidia-smi -rmc" >/dev/null 2>&1 || true; }
+echo "clocks    host GPU locked to 2000-2700 MHz core, 9001 MHz memory"
+
 # ---- receiver -------------------------------------------------------------
 # The renderer refuses to measure an occluded window, and a window opened by
 # a process launched over ssh does not come forward on its own.
@@ -65,7 +80,7 @@ CLIENT_LOG="$(mktemp -t ethernet-gate-client)"
     --mode display-link --require-clean-display \
     --window-seconds 10 --report "$REPORT" >"$CLIENT_LOG" 2>&1 &
 CLIENT_PID=$!
-trap 'kill "$CLIENT_PID" 2>/dev/null || true' EXIT
+trap 'kill "$CLIENT_PID" 2>/dev/null || true; restore_clocks' EXIT
 
 for _ in $(seq 1 60); do
     kill -0 "$CLIENT_PID" 2>/dev/null || break
@@ -111,6 +126,7 @@ WIN_TIMEOUT=$((SECONDS_TO_RUN + 120)) "$REPO/tools/win-session.sh" \
 
 wait "$CLIENT_PID" && client_status=0 || client_status=$?
 trap - EXIT
+restore_clocks
 echo
 cat "$CLIENT_LOG"
 rm -f "$CLIENT_LOG"
