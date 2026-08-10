@@ -23,7 +23,7 @@ pub struct FrameObservation {
     pub duration: Nanos,
     pub accumulated: Option<u32>,
     pub pending: Option<u32>,
-    pub duplicate: bool,
+    pub update: lanplay_capture::backend::FrameUpdate,
 }
 
 pub struct Stats {
@@ -35,9 +35,13 @@ pub struct Stats {
     /// callers to mistake it for elapsed wall time.
     measured_window: Option<Nanos>,
 
+    /// Successful acquire calls, including pointer-only notifications.
+    pub acquires: u64,
+    /// Acquisitions containing a new desktop image.
     pub frames: u64,
+    pub pointer_only: u64,
+    pub anomalous: u64,
     pub timeouts: u64,
-    pub duplicates: u64,
     pub delivery_unusable: u64,
 
     pub delivery: Series,
@@ -76,9 +80,11 @@ impl Stats {
             window_start: None,
             window_end: None,
             measured_window: None,
+            acquires: 0,
             frames: 0,
+            pointer_only: 0,
+            anomalous: 0,
             timeouts: 0,
-            duplicates: 0,
             delivery_unusable: 0,
             delivery: Series::new(),
             acquire: Series::new(),
@@ -101,16 +107,14 @@ impl Stats {
         }
     }
 
-    /// Records a frame and reports how its interval compared to the source
-    /// cadence, which is what the stall-recovery tracking needs.
+    /// Records an acquisition and reports how its interval compared to the
+    /// source cadence, which is what the stall-recovery tracking needs.
     pub fn frame(&mut self, observation: FrameObservation) -> Option<StallClass> {
-        // A duplicate notification is an acquire, but not a new desktop
-        // image. It must remain visible in the duplicate counter while the
-        // cadence and soak counts judge content frames only.
-        if observation.duplicate {
-            self.duplicates += 1;
-        } else {
-            self.frames += 1;
+        self.acquires += 1;
+        match observation.update {
+            lanplay_capture::backend::FrameUpdate::Desktop => self.frames += 1,
+            lanplay_capture::backend::FrameUpdate::PointerOnly => self.pointer_only += 1,
+            lanplay_capture::backend::FrameUpdate::Other => self.anomalous += 1,
         }
         self.frames_after_last_restart += 1;
         self.acquire.push(observation.duration);
@@ -201,9 +205,11 @@ impl Stats {
     /// Clock continuity is deliberately kept: the monotonicity checks hold on
     /// to their last mark, so the boundary itself is still checked.
     pub fn begin_window(&mut self, at: Timestamp) {
+        self.acquires = 0;
         self.frames = 0;
+        self.pointer_only = 0;
+        self.anomalous = 0;
         self.timeouts = 0;
-        self.duplicates = 0;
         self.delivery_unusable = 0;
         self.delivery.clear();
         self.acquire.clear();
@@ -257,15 +263,17 @@ impl Stats {
         let window_s = self.window().as_secs_f64();
         CaptureReport {
             window_s,
+            acquires: self.acquires,
+            acquires_per_second: Self::rate(self.acquires, window_s),
             frames: self.frames,
-            frames_per_second: if window_s > 0.0 {
-                self.frames as f64 / window_s
-            } else {
-                0.0
-            },
+            frames_per_second: Self::rate(self.frames, window_s),
+            pointer_only_updates: self.pointer_only,
+            pointer_only_updates_per_second: Self::rate(self.pointer_only, window_s),
+            anomalous_updates: self.anomalous,
+            anomalous_updates_per_second: Self::rate(self.anomalous, window_s),
             expected_frames: source_hz * window_s,
             timeouts: self.timeouts,
-            duplicates: self.duplicates,
+            duplicates: self.pointer_only + self.anomalous,
             superseded: 0,
             drained: 0,
             signals: 0,
@@ -274,8 +282,16 @@ impl Stats {
             delivery_delay_unusable: self.delivery_unusable,
             acquire: self.acquire.summary(),
             interval: self.interval.summary(),
-            accumulated_frames: self.accumulated.clone(),
-            pending_frames: self.pending.clone(),
+            accumulated_frames: self.accumulated.summary(),
+            pending_frames: self.pending.summary(),
+        }
+    }
+
+    fn rate(count: u64, window_s: f64) -> f64 {
+        if window_s > 0.0 {
+            count as f64 / window_s
+        } else {
+            0.0
         }
     }
 
@@ -370,7 +386,7 @@ mod tests {
             duration: Nanos(200_000),
             accumulated: Some(1),
             pending: None,
-            duplicate: false,
+            update: lanplay_capture::backend::FrameUpdate::Desktop,
         }
     }
 
@@ -380,21 +396,31 @@ mod tests {
         assert_eq!(stats.frame(observation(1_000_000, 500_000)), None);
         assert_eq!(stats.interval.len(), 0);
     }
+
     #[test]
-    fn duplicate_notifications_do_not_satisfy_content_cadence() {
+    fn non_desktop_acquires_do_not_satisfy_desktop_cadence() {
         let mut stats = Stats::new(PERIOD);
         stats.begin_window(Timestamp::from_nanos(0));
         stats.frame(observation(10_000_000, 9_000_000));
 
-        let mut duplicate = observation(20_000_000, 0);
-        duplicate.delivery = None;
-        duplicate.duplicate = true;
-        stats.frame(duplicate);
+        let mut pointer = observation(20_000_000, 0);
+        pointer.delivery = None;
+        pointer.update = lanplay_capture::backend::FrameUpdate::PointerOnly;
+        stats.frame(pointer);
+
+        let mut anomalous = observation(30_000_000, 0);
+        anomalous.delivery = None;
+        anomalous.update = lanplay_capture::backend::FrameUpdate::Other;
+        stats.frame(anomalous);
         stats.end_window(Timestamp::from_nanos(1_000_000_000));
 
         let report = stats.capture_report(100.0, "desktop presented");
+        assert_eq!(report.acquires, 3);
         assert_eq!(report.frames, 1);
-        assert_eq!(report.duplicates, 1);
+        assert_eq!(report.pointer_only_updates, 1);
+        assert_eq!(report.anomalous_updates, 1);
+        assert_eq!(report.duplicates, 2);
+        assert!((report.acquires_per_second - 3.0).abs() < 1e-9);
         assert!((report.frames_per_second - 1.0).abs() < 1e-9);
     }
 

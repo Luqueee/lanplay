@@ -25,7 +25,8 @@ use windows::Win32::Graphics::Dxgi::{
 use windows::core::Interface;
 
 use crate::backend::{
-    Acquired, CaptureBackend, CaptureConfig, CaptureError, CapturedFrame, FrameMetadata, SourceMark,
+    Acquired, CaptureBackend, CaptureConfig, CaptureError, CapturedFrame, FrameMetadata,
+    FrameUpdate, SourceMark,
 };
 use crate::device::CaptureDevice;
 use crate::trace;
@@ -359,7 +360,7 @@ impl CaptureBackend for DesktopDuplication {
             // Desktop Duplication keeps no pool, so there is no pool pressure
             // to report. Reporting zero would be a claim we cannot make.
             pending: None,
-            duplicate: frame_is_duplicate(info.LastPresentTime, info.AccumulatedFrames),
+            update: classify_update(info.LastPresentTime, info.LastMouseUpdateTime),
         };
 
         // Passed through as the API gave it, zero included: a cursor-only
@@ -414,14 +415,18 @@ impl Drop for DesktopDuplication {
     }
 }
 
-/// A frame that says the desktop image did not change.
+/// Classifies why Desktop Duplication woke the consumer.
 ///
-/// No present time and no accumulated updates together mean the duplication
-/// woke us for something other than new desktop content — a cursor move, or a
-/// desktop-image-unchanged notification. The pixels are the ones we already
-/// had.
-const fn frame_is_duplicate(last_present_time: i64, accumulated_frames: u32) -> bool {
-    last_present_time == 0 && accumulated_frames == 0
+/// A desktop present takes precedence when both marks changed: the returned
+/// texture then does contain a new desktop image, regardless of cursor motion.
+const fn classify_update(last_present_time: i64, last_mouse_update_time: i64) -> FrameUpdate {
+    if last_present_time != 0 {
+        FrameUpdate::Desktop
+    } else if last_mouse_update_time != 0 {
+        FrameUpdate::PointerOnly
+    } else {
+        FrameUpdate::Other
+    }
 }
 
 /// Whether the API is telling us it updated the desktop more than once while
@@ -450,22 +455,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn no_present_and_no_accumulation_is_the_unchanged_notification() {
-        assert!(frame_is_duplicate(0, 0));
+    fn pointer_mark_without_present_is_pointer_only() {
+        assert_eq!(classify_update(0, 1_234_567), FrameUpdate::PointerOnly);
     }
 
     #[test]
     fn a_present_time_means_the_desktop_changed() {
         // The mouse moved and the desktop was redrawn: still a real frame.
-        assert!(!frame_is_duplicate(1_234_567, 0));
+        assert_eq!(classify_update(1_234_567, 1_234_567), FrameUpdate::Desktop);
     }
 
     #[test]
-    fn accumulation_without_a_present_time_is_still_a_real_update() {
-        // A protected-content or cross-adapter path can hand back updates
-        // whose present time is unreported; the accumulation says content
-        // moved, so calling it a duplicate would discard a real frame.
-        assert!(!frame_is_duplicate(0, 3));
+    fn no_present_or_pointer_mark_is_anomalous() {
+        assert_eq!(classify_update(0, 0), FrameUpdate::Other);
     }
 
     #[test]

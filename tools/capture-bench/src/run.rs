@@ -238,7 +238,7 @@ pub fn compare(plan: &Plan, kind_seed: u64) -> Result<CompareReport, Box<dyn Err
         // From the block's first acquire, not from the end of the lead-in:
         // the cumulative counters have been counting frames since the lead-in
         // began, so excluding its seconds would inflate every rate.
-        harness.measured = harness.measured + measured_to.saturating_since(block_started);
+        harness.measured += measured_to.saturating_since(block_started);
         let stats = harness.stats.block(mark, seconds);
         block_reports.push(BlockReport {
             index: block.index,
@@ -426,7 +426,7 @@ impl<'device> Harness<'device> {
                         duration: acquired.saturating_since(before),
                         accumulated: frame.metadata.accumulated_frames,
                         pending: frame.metadata.pending,
-                        duplicate: frame.metadata.duplicate,
+                        update: frame.metadata.update,
                     });
                     self.track_recovery(class);
 
@@ -664,8 +664,8 @@ impl<'device> Harness<'device> {
         self.cpu_baseline = None;
         let wall = at.saturating_since(from);
         if wall > Nanos::ZERO {
-            self.cpu_wall = self.cpu_wall + wall;
-            self.cpu_used = self.cpu_used + Nanos(now.get().saturating_sub(baseline.get()));
+            self.cpu_wall += wall;
+            self.cpu_used += Nanos(now.get().saturating_sub(baseline.get()));
         }
     }
 

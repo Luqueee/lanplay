@@ -13,7 +13,7 @@ use serde::Serialize;
 
 use crate::series::{Distribution, Summary};
 
-pub const SCHEMA: &str = "lanplay.capture-bench/1";
+pub const SCHEMA: &str = "lanplay.capture-bench/2";
 
 /// Which output produced these numbers, and at what mode.
 ///
@@ -78,14 +78,22 @@ pub struct StartupReport {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct CaptureReport {
     pub window_s: f64,
-    /// New desktop-content frames. Duplicate API notifications are excluded;
-    /// their count remains visible in [`CaptureReport::duplicates`].
+    /// Every successful acquire, including pointer-only notifications.
+    pub acquires: u64,
+    pub acquires_per_second: f64,
+    /// Acquisitions containing a new desktop image.
     pub frames: u64,
-    /// Cadence of new desktop-content frames, not notification cadence.
     pub frames_per_second: f64,
+    /// DDA acquisitions caused only by a hardware-pointer update.
+    pub pointer_only_updates: u64,
+    pub pointer_only_updates_per_second: f64,
+    /// DDA acquisitions with neither a present nor pointer timestamp.
+    pub anomalous_updates: u64,
+    pub anomalous_updates_per_second: f64,
     /// What the source rate implies for this window.
     pub expected_frames: f64,
     pub timeouts: u64,
+    /// All successful acquisitions without a desktop-image update.
     pub duplicates: u64,
     pub superseded: u64,
     /// WGC only: frames the pool discarded because we were not draining fast

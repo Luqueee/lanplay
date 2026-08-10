@@ -85,6 +85,22 @@ impl SourceMark {
     }
 }
 
+/// Why the capture API returned a frame-sized surface.
+///
+/// Desktop Duplication reports cursor activity through the same acquire call
+/// as desktop presents. Keeping the distinction attached to the frame prevents
+/// notification cadence from being mistaken for image cadence.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FrameUpdate {
+    /// The desktop image changed.
+    #[default]
+    Desktop,
+    /// Only the hardware pointer changed.
+    PointerOnly,
+    /// The API returned a surface without either a desktop or pointer mark.
+    Other,
+}
+
 /// What the API said about the frame beyond the pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FrameMetadata {
@@ -96,9 +112,9 @@ pub struct FrameMetadata {
     /// Frames the API had ready at the moment of the acquire, where it can be
     /// known. For the WGC frame pool this is pool pressure.
     pub pending: Option<u32>,
-    /// True when the API delivered a frame whose content is identical to the
-    /// last one, where it says so.
-    pub duplicate: bool,
+    /// Whether this acquisition contains a desktop image, only a pointer
+    /// update, or neither.
+    pub update: FrameUpdate,
 }
 
 /// A frame, on loan.

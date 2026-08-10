@@ -92,7 +92,12 @@ fn capture(out: &mut impl Write, report: &RunReport) -> fmt::Result {
     writeln!(out, "CAPTURE")?;
     writeln!(
         out,
-        "  content frames         {:>9}  in {:.2} s = {:.2}/s ({:.1}% of {:.0} expected)",
+        "  successful acquires   {:>9}  in {:.2} s = {:.2}/s",
+        capture.acquires, capture.window_s, capture.acquires_per_second
+    )?;
+    writeln!(
+        out,
+        "  desktop updates       {:>9}  in {:.2} s = {:.2}/s ({:.1}% of {:.0} expected)",
         capture.frames,
         capture.window_s,
         capture.frames_per_second,
@@ -105,8 +110,16 @@ fn capture(out: &mut impl Write, report: &RunReport) -> fmt::Result {
     )?;
     writeln!(
         out,
-        "  timeouts              {:>9}   duplicates {}   superseded {}   drained {}",
-        capture.timeouts, capture.duplicates, capture.superseded, capture.drained
+        "  pointer-only updates  {:>9}  = {:.2}/s   anomalous {} = {:.2}/s",
+        capture.pointer_only_updates,
+        capture.pointer_only_updates_per_second,
+        capture.anomalous_updates,
+        capture.anomalous_updates_per_second
+    )?;
+    writeln!(
+        out,
+        "  timeouts              {:>9}   superseded {}   drained {}",
+        capture.timeouts, capture.superseded, capture.drained
     )?;
     if capture.signals > 0 {
         // The pool's own notification rate. If this matches the source and
@@ -381,8 +394,11 @@ fn distribution(out: &mut impl Write, label: &str, distribution: &Distribution) 
     }
     writeln!(
         out,
-        "  {label:<21} {:>9} above one (max {}, mean {:.3}) of {} reported",
+        "  {label:<21} {:>9} above one (p50 {} p95 {} p99 {} max {}, mean {:.3}) of {} reported",
         distribution.over_one,
+        distribution.p50,
+        distribution.p95,
+        distribution.p99,
         distribution.max,
         distribution.mean().unwrap_or(0.0),
         distribution.samples
@@ -660,6 +676,24 @@ mod tests {
         }
         assert!(!block.contains("HANDOFF"));
         assert!(!block.contains("INJECTED STALL"));
+    }
+
+    #[test]
+    fn dda_audit_separates_acquires_from_desktop_and_pointer_updates() {
+        let mut report = populated("native");
+        report.capture.acquires = 9_500;
+        report.capture.acquires_per_second = 158.3;
+        report.capture.pointer_only_updates = 3_500;
+        report.capture.pointer_only_updates_per_second = 58.3;
+        report.capture.accumulated_frames.samples = 6_000;
+        report.capture.accumulated_frames.p50 = 1;
+        report.capture.accumulated_frames.p95 = 1;
+        report.capture.accumulated_frames.p99 = 2;
+        let block = rendered(&report);
+        assert!(block.contains("successful acquires"));
+        assert!(block.contains("desktop updates"));
+        assert!(block.contains("pointer-only updates"));
+        assert!(block.contains("p50 1 p95 1 p99 2"));
     }
 
     #[test]

@@ -97,14 +97,17 @@ fn nanos_to_ms(nanos: u64) -> f64 {
 
 /// A small-integer histogram, for the counts the APIs report about themselves.
 ///
-/// Desktop Duplication's `AccumulatedFrames` and the WGC frame pool's depth
-/// are not latencies; quoting a p99 of them would be theatre. What matters is
-/// how often they exceeded one, and how bad the worst was.
+/// Desktop Duplication's `AccumulatedFrames` and the WGC frame-pool depth are
+/// reported as exact distributions. Percentiles make benchmark runs directly
+/// comparable; the histogram remains available for full inspection.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Distribution {
     pub samples: u64,
     pub max: u32,
     pub over_one: u64,
+    pub p50: u32,
+    pub p95: u32,
+    pub p99: u32,
     pub histogram: BTreeMap<u32, u64>,
 }
 
@@ -134,6 +137,33 @@ impl Distribution {
             .map(|(value, count)| *value as u64 * count)
             .sum();
         Some(total as f64 / self.samples as f64)
+    }
+
+    /// Returns a report-ready copy with exact nearest-rank percentiles.
+    ///
+    /// Percentiles are derived once, off the capture path. Recording remains a
+    /// fixed amount of small-integer bookkeeping.
+    pub fn summary(&self) -> Self {
+        let mut summary = self.clone();
+        summary.p50 = self.percentile(0.50);
+        summary.p95 = self.percentile(0.95);
+        summary.p99 = self.percentile(0.99);
+        summary
+    }
+
+    fn percentile(&self, quantile: f64) -> u32 {
+        if self.samples == 0 {
+            return 0;
+        }
+        let rank = (quantile * self.samples as f64).ceil() as u64;
+        let mut seen = 0;
+        for (&value, &count) in &self.histogram {
+            seen += count;
+            if seen >= rank {
+                return value;
+            }
+        }
+        self.max
     }
 }
 
@@ -220,6 +250,18 @@ mod tests {
         );
         assert_eq!(distribution.histogram[&1], 2);
         assert_eq!(distribution.mean(), Some(9.0 / 5.0));
+    }
+
+    #[test]
+    fn distribution_summary_reports_exact_nearest_rank_percentiles() {
+        let mut distribution = Distribution::default();
+        for value in [1, 1, 1, 2, 5] {
+            distribution.record(value);
+        }
+        let summary = distribution.summary();
+        assert_eq!(summary.p50, 1);
+        assert_eq!(summary.p95, 5);
+        assert_eq!(summary.p99, 5);
     }
 
     #[test]

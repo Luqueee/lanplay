@@ -50,7 +50,8 @@ use windows::core::{Error, IInspectable, Interface, Ref};
 use lanplay_telemetry::Timestamp;
 
 use crate::backend::{
-    Acquired, CaptureBackend, CaptureConfig, CaptureError, CapturedFrame, FrameMetadata, SourceMark,
+    Acquired, CaptureBackend, CaptureConfig, CaptureError, CapturedFrame, FrameMetadata,
+    FrameUpdate, SourceMark,
 };
 use crate::device::CaptureDevice;
 
@@ -582,7 +583,7 @@ impl CaptureBackend for GraphicsCapture {
                 // count says anything about that.
                 accumulated_frames: None,
                 pending: Some(pending),
-                duplicate: false,
+                update: FrameUpdate::Desktop,
             },
             texture: &held.texture,
         }))
