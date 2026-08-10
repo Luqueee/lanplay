@@ -78,7 +78,10 @@ pub struct StartupReport {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct CaptureReport {
     pub window_s: f64,
+    /// New desktop-content frames. Duplicate API notifications are excluded;
+    /// their count remains visible in [`CaptureReport::duplicates`].
     pub frames: u64,
+    /// Cadence of new desktop-content frames, not notification cadence.
     pub frames_per_second: f64,
     /// What the source rate implies for this window.
     pub expected_frames: f64,

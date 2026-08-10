@@ -104,7 +104,14 @@ impl Stats {
     /// Records a frame and reports how its interval compared to the source
     /// cadence, which is what the stall-recovery tracking needs.
     pub fn frame(&mut self, observation: FrameObservation) -> Option<StallClass> {
-        self.frames += 1;
+        // A duplicate notification is an acquire, but not a new desktop
+        // image. It must remain visible in the duplicate counter while the
+        // cadence and soak counts judge content frames only.
+        if observation.duplicate {
+            self.duplicates += 1;
+        } else {
+            self.frames += 1;
+        }
         self.frames_after_last_restart += 1;
         self.acquire.push(observation.duration);
         self.acquire_clock.observe(observation.acquired);
@@ -117,9 +124,6 @@ impl Stats {
         // instant, so it must not enter the monotonicity check either.
         if observation.source.as_nanos() != 0 {
             self.source_clock.observe(observation.source);
-        }
-        if observation.duplicate {
-            self.duplicates += 1;
         }
 
         let backlog = match (observation.accumulated, observation.pending) {
@@ -375,6 +379,23 @@ mod tests {
         let mut stats = Stats::new(PERIOD);
         assert_eq!(stats.frame(observation(1_000_000, 500_000)), None);
         assert_eq!(stats.interval.len(), 0);
+    }
+    #[test]
+    fn duplicate_notifications_do_not_satisfy_content_cadence() {
+        let mut stats = Stats::new(PERIOD);
+        stats.begin_window(Timestamp::from_nanos(0));
+        stats.frame(observation(10_000_000, 9_000_000));
+
+        let mut duplicate = observation(20_000_000, 0);
+        duplicate.delivery = None;
+        duplicate.duplicate = true;
+        stats.frame(duplicate);
+        stats.end_window(Timestamp::from_nanos(1_000_000_000));
+
+        let report = stats.capture_report(100.0, "desktop presented");
+        assert_eq!(report.frames, 1);
+        assert_eq!(report.duplicates, 1);
+        assert!((report.frames_per_second - 1.0).abs() < 1e-9);
     }
 
     #[test]

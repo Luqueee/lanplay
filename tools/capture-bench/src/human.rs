@@ -92,7 +92,7 @@ fn capture(out: &mut impl Write, report: &RunReport) -> fmt::Result {
     writeln!(out, "CAPTURE")?;
     writeln!(
         out,
-        "  frames                {:>9}  in {:.2} s = {:.2}/s ({:.1}% of {:.0} expected)",
+        "  content frames         {:>9}  in {:.2} s = {:.2}/s ({:.1}% of {:.0} expected)",
         capture.frames,
         capture.window_s,
         capture.frames_per_second,
@@ -429,7 +429,7 @@ pub fn compare_block(out: &mut impl Write, report: &CompareReport) -> fmt::Resul
     let dda = &report.dda;
     row(
         out,
-        "frames",
+        "content frames",
         wgc.capture.frames as f64,
         dda.capture.frames as f64,
         0,
