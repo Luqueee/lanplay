@@ -247,48 +247,9 @@ impl Gpu {
         }
     }
 
-    /// Compiles the shader and allocates the constant buffer.
+    /// Compiles the shared procedural shader for this device.
     pub fn pipeline(&self) -> Result<Pipeline, Error> {
-        let vertex_code = compile(s!("vs_main"), s!("vs_5_0"))?;
-        let pixel_code = compile(s!("ps_main"), s!("ps_5_0"))?;
-
-        let constants_desc = D3D11_BUFFER_DESC {
-            ByteWidth: TICK_BYTES,
-            Usage: D3D11_USAGE_DEFAULT,
-            BindFlags: D3D11_BIND_CONSTANT_BUFFER.0 as u32,
-            CPUAccessFlags: 0,
-            MiscFlags: 0,
-            StructureByteStride: 0,
-        };
-
-        // SAFETY: the bytecode slices are owned by the blobs held alive for
-        // the length of these calls, the description is fully initialised, and
-        // every out-pointer is checked.
-        unsafe {
-            let mut vertex = None;
-            self.device
-                .CreateVertexShader(bytecode(&vertex_code), None, Some(&mut vertex))
-                .map_err(api("ID3D11Device::CreateVertexShader"))?;
-            let mut pixel = None;
-            self.device
-                .CreatePixelShader(bytecode(&pixel_code), None, Some(&mut pixel))
-                .map_err(api("ID3D11Device::CreatePixelShader"))?;
-            let mut constants = None;
-            self.device
-                .CreateBuffer(&constants_desc, None, Some(&mut constants))
-                .map_err(api("ID3D11Device::CreateBuffer"))?;
-
-            match (vertex, pixel, constants) {
-                (Some(vertex), Some(pixel), Some(constants)) => Ok(Pipeline {
-                    vertex,
-                    pixel,
-                    constants,
-                }),
-                _ => Err(Error::Unsupported(
-                    "the device accepted the shaders but returned nothing".into(),
-                )),
-            }
-        }
+        Pipeline::new(&self.device)
     }
 }
 
@@ -335,23 +296,87 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
+    /// Compiles the procedural shader and allocates its constant buffer.
+    ///
+    /// This constructor also supports off-screen benchmark textures; callers
+    /// do not need to create a swap chain just to generate deterministic GPU
+    /// content.
+    pub fn new(device: &ID3D11Device) -> Result<Self, Error> {
+        let vertex_code = compile(s!("vs_main"), s!("vs_5_0"))?;
+        let pixel_code = compile(s!("ps_main"), s!("ps_5_0"))?;
+        let constants_desc = D3D11_BUFFER_DESC {
+            ByteWidth: TICK_BYTES,
+            Usage: D3D11_USAGE_DEFAULT,
+            BindFlags: D3D11_BIND_CONSTANT_BUFFER.0 as u32,
+            CPUAccessFlags: 0,
+            MiscFlags: 0,
+            StructureByteStride: 0,
+        };
+
+        // SAFETY: the bytecode slices are owned by live blobs, the
+        // description is fully initialised, and every out-pointer is checked.
+        unsafe {
+            let mut vertex = None;
+            device
+                .CreateVertexShader(bytecode(&vertex_code), None, Some(&mut vertex))
+                .map_err(api("ID3D11Device::CreateVertexShader"))?;
+            let mut pixel = None;
+            device
+                .CreatePixelShader(bytecode(&pixel_code), None, Some(&mut pixel))
+                .map_err(api("ID3D11Device::CreatePixelShader"))?;
+            let mut constants = None;
+            device
+                .CreateBuffer(&constants_desc, None, Some(&mut constants))
+                .map_err(api("ID3D11Device::CreateBuffer"))?;
+
+            match (vertex, pixel, constants) {
+                (Some(vertex), Some(pixel), Some(constants)) => Ok(Self {
+                    vertex,
+                    pixel,
+                    constants,
+                }),
+                _ => Err(Error::Unsupported(
+                    "the device accepted the shaders but returned nothing".into(),
+                )),
+            }
+        }
+    }
+
     /// Draws frame `frame_index` into `chain`'s back buffer.
     ///
     /// State is set every frame rather than once. It costs a handful of
     /// calls, and it means the picture cannot silently depend on state some
     /// earlier frame happened to leave behind.
     pub fn draw(&self, context: &ID3D11DeviceContext, chain: &SwapChain, frame_index: u32) {
+        self.draw_target(
+            context,
+            &chain.target,
+            chain.width,
+            chain.height,
+            frame_index,
+        );
+    }
+
+    /// Draws into an arbitrary BGRA render target without a CPU pixel path.
+    pub fn draw_target(
+        &self,
+        context: &ID3D11DeviceContext,
+        target: &ID3D11RenderTargetView,
+        width: u32,
+        height: u32,
+        frame_index: u32,
+    ) {
         let tick = Tick {
             frame_index,
-            width: chain.width,
-            height: chain.height,
+            width,
+            height,
             reserved: 0,
         };
         let viewport = D3D11_VIEWPORT {
             TopLeftX: 0.0,
             TopLeftY: 0.0,
-            Width: chain.width as f32,
-            Height: chain.height as f32,
+            Width: width as f32,
+            Height: height as f32,
             MinDepth: 0.0,
             MaxDepth: 1.0,
         };
@@ -368,7 +393,7 @@ impl Pipeline {
                 TICK_BYTES,
                 0,
             );
-            context.OMSetRenderTargets(Some(&[Some(chain.target.clone())]), None);
+            context.OMSetRenderTargets(Some(&[Some(target.clone())]), None);
             context.RSSetViewports(Some(&[viewport]));
             context.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             context.VSSetShader(&self.vertex, None);

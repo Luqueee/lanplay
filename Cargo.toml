@@ -31,6 +31,7 @@ lanplay-encoder-nvenc = { path = "windows/encoder-nvenc" }
 lanplay-decoder-videotoolbox = { path = "macos/decoder-videotoolbox" }
 lanplay-protocol = { path = "crates/protocol" }
 lanplay-renderer-metal = { path = "macos/renderer-metal" }
+lanplay-present-source = { path = "tools/present-source" }
 lanplay-telemetry = { path = "crates/telemetry" }
 lanplay-transport = { path = "crates/transport" }
 lanplay-video-core = { path = "crates/video-core" }

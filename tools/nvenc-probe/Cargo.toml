@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 lanplay-capture = { workspace = true }
 lanplay-encoder-nvenc = { workspace = true }
+lanplay-present-source = { workspace = true }
 lanplay-telemetry = { workspace = true }
 clap = { workspace = true }
 

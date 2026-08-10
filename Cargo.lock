@@ -348,6 +348,7 @@ dependencies = [
  "clap",
  "lanplay-capture",
  "lanplay-encoder-nvenc",
+ "lanplay-present-source",
  "lanplay-telemetry",
  "windows",
 ]

@@ -24,6 +24,15 @@ enum RunMode {
 }
 
 #[cfg(windows)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum ContentSource {
+    /// One frame-wide colour, changed deterministically every frame.
+    Flat,
+    /// GPU-generated motion, high-frequency detail, and frame-wide scene changes.
+    Pattern,
+}
+
+#[cfg(windows)]
 #[derive(clap::Parser)]
 #[command(name = "lanplay-nvenc-probe")]
 struct Args {
@@ -37,6 +46,8 @@ struct Args {
     bitrate_mbps: u32,
     #[arg(long, value_enum, default_value_t = RunMode::Uncapped)]
     mode: RunMode,
+    #[arg(long, value_enum, default_value_t = ContentSource::Flat)]
+    source: ContentSource,
     /// Overrides `--frames`; intended for paced soak runs.
     #[arg(long)]
     seconds: Option<u64>,
@@ -54,6 +65,43 @@ struct Args {
 struct Surface {
     texture: windows::Win32::Graphics::Direct3D11::ID3D11Texture2D,
     target: windows::Win32::Graphics::Direct3D11::ID3D11RenderTargetView,
+}
+
+#[cfg(windows)]
+enum Content {
+    Flat,
+    Pattern(lanplay_present_source::gpu::Pipeline),
+}
+
+#[cfg(windows)]
+impl Content {
+    fn new(
+        source: ContentSource,
+        device: &windows::Win32::Graphics::Direct3D11::ID3D11Device,
+    ) -> Result<Self, String> {
+        match source {
+            ContentSource::Flat => Ok(Self::Flat),
+            ContentSource::Pattern => lanplay_present_source::gpu::Pipeline::new(device)
+                .map(Self::Pattern)
+                .map_err(|error| error.to_string()),
+        }
+    }
+
+    fn draw(
+        &self,
+        context: &windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext,
+        surface: &Surface,
+        width: u32,
+        height: u32,
+        frame: u64,
+    ) {
+        match self {
+            Self::Flat => clear_surface(context, &surface.target, frame),
+            Self::Pattern(pipeline) => {
+                pipeline.draw_target(context, &surface.target, width, height, frame as u32);
+            }
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -120,6 +168,7 @@ fn windows_main() -> Result<(), String> {
     for _ in 0..SLOT_COUNT {
         surfaces.push(benchmark_surface(device.device(), args.width, args.height)?);
     }
+    let content = Content::new(args.source, device.device())?;
 
     let mut session =
         lanplay_encoder_nvenc::NvencSession::open(device.device()).map_err(|e| e.to_string())?;
@@ -150,7 +199,13 @@ fn windows_main() -> Result<(), String> {
 
     for frame in 0..args.warmup {
         let slot = frame as usize % SLOT_COUNT;
-        clear_surface(device.context(), &surfaces[slot].target, frame);
+        content.draw(
+            device.context(),
+            &surfaces[slot],
+            args.width,
+            args.height,
+            frame,
+        );
         let encoded = session
             .encode_bgra(&inputs[slot], &outputs[slot], frame, frame == 0)
             .map_err(|e| format!("warm-up frame {frame}: {e}"))?;
@@ -179,8 +234,11 @@ fn windows_main() -> Result<(), String> {
         &session,
         device.context(),
         &surfaces,
+        &content,
         &inputs,
         &outputs,
+        args.width,
+        args.height,
         args.mode,
         args.fps,
         args.warmup,
@@ -201,8 +259,11 @@ fn run_pipeline<'a>(
     session: &'a lanplay_encoder_nvenc::NvencSession,
     context: &windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext,
     surfaces: &[Surface],
+    content: &Content,
     inputs: &'a [lanplay_encoder_nvenc::RegisteredInput<'a>],
     outputs: &'a [lanplay_encoder_nvenc::OutputBuffer<'a>],
+    width: u32,
+    height: u32,
     mode: RunMode,
     fps: u32,
     first_frame: u64,
@@ -280,7 +341,7 @@ fn run_pipeline<'a>(
             let admitted = Instant::now();
             let admission_wait_ns = (admitted - wait_start).as_nanos() as u64;
             let frame = first_frame + offset;
-            clear_surface(context, &surfaces[slot].target, frame);
+            content.draw(context, &surfaces[slot], width, height, frame);
 
             let map_start = Instant::now();
             let mapped = session
@@ -407,8 +468,15 @@ fn report(
 ) -> Result<(), String> {
     let throughput = frames as f64 / elapsed.as_secs_f64();
     println!(
-        "config {}x{} @ {} fps, {} Mbps, P1 ULL CBR, BGRA direct, async {} slots, {:?}",
-        args.width, args.height, args.fps, args.bitrate_mbps, SLOT_COUNT, args.mode
+        "config {}x{} @ {} fps, {} Mbps, P1 ULL CBR, BGRA direct, {:?} source, IDR interval {}, async {} slots, {:?}",
+        args.width,
+        args.height,
+        args.fps,
+        args.bitrate_mbps,
+        args.source,
+        args.idr_interval,
+        SLOT_COUNT,
+        args.mode
     );
     println!(
         "frames {} in {:.3} s = {:.2} frames/s, pool exhaustions {}",
@@ -431,6 +499,17 @@ fn report(
     print_stage(
         "slot residency",
         metrics.iter().map(|m| m.slot_residency_ns),
+    );
+    print_stage(
+        "P completion",
+        metrics
+            .iter()
+            .filter(|m| !m.is_idr)
+            .map(|m| m.completion_ns),
+    );
+    print_stage(
+        "IDR completion",
+        metrics.iter().filter(|m| m.is_idr).map(|m| m.completion_ns),
     );
 
     let p_sizes: Vec<u64> = metrics
