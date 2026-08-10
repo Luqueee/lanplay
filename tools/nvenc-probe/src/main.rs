@@ -75,6 +75,8 @@ enum ContentSource {
     Flat,
     /// GPU-generated motion, high-frequency detail, and frame-wide scene changes.
     Pattern,
+    /// Live Desktop Duplication copied into the encoder-owned slot.
+    Capture,
 }
 
 #[cfg(windows)]
@@ -119,37 +121,101 @@ struct Surface {
 }
 
 #[cfg(windows)]
+#[derive(Clone, Copy, Debug, Default)]
+struct SourceSample {
+    wait_ns: u64,
+    accumulated_frames: u32,
+}
+
+#[cfg(windows)]
 enum Content {
     Flat,
     Pattern(lanplay_present_source::gpu::Pipeline),
+    Capture(lanplay_capture::DesktopDuplication),
 }
 
 #[cfg(windows)]
 impl Content {
-    fn new(
-        source: ContentSource,
-        device: &windows::Win32::Graphics::Direct3D11::ID3D11Device,
-    ) -> Result<Self, String> {
+    fn new(source: ContentSource, device: &lanplay_capture::CaptureDevice) -> Result<Self, String> {
         match source {
             ContentSource::Flat => Ok(Self::Flat),
-            ContentSource::Pattern => lanplay_present_source::gpu::Pipeline::new(device)
+            ContentSource::Pattern => lanplay_present_source::gpu::Pipeline::new(device.device())
                 .map(Self::Pattern)
                 .map_err(|error| error.to_string()),
+            ContentSource::Capture => {
+                let mut capture =
+                    lanplay_capture::DesktopDuplication::new(device).map_err(|e| e.to_string())?;
+                lanplay_capture::CaptureBackend::start(
+                    &mut capture,
+                    lanplay_capture::CaptureConfig {
+                        output: 0,
+                        buffers: 2,
+                        acquire_timeout_ms: 100,
+                        cursor: false,
+                    },
+                )
+                .map_err(|e| e.to_string())?;
+                Ok(Self::Capture(capture))
+            }
         }
     }
 
     fn draw(
-        &self,
+        &mut self,
         context: &windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext,
         surface: &Surface,
         width: u32,
         height: u32,
         frame: u64,
-    ) {
+    ) -> Result<SourceSample, String> {
         match self {
-            Self::Flat => clear_surface(context, &surface.target, frame),
+            Self::Flat => {
+                clear_surface(context, &surface.target, frame);
+                Ok(SourceSample::default())
+            }
             Self::Pattern(pipeline) => {
                 pipeline.draw_target(context, &surface.target, width, height, frame as u32);
+                Ok(SourceSample::default())
+            }
+            Self::Capture(capture) => {
+                let started = std::time::Instant::now();
+                let deadline = started + std::time::Duration::from_secs(1);
+                loop {
+                    let restart = {
+                        match lanplay_capture::CaptureBackend::acquire(capture)
+                            .map_err(|e| e.to_string())?
+                        {
+                            lanplay_capture::Acquired::Frame(captured) => {
+                                if captured.width != width || captured.height != height {
+                                    return Err(format!(
+                                        "capture is {}x{}, encoder is {width}x{height}",
+                                        captured.width, captured.height
+                                    ));
+                                }
+                                let accumulated = captured.metadata.accumulated_frames.unwrap_or(1);
+                                // SAFETY: both textures belong to the same
+                                // device, have identical dimensions/format,
+                                // and remain alive through command submission.
+                                unsafe {
+                                    context.CopyResource(&surface.texture, captured.texture);
+                                }
+                                return Ok(SourceSample {
+                                    wait_ns: started.elapsed().as_nanos() as u64,
+                                    accumulated_frames: accumulated,
+                                });
+                            }
+                            lanplay_capture::Acquired::Timeout => false,
+                            lanplay_capture::Acquired::Lost => true,
+                        }
+                    };
+                    if restart {
+                        lanplay_capture::CaptureBackend::restart(capture)
+                            .map_err(|e| e.to_string())?;
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        return Err("capture produced no frame for one second".into());
+                    }
+                }
             }
         }
     }
@@ -159,6 +225,8 @@ impl Content {
 struct Work<'a> {
     slot: usize,
     preprocess_ns: u64,
+    source_wait_ns: u64,
+    accumulated_frames: u32,
     submitted: lanplay_encoder_nvenc::SubmittedFrame<'a>,
     admitted: std::time::Instant,
     admission_wait_ns: u64,
@@ -173,6 +241,8 @@ struct FrameMetrics {
     is_idr: bool,
     preprocess_ns: u64,
     preprocess_gpu_ns: Option<u64>,
+    source_wait_ns: u64,
+    accumulated_frames: u32,
     bytes: usize,
     admission_wait_ns: u64,
     map_ns: u64,
@@ -222,7 +292,7 @@ fn windows_main() -> Result<(), String> {
     for _ in 0..SLOT_COUNT {
         surfaces.push(benchmark_surface(device.device(), args.width, args.height)?);
     }
-    let content = Content::new(args.source, device.device())?;
+    let mut content = Content::new(args.source, &device)?;
 
     let mut session =
         lanplay_encoder_nvenc::NvencSession::open(device.device()).map_err(|e| e.to_string())?;
@@ -277,13 +347,13 @@ fn windows_main() -> Result<(), String> {
 
     for frame in 0..args.warmup {
         let slot = frame as usize % SLOT_COUNT;
-        content.draw(
+        let _ = content.draw(
             device.context(),
             &surfaces[slot],
             args.width,
             args.height,
             frame,
-        );
+        )?;
         if let Some(converter) = converter.as_mut() {
             let _ = converter.convert(slot, frame)?;
         }
@@ -315,7 +385,7 @@ fn windows_main() -> Result<(), String> {
         &session,
         device.context(),
         &surfaces,
-        &content,
+        &mut content,
         &inputs,
         &outputs,
         args.width,
@@ -341,7 +411,7 @@ fn run_pipeline<'a>(
     session: &'a lanplay_encoder_nvenc::NvencSession,
     context: &windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext,
     surfaces: &[Surface],
-    content: &Content,
+    content: &mut Content,
     inputs: &'a [lanplay_encoder_nvenc::RegisteredInput<'a>],
     outputs: &'a [lanplay_encoder_nvenc::OutputBuffer<'a>],
     width: u32,
@@ -425,7 +495,7 @@ fn run_pipeline<'a>(
             let admitted = Instant::now();
             let admission_wait_ns = (admitted - wait_start).as_nanos() as u64;
             let frame = first_frame + offset;
-            content.draw(context, &surfaces[slot], width, height, frame);
+            let source = content.draw(context, &surfaces[slot], width, height, frame)?;
             let preprocess_start = Instant::now();
             if let Some(converter) = converter.as_deref_mut()
                 && let Some(sample) = converter.convert(slot, frame)?
@@ -451,6 +521,8 @@ fn run_pipeline<'a>(
                 .send(Work {
                     slot,
                     preprocess_ns,
+                    source_wait_ns: source.wait_ns,
+                    accumulated_frames: source.accumulated_frames,
                     submitted,
                     admitted,
                     admission_wait_ns,
@@ -533,6 +605,8 @@ fn complete_work(
         frame,
         is_idr,
         preprocess_ns: work.preprocess_ns,
+        source_wait_ns: work.source_wait_ns,
+        accumulated_frames: work.accumulated_frames,
         preprocess_gpu_ns: None,
         bytes: bytes.len(),
         admission_wait_ns: work.admission_wait_ns,
@@ -597,6 +671,14 @@ fn report(
         throughput,
         pool_exhaustions
     );
+    if args.source == ContentSource::Capture {
+        print_stage("capture acquire", metrics.iter().map(|m| m.source_wait_ns));
+        let accumulated: u64 = metrics
+            .iter()
+            .map(|m| u64::from(m.accumulated_frames.saturating_sub(1)))
+            .sum();
+        println!("capture newer frames accumulated while busy: {accumulated}");
+    }
     print_stage(
         "admission wait",
         metrics.iter().map(|m| m.admission_wait_ns),
