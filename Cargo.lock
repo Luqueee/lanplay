@@ -345,8 +345,10 @@ dependencies = [
 name = "lanplay-nvenc-probe"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "lanplay-capture",
  "lanplay-encoder-nvenc",
+ "windows",
 ]
 
 [[package]]

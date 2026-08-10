@@ -8,3 +8,7 @@ license.workspace = true
 [dependencies]
 lanplay-capture = { workspace = true }
 lanplay-encoder-nvenc = { workspace = true }
+clap = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
