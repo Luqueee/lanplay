@@ -331,6 +331,66 @@ fn capture_into_surface<B: lanplay_capture::CaptureBackend>(
     }
 }
 
+/// Where each thread last got to, so a wedge names itself.
+///
+/// A pipeline that stops has exactly two symptoms from the outside: no
+/// output, and no CPU. Bisecting a hang by rerunning it with pieces removed
+/// costs minutes per attempt and only ever narrows it to a component. One
+/// atomic per thread, stored before every call that can block, narrows it to
+/// a line.
+#[cfg(windows)]
+mod stage {
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+    pub static SUBMIT: AtomicUsize = AtomicUsize::new(0);
+    pub static COMPLETE: AtomicUsize = AtomicUsize::new(0);
+    /// Frames the submit loop has handed to the encoder. The watchdog's
+    /// liveness signal: a wedge is this standing still.
+    pub static SUBMITTED: AtomicU64 = AtomicU64::new(0);
+    pub static COMPLETED: AtomicU64 = AtomicU64::new(0);
+
+    pub const SUBMIT_NAMES: [&str; 8] = [
+        "start",
+        "pacing",
+        "waiting for a free slot",
+        "capturing",
+        "converting to NV12",
+        "mapping the input",
+        "submitting to NVENC",
+        "queueing for completion",
+    ];
+    pub const COMPLETE_NAMES: [&str; 6] = [
+        "start",
+        "waiting for work",
+        "waiting for the completion event",
+        "locking the bitstream",
+        "unlocking",
+        "sending",
+    ];
+
+    #[inline]
+    pub fn submit(step: usize) {
+        SUBMIT.store(step, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn complete(step: usize) {
+        COMPLETE.store(step, Ordering::Relaxed);
+    }
+
+    pub fn describe() -> String {
+        format!(
+            "submit thread {} (frame {}), completion thread {} (frame {})",
+            SUBMIT_NAMES[SUBMIT.load(Ordering::Relaxed).min(SUBMIT_NAMES.len() - 1)],
+            SUBMITTED.load(Ordering::Relaxed),
+            COMPLETE_NAMES[COMPLETE
+                .load(Ordering::Relaxed)
+                .min(COMPLETE_NAMES.len() - 1)],
+            COMPLETED.load(Ordering::Relaxed),
+        )
+    }
+}
+
 #[cfg(windows)]
 struct Work<'a> {
     slot: usize,
@@ -498,6 +558,41 @@ fn windows_main() -> Result<(), String> {
         }
     });
 
+    // A hang used to look identical to a slow run from the outside: no
+    // output, no CPU, nothing to grep. This turns it into one line naming the
+    // call that never returned, and then kills the run rather than letting a
+    // harness sit on it until its own timeout.
+    let watchdog_stop = Arc::clone(&memory_stop);
+    std::thread::spawn(move || {
+        const STALL: std::time::Duration = std::time::Duration::from_secs(5);
+        let mut last = (0u64, 0u64);
+        let mut still = std::time::Duration::ZERO;
+        while !watchdog_stop.load(Ordering::Acquire) {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            let now = (
+                stage::SUBMITTED.load(Ordering::Relaxed),
+                stage::COMPLETED.load(Ordering::Relaxed),
+            );
+            if now == last {
+                still += std::time::Duration::from_millis(250);
+                if still >= STALL {
+                    eprintln!(
+                        "FAIL: stalled {} s in {}",
+                        STALL.as_secs(),
+                        stage::describe()
+                    );
+                    // The point of the watchdog is that the process is wedged
+                    // in a call that will not return, so unwinding is not on
+                    // the table.
+                    std::process::exit(3);
+                }
+            } else {
+                last = now;
+                still = std::time::Duration::ZERO;
+            }
+        }
+    });
+
     let sender = args
         .send_to
         .map(|target| MediaSender::new(target, args.fps, args.mtu))
@@ -570,7 +665,11 @@ fn run_pipeline<'a>(
         let completion_failed = Arc::clone(&failed);
         let completion = scope.spawn(move || {
             let mut sender = sender;
-            while let Ok(work) = work_rx.recv() {
+            loop {
+                stage::complete(1);
+                let Ok(work) = work_rx.recv() else {
+                    break;
+                };
                 let slot = work.slot;
                 let result = if completion_failed.load(Ordering::Acquire) {
                     Err(format!(
@@ -583,6 +682,9 @@ fn run_pipeline<'a>(
                 if result.is_err() {
                     completion_failed.store(true, Ordering::Release);
                 }
+                if let Ok(metrics) = &result {
+                    stage::COMPLETED.store(metrics.frame, Ordering::Relaxed);
+                }
                 let _ = result_tx.send(result);
                 let _ = free_tx.send(slot);
             }
@@ -593,9 +695,11 @@ fn run_pipeline<'a>(
                 break;
             }
             if mode == RunMode::Paced {
+                stage::submit(1);
                 wait_until(started + period.mul_f64(offset as f64));
             }
             let wait_start = Instant::now();
+            stage::submit(2);
             let slot = match free_rx.try_recv() {
                 Ok(slot) => slot,
                 Err(TryRecvError::Empty) => {
@@ -619,7 +723,9 @@ fn run_pipeline<'a>(
             let admitted = Instant::now();
             let admission_wait_ns = (admitted - wait_start).as_nanos() as u64;
             let frame = first_frame + offset;
+            stage::submit(3);
             let source = content.draw(context, &surfaces[slot], width, height, frame)?;
+            stage::submit(4);
             let preprocess_start = Instant::now();
             if let Some(converter) = converter.as_deref_mut()
                 && let Some(sample) = converter.convert(slot, frame)?
@@ -629,17 +735,19 @@ fn run_pipeline<'a>(
             }
             let preprocess_ns = preprocess_start.elapsed().as_nanos() as u64;
 
+            stage::submit(5);
             let map_start = Instant::now();
             let mapped = session
                 .map_input(&inputs[slot])
                 .map_err(|e| format!("map frame {frame}: {e}"))?;
             let map_end = Instant::now();
             let force_idr = offset == 0 || (idr_interval != 0 && offset % idr_interval == 0);
-
+            stage::submit(6);
             let submit_start = Instant::now();
             let submitted = session
                 .encode_submit(mapped, &outputs[slot], frame, force_idr)
                 .map_err(|e| format!("submit frame {frame}: {e}"))?;
+            stage::submit(7);
             let submit_end = Instant::now();
             work_tx
                 .send(Work {
@@ -656,6 +764,7 @@ fn run_pipeline<'a>(
                     submit_end,
                 })
                 .map_err(|_| "completion thread stopped accepting work".to_owned())?;
+            stage::SUBMITTED.store(frame, Ordering::Relaxed);
             submitted_count += 1;
         }
         drop(work_tx);
@@ -710,9 +819,11 @@ fn complete_work(
 ) -> Result<FrameMetrics, String> {
     let frame = work.submitted.frame_index();
     let is_idr = work.submitted.is_idr();
+    stage::complete(2);
     session
         .wait_completion(&work.submitted)
         .map_err(|e| format!("completion event frame {frame}: {e}"))?;
+    stage::complete(3);
     let completed = std::time::Instant::now();
     let lock_start = std::time::Instant::now();
     let locked = session
@@ -728,6 +839,7 @@ fn complete_work(
     } else {
         locked.bytes().to_vec()
     };
+    stage::complete(4);
     let encoded_bytes = bytes.len();
     let copy_end = std::time::Instant::now();
     let unlock_start = std::time::Instant::now();
@@ -735,6 +847,7 @@ fn complete_work(
         .unlock()
         .map_err(|e| format!("unlock frame {frame}: {e}"))?;
     let unlock_end = std::time::Instant::now();
+    stage::complete(5);
     let network = match sender.as_deref_mut() {
         Some(sender) => sender.send(frame, is_idr, bytes)?,
         None => NetworkSample::default(),

@@ -28,9 +28,11 @@ use nvenc_sys::{
     NV_ENC_TUNING_INFO, NV_ENCODE_API_FUNCTION_LIST, NV_ENCODE_API_FUNCTION_LIST_VER,
     NVENC_INFINITE_GOPLENGTH, NVENCAPI_VERSION, NVENCSTATUS, NvEncodeApiCreateInstanceFn,
 };
-use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, WAIT_FAILED, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{
+    CloseHandle, GetLastError, HANDLE, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
 use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11Texture2D};
-use windows::Win32::System::Threading::{CreateEventW, INFINITE, WaitForSingleObject};
+use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 use windows::core::Interface;
 
 #[allow(non_snake_case)]
@@ -49,11 +51,23 @@ const CREATE_INSTANCE: &[u8] = b"NvEncodeAPICreateInstance\0";
 pub enum NvencError {
     Unavailable(&'static str),
     NotInitialized,
-    Api { call: &'static str, status: i32 },
-    Win32 { call: &'static str, code: u32 },
+    Api {
+        call: &'static str,
+        status: i32,
+    },
+    Win32 {
+        call: &'static str,
+        code: u32,
+    },
     InvalidApiFunction(&'static str),
     InvalidCount(&'static str, u32),
     InvalidOutput(&'static str),
+    /// The completion event never fired. A wedged encoder is otherwise
+    /// indistinguishable from a slow one: the thread simply never returns.
+    CompletionTimeout {
+        frame: u64,
+        after_ms: u32,
+    },
 }
 
 impl fmt::Display for NvencError {
@@ -72,6 +86,9 @@ impl fmt::Display for NvencError {
                 write!(f, "NVENC returned unreasonable {name} count {count}")
             }
             NvencError::InvalidOutput(what) => write!(f, "NVENC returned invalid output: {what}"),
+            NvencError::CompletionTimeout { frame, after_ms } => {
+                write!(f, "frame {frame} never completed after {after_ms} ms")
+            }
         }
     }
 }
@@ -712,7 +729,15 @@ impl NvencSession {
     }
 
     /// Waits for the hardware event. Synchronous sessions have no event.
+    ///
+    /// Bounded, not `INFINITE`. A frame at 120 fps owes an answer in 8.33 ms;
+    /// one that has not answered in two seconds is not slow, it is wedged,
+    /// and waiting forever turns that into a silent hang with no frame number
+    /// attached. The ceiling is two hundred periods precisely so that it can
+    /// never fire on a merely loaded encoder.
     pub fn wait_completion(&self, submitted: &SubmittedFrame<'_>) -> Result<(), NvencError> {
+        const COMPLETION_CEILING_MS: u32 = 2_000;
+
         if !core::ptr::eq(self, submitted.session) {
             return Err(NvencError::InvalidOutput(
                 "submission belongs to another NVENC session",
@@ -721,7 +746,13 @@ impl NvencSession {
         let Some(event) = submitted.output.event else {
             return Ok(());
         };
-        let result = unsafe { WaitForSingleObject(event, INFINITE) };
+        let result = unsafe { WaitForSingleObject(event, COMPLETION_CEILING_MS) };
+        if result == WAIT_TIMEOUT {
+            return Err(NvencError::CompletionTimeout {
+                frame: submitted.frame_index,
+                after_ms: COMPLETION_CEILING_MS,
+            });
+        }
         if result == WAIT_OBJECT_0 {
             Ok(())
         } else {

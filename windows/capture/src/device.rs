@@ -20,7 +20,7 @@ use windows::Win32::Graphics::Direct3D::{
 };
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice, ID3D11Device,
-    ID3D11DeviceContext,
+    ID3D11DeviceContext, ID3D11Multithread,
 };
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_ERROR_INVALID_CALL, IDXGIAdapter1, IDXGIDevice, IDXGIFactory1,
@@ -250,6 +250,40 @@ impl CaptureDevice {
             span.ok(format_args!(
                 "output_adapter_luid={output_luid} d3d11_device_adapter_luid={device_luid} match=yes"
             ));
+
+            // The device is handed to two threads: whichever one captures and
+            // copies, and whichever one drives the encoder. A D3D11 device is
+            // free-threaded but its immediate context is not, and NVENC takes
+            // that context internally on calls the caller never sees - the
+            // bitstream lock and unlock among them. Without this flag the two
+            // eventually meet inside the driver and simply stop: one thread
+            // parked in `AcquireNextFrame`, the other in
+            // `NvEncUnlockBitstream`, neither holding a lock the other can
+            // see. NVIDIA's own samples set it for exactly this reason.
+            //
+            // Serialising the context by hand instead would mean a mutex the
+            // driver already has, held across calls whose duration we do not
+            // control.
+            let multithread =
+                context
+                    .cast::<ID3D11Multithread>()
+                    .map_err(|error| CaptureError::Api {
+                        call: "ID3D11DeviceContext::QueryInterface(ID3D11Multithread)",
+                        hresult: error.code().0,
+                    })?;
+            let span = trace::begin("set_multithread_protected", "api=ID3D11Multithread");
+            // Returns the previous setting, which nothing here needs.
+            let _ = multithread.SetMultithreadProtected(true);
+            if !multithread.GetMultithreadProtected().as_bool() {
+                span.error(
+                    DXGI_ERROR_INVALID_CALL.0,
+                    "api=ID3D11Multithread protected=no",
+                );
+                return Err(CaptureError::Unsupported(
+                    "the D3D11 device refused multithread protection".into(),
+                ));
+            }
+            span.ok("api=ID3D11Multithread protected=yes");
 
             let identity = DeviceIdentity {
                 adapter: String::from_utf16_lossy(trim_nul(&adapter_desc.Description)),
