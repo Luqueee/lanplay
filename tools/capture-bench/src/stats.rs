@@ -30,6 +30,10 @@ pub struct Stats {
     period: Nanos,
     window_start: Option<Timestamp>,
     window_end: Option<Timestamp>,
+    /// Compare mode supplies the sum of disjoint backend blocks. It must not
+    /// be represented as a synthetic timestamp span, because that invites
+    /// callers to mistake it for elapsed wall time.
+    measured_window: Option<Nanos>,
 
     pub frames: u64,
     pub timeouts: u64,
@@ -71,6 +75,7 @@ impl Stats {
             period,
             window_start: None,
             window_end: None,
+            measured_window: None,
             frames: 0,
             timeouts: 0,
             duplicates: 0,
@@ -216,25 +221,28 @@ impl Stats {
         self.skip_next_interval = true;
         self.window_start = Some(at);
         self.window_end = Some(at);
+        self.measured_window = None;
     }
 
     pub fn end_window(&mut self, at: Timestamp) {
         self.window_end = Some(at);
+        self.measured_window = None;
     }
 
-    /// Replaces the measured span with an explicitly accumulated one.
+    /// Supplies the sum of disjoint measured blocks, as used by `compare`.
     ///
-    /// `compare` interleaves the two backends, so a backend's window is the
-    /// sum of its own blocks and not the wall clock from its first acquire to
-    /// its last: the other backend's blocks sit in between, and counting them
-    /// halves every rate this backend reports.
+    /// The other backend runs between these blocks, so the wall clock from
+    /// the first block to the last would count time this backend did not hold
+    /// the display and under-report its cadence.
     pub fn set_window(&mut self, measured: Nanos) {
-        self.window_start = Some(Timestamp::from_nanos(0));
-        self.window_end = Some(Timestamp::from_nanos(measured.get()));
+        self.measured_window = Some(measured);
     }
 
     /// Measured wall time. Zero before [`Stats::begin_window`].
     pub fn window(&self) -> Nanos {
+        if let Some(measured) = self.measured_window {
+            return measured;
+        }
         match (self.window_start, self.window_end) {
             (Some(start), Some(end)) => end.saturating_since(start),
             _ => Nanos::ZERO,
@@ -533,5 +541,31 @@ mod tests {
             (block.delivery.p50_ms - 2.0).abs() < 1e-9,
             "the earlier block's 1 ms delays are not in this one"
         );
+    }
+    #[test]
+    fn a_compare_window_sums_blocks_without_counting_the_gap() {
+        let mut stats = Stats::new(PERIOD);
+        stats.begin_window(Timestamp::from_nanos(0));
+
+        for index in 1..=100u64 {
+            let acquired = index * 10_000_000;
+            stats.frame(observation(acquired, acquired - 1_000_000));
+        }
+
+        // The other backend ran for five seconds between these blocks.
+        stats.skip_next_interval();
+        for index in 1..=100u64 {
+            let acquired = 5_000_000_000 + index * 10_000_000;
+            stats.frame(observation(acquired, acquired - 1_000_000));
+        }
+
+        stats.set_window(Nanos(2_000_000_000));
+        let report = stats.capture_report(100.0, "desktop presented");
+        assert_eq!(report.frames, 200);
+        assert!((report.window_s - 2.0).abs() < 1e-9);
+        assert!((report.frames_per_second - 100.0).abs() < 1e-9);
+        assert!((report.expected_frames - 200.0).abs() < 1e-9);
+        assert_eq!(report.interval.count, 198);
+        assert!(report.interval.max_ms <= 10.0);
     }
 }

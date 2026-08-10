@@ -214,13 +214,15 @@ pub fn compare(plan: &Plan, kind_seed: u64) -> Result<CompareReport, Box<dyn Err
         let mut capture = seam::open(block.backend, &subject.device)?;
         capture.start(plan.capture_config())?;
 
-        let lead_in_until = Timestamp::now().add(BLOCK_LEAD_IN);
+        // Before the first acquire of the block, not after: the gap while the
+        // other backend held the display would otherwise be recorded as this
+        // one's worst interval during the lead-in.
+        harness.stats.skip_next_interval();
+        let block_started = Timestamp::now();
+        harness.begin_block(block_started);
+        let lead_in_until = block_started.add(BLOCK_LEAD_IN);
         harness.pump(&mut capture, lead_in_until)?;
 
-        // The gap while the other backend held the display is not an interval
-        // this one produced, and spliced across it would be reported as its
-        // worst stall.
-        harness.stats.skip_next_interval();
         let measured_from = Timestamp::now();
         let mark = harness.stats.mark();
         let until = measured_from.add(Nanos::from_millis_f64(
@@ -231,7 +233,10 @@ pub fn compare(plan: &Plan, kind_seed: u64) -> Result<CompareReport, Box<dyn Err
         harness.finish_block(&mut capture, measured_to);
 
         let seconds = measured_to.saturating_since(measured_from).as_secs_f64();
-        harness.measured = harness.measured + measured_to.saturating_since(measured_from);
+        // From the block's first acquire, not from the end of the lead-in:
+        // the cumulative counters have been counting frames since the lead-in
+        // began, so excluding its seconds would inflate every rate.
+        harness.measured = harness.measured + measured_to.saturating_since(block_started);
         let stats = harness.stats.block(mark, seconds);
         block_reports.push(BlockReport {
             index: block.index,
@@ -300,6 +305,8 @@ struct Harness<'device> {
     /// own blocks. In `compare` the other backend's blocks sit in between, so
     /// the wall clock from first acquire to last is nearly double this.
     measured: Nanos,
+    cpu_used: Nanos,
+    cpu_wall: Nanos,
     pool_create_ms: Option<f64>,
     owned_pool_rebuilds: u64,
     pool_cpu_accessible: bool,
@@ -344,6 +351,8 @@ impl<'device> Harness<'device> {
             timer: None,
             holds: Vec::new(),
             measured: Nanos::ZERO,
+            cpu_used: Nanos::ZERO,
+            cpu_wall: Nanos::ZERO,
             pool_create_ms: None,
             owned_pool_rebuilds: 0,
             pool_cpu_accessible: false,
@@ -616,6 +625,8 @@ impl<'device> Harness<'device> {
         }
         self.starvation = Trend::new();
         self.cpu_baseline = process_cpu_time().map(|cpu| (cpu, now));
+        self.cpu_used = Nanos::ZERO;
+        self.cpu_wall = Nanos::ZERO;
         self.working_set_start = resident_bytes();
         self.next_sample = now;
     }
@@ -634,23 +645,40 @@ impl<'device> Harness<'device> {
             .plus(capture.extras().since(self.extras_baseline));
         self.extras_baseline = Extras::default();
         capture.stop();
+        self.account_cpu_until(at);
+    }
+
+    fn begin_block(&mut self, at: Timestamp) {
+        self.cpu_baseline = process_cpu_time().map(|cpu| (cpu, at));
+    }
+
+    fn account_cpu_until(&mut self, at: Timestamp) {
+        let Some((baseline, from)) = self.cpu_baseline else {
+            return;
+        };
+        let Some(now) = process_cpu_time() else {
+            return;
+        };
+        self.cpu_baseline = None;
+        let wall = at.saturating_since(from);
+        if wall > Nanos::ZERO {
+            self.cpu_wall = self.cpu_wall + wall;
+            self.cpu_used = self.cpu_used + Nanos(now.get().saturating_sub(baseline.get()));
+        }
     }
 
     fn finish_run(&mut self, at: Timestamp) {
+        self.account_cpu_until(at);
+        if self.cpu_wall > Nanos::ZERO {
+            self.cpu_percent =
+                Some(self.cpu_used.get() as f64 / self.cpu_wall.get() as f64 * 100.0);
+        }
+        self.stats.end_window(at);
         if self.measured > Nanos::ZERO {
             self.stats.set_window(self.measured);
-        } else {
-            self.stats.end_window(at);
         }
         if let Some(timer) = &mut self.timer {
             timer.drain(self.device.context());
-        }
-        if let (Some((baseline, from)), Some(now)) = (self.cpu_baseline, process_cpu_time()) {
-            let wall = at.saturating_since(from).get();
-            if wall > 0 {
-                let used = now.get().saturating_sub(baseline.get());
-                self.cpu_percent = Some(used as f64 / wall as f64 * 100.0);
-            }
         }
         if let Some(bytes) = resident_bytes() {
             self.working_set = Some(bytes);
