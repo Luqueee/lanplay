@@ -43,6 +43,19 @@ enum Duplicator {
     Legacy(IDXGIOutput1),
 }
 
+/// Duplication entry point selected for a diagnostic run.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DdaApi {
+    /// Prefer `DuplicateOutput1`, falling back only when `IDXGIOutput5` is not
+    /// exposed by the output.
+    #[default]
+    Auto,
+    /// Require `IDXGIOutput5::DuplicateOutput1` with one BGRA8 format.
+    Output1,
+    /// Require `IDXGIOutput1::DuplicateOutput`.
+    Legacy,
+}
+
 pub struct DesktopDuplication {
     /// The shared capture device, by interface pointer. Cloning an
     /// `ID3D11Device` bumps a refcount; it does not make a second device, and
@@ -66,37 +79,66 @@ impl DesktopDuplication {
     /// [`CaptureDevice::open`] picks the adapter from the output, so the
     /// pairing holds by construction and there is nothing to check here.
     pub fn new(device: &CaptureDevice) -> Result<DesktopDuplication, CaptureError> {
-        let span = trace::begin(
-            "query_output5",
-            format_args!(
-                "adapter_luid={} output={} format={DXGI_FORMAT_B8G8R8A8_UNORM:?}",
-                device.identity().luid,
-                device.identity().output,
-            ),
-        );
-        let (duplicator, api) = match device.output().cast::<IDXGIOutput5>() {
-            Ok(output) => {
-                span.ok(format_args!(
-                    "adapter_luid={} output={} supported=yes",
+        Self::new_with_api(device, DdaApi::Auto)
+    }
+
+    /// Binds to the output through one explicitly selected entry point.
+    ///
+    /// Production uses [`DdaApi::Auto`]. The forced variants exist so the
+    /// compatibility probe can compare both driver paths without changing any
+    /// other capture behavior.
+    pub fn new_with_api(
+        device: &CaptureDevice,
+        requested: DdaApi,
+    ) -> Result<DesktopDuplication, CaptureError> {
+        let output1 = || {
+            let span = trace::begin(
+                "query_output5",
+                format_args!(
+                    "adapter_luid={} output={} format={DXGI_FORMAT_B8G8R8A8_UNORM:?}",
                     device.identity().luid,
                     device.identity().output,
-                ));
-                (Duplicator::WithFormatList(output), "DuplicateOutput1")
-            }
-            Err(error) => {
-                span.error(
-                    error.code().0,
-                    format_args!(
-                        "adapter_luid={} output={} supported=no fallback=DuplicateOutput",
+                ),
+            );
+            match device.output().cast::<IDXGIOutput5>() {
+                Ok(output) => {
+                    span.ok(format_args!(
+                        "adapter_luid={} output={} supported=yes",
                         device.identity().luid,
                         device.identity().output,
-                    ),
-                );
-                (
+                    ));
+                    Ok(output)
+                }
+                Err(error) => {
+                    span.error(
+                        error.code().0,
+                        format_args!(
+                            "adapter_luid={} output={} supported=no",
+                            device.identity().luid,
+                            device.identity().output,
+                        ),
+                    );
+                    Err(CaptureError::Unsupported(format!(
+                        "this output does not support IDXGIOutput5: 0x{:08X}",
+                        error.code().0 as u32
+                    )))
+                }
+            }
+        };
+
+        let (duplicator, api) = match requested {
+            DdaApi::Auto => match output1() {
+                Ok(output) => (Duplicator::WithFormatList(output), "DuplicateOutput1"),
+                Err(_) => (
                     Duplicator::Legacy(device.output_as::<IDXGIOutput1>()?),
                     "DuplicateOutput",
-                )
-            }
+                ),
+            },
+            DdaApi::Output1 => (Duplicator::WithFormatList(output1()?), "DuplicateOutput1"),
+            DdaApi::Legacy => (
+                Duplicator::Legacy(device.output_as::<IDXGIOutput1>()?),
+                "DuplicateOutput",
+            ),
         };
 
         Ok(DesktopDuplication {

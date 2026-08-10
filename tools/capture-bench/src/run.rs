@@ -16,6 +16,7 @@
 use core::error::Error;
 
 use lanplay_capture::backend::CapturedFrame;
+use lanplay_capture::dda::DdaApi;
 use lanplay_capture::{
     Acquired, CaptureBackend, CaptureConfig, CaptureDevice, CaptureError, PoolHandle, TexturePool,
 };
@@ -70,6 +71,7 @@ pub struct Plan {
     pub buffers: u32,
     pub output: u32,
     pub acquire_timeout_ms: u32,
+    pub dda_api: DdaApi,
     pub cursor: bool,
     /// Overrides the detected display rate when the producer is not the
     /// compositor's own cadence.
@@ -157,7 +159,7 @@ fn open_subject(plan: &Plan) -> Result<Subject, Box<dyn Error>> {
 pub fn single(plan: &Plan, kind: BackendKind) -> Result<RunReport, Box<dyn Error>> {
     let subject = open_subject(plan)?;
     let mut harness = Harness::new(&subject, plan);
-    let mut capture = seam::open(kind, &subject.device)?;
+    let mut capture = seam::open(kind, &subject.device, plan.dda_api)?;
 
     let started = Timestamp::now();
     capture.start(plan.capture_config())?;
@@ -195,7 +197,7 @@ pub fn compare(plan: &Plan, kind_seed: u64) -> Result<CompareReport, Box<dyn Err
     // Their first allocations are then behind them when the alternation starts.
     let warmup_each = Nanos::from_millis_f64(plan.warmup_seconds * 500.0);
     for (index, (kind, harness)) in harnesses.iter_mut().enumerate() {
-        let mut capture = seam::open(*kind, &subject.device)?;
+        let mut capture = seam::open(*kind, &subject.device, plan.dda_api)?;
         let started = Timestamp::now();
         capture.start(plan.capture_config())?;
         starts[index] = Timestamp::now().saturating_since(started).as_millis_f64();
@@ -211,7 +213,7 @@ pub fn compare(plan: &Plan, kind_seed: u64) -> Result<CompareReport, Box<dyn Err
         let index = usize::from(block.backend == BackendKind::Dda);
         let harness = &mut harnesses[index].1;
 
-        let mut capture = seam::open(block.backend, &subject.device)?;
+        let mut capture = seam::open(block.backend, &subject.device, plan.dda_api)?;
         capture.start(plan.capture_config())?;
 
         // Before the first acquire of the block, not after: the gap while the

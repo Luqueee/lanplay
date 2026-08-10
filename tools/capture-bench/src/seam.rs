@@ -12,7 +12,7 @@
 
 #![cfg(windows)]
 
-use lanplay_capture::dda::DesktopDuplication;
+use lanplay_capture::dda::{DdaApi, DesktopDuplication};
 use lanplay_capture::wgc::GraphicsCapture;
 use lanplay_capture::{Acquired, CaptureBackend, CaptureConfig, CaptureDevice, CaptureError};
 
@@ -23,10 +23,14 @@ pub enum Capture {
     Dda(DesktopDuplication),
 }
 
-pub fn open(kind: BackendKind, device: &CaptureDevice) -> Result<Capture, CaptureError> {
+pub fn open(
+    kind: BackendKind,
+    device: &CaptureDevice,
+    dda_api: DdaApi,
+) -> Result<Capture, CaptureError> {
     Ok(match kind {
         BackendKind::Wgc => Capture::Wgc(GraphicsCapture::new(device)?),
-        BackendKind::Dda => Capture::Dda(DesktopDuplication::new(device)?),
+        BackendKind::Dda => Capture::Dda(DesktopDuplication::new_with_api(device, dda_api)?),
     })
 }
 

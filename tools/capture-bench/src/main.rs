@@ -39,7 +39,7 @@ use core::fmt::Write as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::output::Output;
 use crate::schedule::BackendKind;
@@ -51,6 +51,14 @@ const DEFAULT_POOL: u32 = 3;
 /// Stand-in for the encoder's hold, in milliseconds. Roughly one 100 Hz frame
 /// period, so the default measures a downstream that keeps up.
 const DEFAULT_HOLD_MS: f64 = 4.0;
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum DdaApiChoice {
+    #[default]
+    Auto,
+    Output1,
+    Legacy,
+}
 
 #[derive(Parser)]
 #[command(
@@ -85,6 +93,9 @@ struct Common {
     /// Which output to capture.
     #[arg(long, default_value_t = 0)]
     output: u32,
+    /// Desktop Duplication entry point. Diagnostic only; WGC ignores it.
+    #[arg(long, value_enum, default_value_t)]
+    dda_api: DdaApiChoice,
     /// Time discarded before the measured window. Device creation, the first
     /// allocation and the driver's first path through the copy happen here and
     /// are reported separately.
@@ -298,6 +309,11 @@ fn dispatch(settings: &Settings, out: &mut Output) -> Result<bool, Box<dyn core:
         buffers: common.buffers,
         output: common.output,
         acquire_timeout_ms: common.acquire_timeout_ms,
+        dda_api: match common.dda_api {
+            DdaApiChoice::Auto => lanplay_capture::dda::DdaApi::Auto,
+            DdaApiChoice::Output1 => lanplay_capture::dda::DdaApi::Output1,
+            DdaApiChoice::Legacy => lanplay_capture::dda::DdaApi::Legacy,
+        },
         cursor: common.cursor,
         source_hz: common.source_hz,
         stall_ms: common.stall_ms,
