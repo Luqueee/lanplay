@@ -1,4 +1,6 @@
 //! Isolated D3D11-to-NVENC latency, throughput, and cadence benchmark.
+#[cfg(windows)]
+mod nv12;
 
 #[cfg(windows)]
 const SLOT_COUNT: usize = 4;
@@ -25,6 +27,49 @@ enum RunMode {
 
 #[cfg(windows)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum Preset {
+    P1,
+    P2,
+    P3,
+}
+
+#[cfg(windows)]
+impl From<Preset> for lanplay_encoder_nvenc::EncoderPreset {
+    fn from(value: Preset) -> Self {
+        match value {
+            Preset::P1 => Self::P1,
+            Preset::P2 => Self::P2,
+            Preset::P3 => Self::P3,
+        }
+    }
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum Tuning {
+    Ll,
+    Ull,
+}
+
+#[cfg(windows)]
+impl From<Tuning> for lanplay_encoder_nvenc::LatencyTuning {
+    fn from(value: Tuning) -> Self {
+        match value {
+            Tuning::Ll => Self::LowLatency,
+            Tuning::Ull => Self::UltraLowLatency,
+        }
+    }
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum InputFormat {
+    Bgra,
+    Nv12,
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 enum ContentSource {
     /// One frame-wide colour, changed deterministically every frame.
     Flat,
@@ -44,6 +89,12 @@ struct Args {
     fps: u32,
     #[arg(long, default_value_t = 50)]
     bitrate_mbps: u32,
+    #[arg(long, value_enum, default_value_t = Preset::P1)]
+    preset: Preset,
+    #[arg(long, value_enum, default_value_t = Tuning::Ull)]
+    tuning: Tuning,
+    #[arg(long, value_enum, default_value_t = InputFormat::Bgra)]
+    input: InputFormat,
     #[arg(long, value_enum, default_value_t = RunMode::Uncapped)]
     mode: RunMode,
     #[arg(long, value_enum, default_value_t = ContentSource::Flat)]
@@ -107,6 +158,7 @@ impl Content {
 #[cfg(windows)]
 struct Work<'a> {
     slot: usize,
+    preprocess_ns: u64,
     submitted: lanplay_encoder_nvenc::SubmittedFrame<'a>,
     admitted: std::time::Instant,
     admission_wait_ns: u64,
@@ -119,6 +171,8 @@ struct Work<'a> {
 struct FrameMetrics {
     frame: u64,
     is_idr: bool,
+    preprocess_ns: u64,
+    preprocess_gpu_ns: Option<u64>,
     bytes: usize,
     admission_wait_ns: u64,
     map_ns: u64,
@@ -177,23 +231,47 @@ fn windows_main() -> Result<(), String> {
     if !codecs.contains(&h264) {
         return Err("the selected NVENC session does not expose H.264".into());
     }
+    let bgra_textures: Vec<_> = surfaces
+        .iter()
+        .map(|surface| surface.texture.clone())
+        .collect();
+    let mut converter = match args.input {
+        InputFormat::Bgra => None,
+        InputFormat::Nv12 => Some(nv12::Converter::new(
+            device.device(),
+            device.context(),
+            args.width,
+            args.height,
+            args.fps,
+            &bgra_textures,
+        )?),
+    };
     if !session.supports_async().map_err(|e| e.to_string())? {
         return Err("the selected NVENC session does not support async encoding".into());
     }
     let formats = session.input_formats(h264).map_err(|e| e.to_string())?;
     println!("H.264 input formats: {formats:?}");
     session
-        .initialize_h264(args.width, args.height, args.fps, 1, bitrate, true)
+        .initialize_h264(lanplay_encoder_nvenc::H264Config {
+            width: args.width,
+            height: args.height,
+            fps_num: args.fps,
+            fps_den: 1,
+            bitrate,
+            async_mode: true,
+            preset: args.preset.into(),
+            tuning: args.tuning.into(),
+        })
         .map_err(|e| e.to_string())?;
 
     let mut inputs = Vec::with_capacity(SLOT_COUNT);
     let mut outputs = Vec::with_capacity(SLOT_COUNT);
     for surface in &surfaces {
-        inputs.push(
-            session
-                .register_bgra(&surface.texture)
-                .map_err(|e| e.to_string())?,
-        );
+        let input = match &converter {
+            Some(converter) => session.register_nv12(converter.texture(inputs.len())),
+            None => session.register_bgra(&surface.texture),
+        };
+        inputs.push(input.map_err(|e| e.to_string())?);
         outputs.push(session.create_output_buffer().map_err(|e| e.to_string())?);
     }
 
@@ -206,8 +284,11 @@ fn windows_main() -> Result<(), String> {
             args.height,
             frame,
         );
+        if let Some(converter) = converter.as_mut() {
+            let _ = converter.convert(slot, frame)?;
+        }
         let encoded = session
-            .encode_bgra(&inputs[slot], &outputs[slot], frame, frame == 0)
+            .encode(&inputs[slot], &outputs[slot], frame, frame == 0)
             .map_err(|e| format!("warm-up frame {frame}: {e}"))?;
         validate_bitstream(&encoded.data, frame)?;
     }
@@ -240,6 +321,7 @@ fn windows_main() -> Result<(), String> {
         args.width,
         args.height,
         args.mode,
+        converter.as_mut(),
         args.fps,
         args.warmup,
         frames,
@@ -265,6 +347,7 @@ fn run_pipeline<'a>(
     width: u32,
     height: u32,
     mode: RunMode,
+    mut converter: Option<&mut nv12::Converter>,
     fps: u32,
     first_frame: u64,
     frames: u64,
@@ -288,6 +371,7 @@ fn run_pipeline<'a>(
     let started = Instant::now();
     let mut pool_exhaustions = 0u64;
     let mut submitted_count = 0u64;
+    let mut preprocess_gpu = Vec::with_capacity(frames as usize);
 
     let outcome = std::thread::scope(|scope| -> Result<Vec<FrameMetrics>, String> {
         let completion_failed = Arc::clone(&failed);
@@ -342,6 +426,14 @@ fn run_pipeline<'a>(
             let admission_wait_ns = (admitted - wait_start).as_nanos() as u64;
             let frame = first_frame + offset;
             content.draw(context, &surfaces[slot], width, height, frame);
+            let preprocess_start = Instant::now();
+            if let Some(converter) = converter.as_deref_mut()
+                && let Some(sample) = converter.convert(slot, frame)?
+                && sample.0 >= first_frame
+            {
+                preprocess_gpu.push(sample);
+            }
+            let preprocess_ns = preprocess_start.elapsed().as_nanos() as u64;
 
             let map_start = Instant::now();
             let mapped = session
@@ -349,6 +441,7 @@ fn run_pipeline<'a>(
                 .map_err(|e| format!("map frame {frame}: {e}"))?;
             let map_end = Instant::now();
             let force_idr = offset == 0 || (idr_interval != 0 && offset % idr_interval == 0);
+
             let submit_start = Instant::now();
             let submitted = session
                 .encode_submit(mapped, &outputs[slot], frame, force_idr)
@@ -357,6 +450,7 @@ fn run_pipeline<'a>(
             work_tx
                 .send(Work {
                     slot,
+                    preprocess_ns,
                     submitted,
                     admitted,
                     admission_wait_ns,
@@ -395,7 +489,20 @@ fn run_pipeline<'a>(
         }
     });
     let elapsed = started.elapsed();
-    outcome.map(|metrics| (metrics, elapsed, pool_exhaustions))
+    let mut metrics = outcome?;
+    if let Some(converter) = converter {
+        preprocess_gpu.extend(
+            converter
+                .finish_timings()?
+                .into_iter()
+                .filter(|(frame, _)| *frame >= first_frame),
+        );
+    }
+    let gpu_by_frame: std::collections::HashMap<_, _> = preprocess_gpu.into_iter().collect();
+    for metric in &mut metrics {
+        metric.preprocess_gpu_ns = gpu_by_frame.get(&metric.frame).copied();
+    }
+    Ok((metrics, elapsed, pool_exhaustions))
 }
 
 #[cfg(windows)]
@@ -425,6 +532,8 @@ fn complete_work(
     Ok(FrameMetrics {
         frame,
         is_idr,
+        preprocess_ns: work.preprocess_ns,
+        preprocess_gpu_ns: None,
         bytes: bytes.len(),
         admission_wait_ns: work.admission_wait_ns,
         map_ns: work.map_ns,
@@ -468,11 +577,14 @@ fn report(
 ) -> Result<(), String> {
     let throughput = frames as f64 / elapsed.as_secs_f64();
     println!(
-        "config {}x{} @ {} fps, {} Mbps, P1 ULL CBR, BGRA direct, {:?} source, IDR interval {}, async {} slots, {:?}",
+        "config {}x{} @ {} fps, {} Mbps, {:?} {:?} CBR, {:?} input, {:?} source, IDR interval {}, async {} slots, {:?}",
         args.width,
         args.height,
         args.fps,
         args.bitrate_mbps,
+        args.preset,
+        args.tuning,
+        args.input,
         args.source,
         args.idr_interval,
         SLOT_COUNT,
@@ -495,6 +607,11 @@ fn report(
     print_stage("lock after event", metrics.iter().map(|m| m.lock_ns));
     print_stage("bitstream copy", metrics.iter().map(|m| m.copy_ns));
     print_stage("unlock", metrics.iter().map(|m| m.unlock_ns));
+    print_stage("RGB->NV12 CPU", metrics.iter().map(|m| m.preprocess_ns));
+    let gpu_conversion: Vec<u64> = metrics.iter().filter_map(|m| m.preprocess_gpu_ns).collect();
+    if !gpu_conversion.is_empty() {
+        print_stage("RGB->NV12 GPU", gpu_conversion.into_iter());
+    }
     print_stage("encoder residency", metrics.iter().map(|m| m.residency_ns));
     print_stage(
         "slot residency",

@@ -23,10 +23,10 @@ use nvenc_sys::{
     NV_ENC_MAP_INPUT_RESOURCE_VER, NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS,
     NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER, NV_ENC_PARAMS_RC_MODE, NV_ENC_PIC_FLAGS,
     NV_ENC_PIC_PARAMS, NV_ENC_PIC_PARAMS_VER, NV_ENC_PIC_STRUCT, NV_ENC_PRESET_CONFIG,
-    NV_ENC_PRESET_CONFIG_VER, NV_ENC_PRESET_P1_GUID, NV_ENC_REGISTER_RESOURCE,
-    NV_ENC_REGISTER_RESOURCE_VER, NV_ENC_REGISTERED_PTR, NV_ENC_TUNING_INFO,
-    NV_ENCODE_API_FUNCTION_LIST, NV_ENCODE_API_FUNCTION_LIST_VER, NVENC_INFINITE_GOPLENGTH,
-    NVENCAPI_VERSION, NVENCSTATUS, NvEncodeApiCreateInstanceFn,
+    NV_ENC_PRESET_CONFIG_VER, NV_ENC_PRESET_P1_GUID, NV_ENC_PRESET_P2_GUID, NV_ENC_PRESET_P3_GUID,
+    NV_ENC_REGISTER_RESOURCE, NV_ENC_REGISTER_RESOURCE_VER, NV_ENC_REGISTERED_PTR,
+    NV_ENC_TUNING_INFO, NV_ENCODE_API_FUNCTION_LIST, NV_ENCODE_API_FUNCTION_LIST_VER,
+    NVENC_INFINITE_GOPLENGTH, NVENCAPI_VERSION, NVENCSTATUS, NvEncodeApiCreateInstanceFn,
 };
 use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, WAIT_FAILED, WAIT_OBJECT_0};
 use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11Texture2D};
@@ -187,6 +187,50 @@ pub struct LockedBitstream<'a> {
     bytes: *const u8,
     len: usize,
     locked: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EncoderPreset {
+    P1,
+    P2,
+    P3,
+}
+
+impl EncoderPreset {
+    fn guid(self) -> GUID {
+        match self {
+            Self::P1 => NV_ENC_PRESET_P1_GUID,
+            Self::P2 => NV_ENC_PRESET_P2_GUID,
+            Self::P3 => NV_ENC_PRESET_P3_GUID,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LatencyTuning {
+    LowLatency,
+    UltraLowLatency,
+}
+
+impl LatencyTuning {
+    fn nvenc(self) -> NV_ENC_TUNING_INFO {
+        match self {
+            Self::LowLatency => NV_ENC_TUNING_INFO::NV_ENC_TUNING_INFO_LOW_LATENCY,
+            Self::UltraLowLatency => NV_ENC_TUNING_INFO::NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct H264Config {
+    pub width: u32,
+    pub height: u32,
+    pub fps_num: u32,
+    pub fps_den: u32,
+    pub bitrate: u32,
+    pub async_mode: bool,
+    pub preset: EncoderPreset,
+    pub tuning: LatencyTuning,
 }
 
 /// A D3D11 texture registered for this session.
@@ -360,16 +404,18 @@ impl NvencSession {
         Ok(supported != 0)
     }
 
-    /// Configures H.264 P1 ultra-low-latency CBR with no B-frames.
-    pub fn initialize_h264(
-        &mut self,
-        width: u32,
-        height: u32,
-        fps_num: u32,
-        fps_den: u32,
-        bitrate: u32,
-        async_mode: bool,
-    ) -> Result<(), NvencError> {
+    /// Configures H.264 High CBR with no B-frames or lookahead.
+    pub fn initialize_h264(&mut self, options: H264Config) -> Result<(), NvencError> {
+        let H264Config {
+            width,
+            height,
+            fps_num,
+            fps_den,
+            bitrate,
+            async_mode,
+            preset,
+            tuning,
+        } = options;
         if self.initialized {
             return Err(NvencError::InvalidOutput("session initialized twice"));
         }
@@ -384,7 +430,8 @@ impl NvencSession {
             ));
         }
 
-        let tuning = NV_ENC_TUNING_INFO::NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY;
+        let tuning = tuning.nvenc();
+        let preset_guid = preset.guid();
         let mut preset = NV_ENC_PRESET_CONFIG {
             version: NV_ENC_PRESET_CONFIG_VER,
             presetCfg: nvenc_sys::NV_ENC_CONFIG {
@@ -401,7 +448,7 @@ impl NvencSession {
                 get_preset(
                     self.encoder,
                     NV_ENC_CODEC_H264_GUID,
-                    NV_ENC_PRESET_P1_GUID,
+                    preset_guid,
                     tuning,
                     &mut preset,
                 )
@@ -423,7 +470,7 @@ impl NvencSession {
         let mut params = NV_ENC_INITIALIZE_PARAMS {
             version: NV_ENC_INITIALIZE_PARAMS_VER,
             encodeGUID: NV_ENC_CODEC_H264_GUID,
-            presetGUID: NV_ENC_PRESET_P1_GUID,
+            presetGUID: preset_guid,
             encodeWidth: width,
             encodeHeight: height,
             darWidth: width,
@@ -454,10 +501,26 @@ impl NvencSession {
         Ok(())
     }
 
-    /// Registers one pool-owned BGRA texture and keeps it mapped.
+    /// Registers one pool-owned BGRA texture for direct RGB input.
     pub fn register_bgra<'a>(
         &'a self,
         texture: &ID3D11Texture2D,
+    ) -> Result<RegisteredInput<'a>, NvencError> {
+        self.register_texture(texture, NV_ENC_BUFFER_FORMAT::NV_ENC_BUFFER_FORMAT_ARGB)
+    }
+
+    /// Registers one pool-owned NV12 texture produced by a GPU conversion.
+    pub fn register_nv12<'a>(
+        &'a self,
+        texture: &ID3D11Texture2D,
+    ) -> Result<RegisteredInput<'a>, NvencError> {
+        self.register_texture(texture, NV_ENC_BUFFER_FORMAT::NV_ENC_BUFFER_FORMAT_NV12)
+    }
+
+    fn register_texture<'a>(
+        &'a self,
+        texture: &ID3D11Texture2D,
+        format: NV_ENC_BUFFER_FORMAT,
     ) -> Result<RegisteredInput<'a>, NvencError> {
         if !self.initialized {
             return Err(NvencError::NotInitialized);
@@ -468,7 +531,7 @@ impl NvencSession {
             width: self.width,
             height: self.height,
             resourceToRegister: texture.as_raw(),
-            bufferFormat: NV_ENC_BUFFER_FORMAT::NV_ENC_BUFFER_FORMAT_ARGB,
+            bufferFormat: format,
             bufferUsage: NV_ENC_BUFFER_USAGE::NV_ENC_INPUT_IMAGE,
             ..Default::default()
         };
@@ -715,8 +778,8 @@ impl NvencSession {
         })
     }
 
-    /// Serial convenience path used by small capability probes.
-    pub fn encode_bgra(
+    /// Serial convenience path for any registered input format.
+    pub fn encode(
         &self,
         input: &RegisteredInput<'_>,
         output: &OutputBuffer<'_>,
