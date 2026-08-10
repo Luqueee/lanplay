@@ -113,11 +113,7 @@ struct Args {
     /// RTP datagram size, including headers.
     #[arg(long, default_value_t = lanplay_transport::MAX_UDP_PAYLOAD)]
     mtu: usize,
-    /// Send every packet of an access unit immediately. Useful only when the
-    /// encoded rate is already far below link capacity.
-    #[arg(long)]
-    burst_rtp: bool,
-    /// Overrides `--frames`; intended for paced soak runs.
+    /// Overrides `--frames`; intended for soak runs.
     #[arg(long)]
     seconds: Option<u64>,
     /// Frames discarded before measurement.
@@ -125,6 +121,9 @@ struct Args {
     warmup: u64,
     #[arg(long, default_value_t = 1200)]
     frames: u64,
+    /// Width of each reporting slice. A ten-minute mean cannot show a stall.
+    #[arg(long, default_value_t = 10.0)]
+    window_seconds: f64,
     /// Force an IDR every N measured frames; zero means only the first.
     #[arg(long, default_value_t = 0)]
     idr_interval: u64,
@@ -153,24 +152,26 @@ struct NetworkSample {
     send_ns: u64,
 }
 
+/// Access units onto the wire, one burst per frame.
+///
+/// There is deliberately no pacer here. Three measurements said the same
+/// thing: pacing to the configured bitrate spent `p50 7.667 ms` of an
+/// 8.333 ms period inside this call, and because it runs on the encoder's
+/// completion thread that delay is charged to the next frame's completion as
+/// well. CBR with a small VBV already bounds what we produce over the medium
+/// term, and the AP aggregates regardless. If evidence ever reopens pacing -
+/// an RTT gradient, a growing NIC queue, loss, late access units - it belongs
+/// behind a bounded queue on a network thread, never here.
 #[cfg(windows)]
 struct MediaSender {
     socket: std::net::UdpSocket,
     packetizer: lanplay_transport::Packetizer,
     fps: u32,
-    nanos_per_wire_byte: f64,
-    next_send: std::time::Instant,
 }
 
 #[cfg(windows)]
 impl MediaSender {
-    fn new(
-        target: std::net::SocketAddr,
-        fps: u32,
-        mtu: usize,
-        bitrate_mbps: u32,
-        burst: bool,
-    ) -> Result<Self, String> {
+    fn new(target: std::net::SocketAddr, fps: u32, mtu: usize) -> Result<Self, String> {
         let socket = std::net::UdpSocket::bind("0.0.0.0:0")
             .map_err(|error| format!("bind RTP sender: {error}"))?;
         socket
@@ -189,12 +190,6 @@ impl MediaSender {
             socket,
             packetizer,
             fps,
-            nanos_per_wire_byte: if burst {
-                0.0
-            } else {
-                8_000.0 / f64::from(bitrate_mbps)
-            },
-            next_send: std::time::Instant::now(),
         })
     }
 
@@ -206,28 +201,14 @@ impl MediaSender {
             is_idr,
             data,
         };
-        self.next_send = self.next_send.max(started);
         let mut sent = 0u64;
         let mut errors = 0u64;
         let socket = &self.socket;
-        let next_send = &mut self.next_send;
-        let nanos_per_wire_byte = self.nanos_per_wire_byte;
         let packetized = self
             .packetizer
-            .packetize(&unit, |datagram| {
-                if nanos_per_wire_byte > 0.0 {
-                    wait_until(*next_send);
-                }
-                match socket.send(datagram) {
-                    Ok(bytes) => sent += bytes as u64,
-                    Err(_) => errors += 1,
-                }
-                if nanos_per_wire_byte > 0.0 {
-                    // IPv4 and UDP add 28 bytes not present in the datagram.
-                    *next_send += std::time::Duration::from_nanos(
-                        ((datagram.len() as u64 + 28) as f64 * nanos_per_wire_byte) as u64,
-                    );
-                }
+            .packetize(&unit, |datagram| match socket.send(datagram) {
+                Ok(bytes) => sent += bytes as u64,
+                Err(_) => errors += 1,
             })
             .map_err(|error| format!("packetize frame {frame}: {error}"))?;
         Ok(NetworkSample {
@@ -368,6 +349,10 @@ struct Work<'a> {
 #[cfg(windows)]
 struct FrameMetrics {
     frame: u64,
+    /// When the encoder said the frame was done. Windows are sliced on this
+    /// rather than on the frame index: an index assumes the pacing held,
+    /// which is exactly what a window is there to check.
+    completed_at: std::time::Instant,
     is_idr: bool,
     preprocess_ns: u64,
     preprocess_gpu_ns: Option<u64>,
@@ -515,15 +500,7 @@ fn windows_main() -> Result<(), String> {
 
     let sender = args
         .send_to
-        .map(|target| {
-            MediaSender::new(
-                target,
-                args.fps,
-                args.mtu,
-                args.bitrate_mbps,
-                args.burst_rtp,
-            )
-        })
+        .map(|target| MediaSender::new(target, args.fps, args.mtu))
         .transpose()?;
     let run = run_pipeline(
         &session,
@@ -764,6 +741,7 @@ fn complete_work(
     };
     Ok(FrameMetrics {
         frame,
+        completed_at: completed,
         is_idr,
         preprocess_ns: work.preprocess_ns,
         source_wait_ns: work.source_wait_ns,
@@ -942,6 +920,7 @@ fn report(
             delta as f64 / 1e6
         );
     }
+    print_windows(metrics, args.window_seconds.max(1.0), args.fps);
 
     let period_ns = 1_000_000_000u64 / u64::from(args.fps);
     let completion = Distribution::new(metrics.iter().map(|m| m.completion_ns).collect());
@@ -971,6 +950,67 @@ fn report(
         Ok(())
     } else {
         Err("async encoder gate failed".into())
+    }
+}
+
+/// The run in slices, so a stall cannot hide inside an average.
+///
+/// Sliced on the completion clock: the whole question a window answers is
+/// whether the encoder kept up over that stretch of real time, and bucketing
+/// by frame index would assume the answer.
+#[cfg(windows)]
+fn print_windows(metrics: &[FrameMetrics], seconds: f64, fps: u32) {
+    let Some(first) = metrics.first() else {
+        return;
+    };
+    let period_ms = 1_000.0 / f64::from(fps);
+    let origin = first.completed_at;
+    let width = std::time::Duration::from_secs_f64(seconds);
+    println!();
+    println!(
+        "windows of {seconds:.0} s  (encode Hz, completion and capture p99 in ms, wire Mbit/s)"
+    );
+    let mut index = 0usize;
+    loop {
+        let from = width.mul_f64(index as f64);
+        let to = from + width;
+        let slice: Vec<&FrameMetrics> = metrics
+            .iter()
+            .filter(|metric| {
+                let at = metric.completed_at.duration_since(origin);
+                at >= from && at < to
+            })
+            .collect();
+        if slice.is_empty() {
+            break;
+        }
+        // The slice's own span, not the nominal width: the last one is short.
+        let span = slice
+            .last()
+            .unwrap()
+            .completed_at
+            .duration_since(slice.first().unwrap().completed_at)
+            .as_secs_f64()
+            .max(f64::EPSILON);
+        let completion = Distribution::new(slice.iter().map(|m| m.completion_ns).collect());
+        let capture = Distribution::new(slice.iter().map(|m| m.source_wait_ns).collect());
+        let bytes: u64 = slice.iter().map(|metric| metric.bytes as u64).sum();
+        let late = slice
+            .iter()
+            .filter(|metric| metric.completion_ns as f64 / 1e6 > period_ms)
+            .count();
+        println!(
+            "  {:>5.0}-{:<5.0} {:>7} fr {:>7.1} Hz  enc p99 {:>7.3}  cap p99 {:>7.3}  {:>6.2} Mbit/s  late {}",
+            from.as_secs_f64(),
+            to.as_secs_f64(),
+            slice.len(),
+            slice.len() as f64 / span,
+            completion.p99() as f64 / 1e6,
+            capture.p99() as f64 / 1e6,
+            bytes as f64 * 8.0 / span / 1e6,
+            late
+        );
+        index += 1;
     }
 }
 

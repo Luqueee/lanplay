@@ -209,10 +209,17 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     // last access unit, so `rendered` and `superseded` cannot advance in it.
     let spans_end = Arc::new(SpanEnd::default());
     let stream_ended = Arc::new(AtomicBool::new(false));
+    // Bumped for every access unit handed to the decoder. Two readers: the
+    // LAN watchdog, which needs to know the stream is still alive, and the
+    // window sampler, which turns it into the delivered rate.
+    let arrived = Arc::new(AtomicU64::new(0));
+    // Cloned before the decoder is moved into whichever thread submits to it.
+    let decoder_counters = decoder.counters();
 
     let pipeline = match cli.transport {
         crate::Transport::Direct => {
             let feed_stop = Arc::clone(&stop);
+            let feed_arrived = Arc::clone(&arrived);
             Pipeline::Direct(thread::Builder::new().name("feed".into()).spawn(move || {
                 feed_loop(
                     decoder,
@@ -220,6 +227,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                     recorder,
                     feed_fps,
                     expected_frames,
+                    feed_arrived,
                     feed_stop,
                 )
             })?)
@@ -235,6 +243,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             let receive_stop = Arc::clone(&stop);
             let receive_ledger = Arc::clone(&ledger);
             let receive_recorder = recorder.clone();
+            let receive_arrived = Arc::clone(&arrived);
             let receiver = thread::Builder::new()
                 .name("rtp-rx".into())
                 .spawn(move || {
@@ -244,7 +253,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                         receive_recorder,
                         receive_ledger,
                         SAMPLE_INTERVAL,
-                        Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                        receive_arrived,
                         receive_stop,
                     )
                 })?;
@@ -288,7 +297,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                 socket.local_addr()?
             );
 
-            let progress = Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let progress = Arc::clone(&arrived);
             let receive_stop = Arc::clone(&stop);
             let receive_progress = Arc::clone(&progress);
             let receiver = thread::Builder::new()
@@ -353,6 +362,8 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
         Arc::clone(&telemetry),
         Arc::clone(&counters),
         Arc::clone(&slot),
+        decoder_counters,
+        Arc::clone(&arrived),
         Duration::from_secs_f64(cli.window_seconds.max(1.0)),
         sampler_stop,
     );
@@ -419,6 +430,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
 
     report(cli, &outcome, &memory, &render_stats, &snapshot);
     if !slices.is_empty() {
+        print_windows(&slices);
         println!(
             "  worst callback drop between windows: {:.1}% over {} windows",
             crate::windows::worst_callback_drop(&slices) * 100.0,
@@ -479,12 +491,43 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     Ok(verdict.passed())
 }
 
+/// The run sliced into windows, printed as a table.
+///
+/// A ten-minute mean cannot show a stall: a run that held 120 Hz for four
+/// minutes, collapsed for twenty seconds and recovered still averages 116.
+/// Every column here is per-window for exactly that reason, and the p99s are
+/// taken from histograms that get reset rather than differenced.
+fn print_windows(windows: &[crate::report::Window]) {
+    println!();
+    println!("Windows");
+    println!(
+        "  {:>12}  {:>7} {:>7} {:>7} {:>7}  {:>8} {:>8}  {:>7} {:>7}",
+        "window", "src/s", "dec/s", "rnd/s", "tick/s", "srcp99", "agep99", "super%", "empty%"
+    );
+    for window in windows {
+        println!(
+            "  {:>5.0}-{:<6.0}  {:>7.1} {:>7.1} {:>7.1} {:>7.1}  {:>8.2} {:>8.2}  {:>7.1} {:>7.1}",
+            window.from_s,
+            window.to_s,
+            window.source_hz,
+            window.decode_hz,
+            window.render_hz,
+            window.callback_hz,
+            window.source_interval_p99_ms,
+            window.frame_age_p99_ms,
+            window.superseded_pct,
+            window.empty_pct
+        );
+    }
+}
+
 fn feed_loop(
     mut decoder: VideoToolboxDecoder,
     mut source: FixtureSource,
     recorder: Recorder,
     fps: f64,
     frames: u64,
+    arrived: Arc<AtomicU64>,
     stop: Arc<AtomicBool>,
 ) -> FeedResult {
     let period = Nanos((1_000_000_000.0 / fps) as u64);
@@ -509,6 +552,7 @@ fn feed_loop(
         recorder.mark(unit.id, Stage::FrameCreated);
         recorder.mark(unit.id, Stage::FrameReassembled);
         decoder.submit(&unit)?;
+        arrived.fetch_add(1, Ordering::Relaxed);
 
         let in_flight = decoder.in_flight();
         max_backlog = max_backlog.max(in_flight);

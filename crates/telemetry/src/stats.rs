@@ -35,6 +35,7 @@ pub(crate) struct Histograms {
 pub(crate) struct WindowHistograms {
     pub local_age: Histogram<u32>,
     pub present_interval: Histogram<u32>,
+    pub source_interval: Histogram<u32>,
     pub presented: u64,
 }
 
@@ -43,6 +44,7 @@ impl WindowHistograms {
         WindowHistograms {
             local_age: new_histogram(),
             present_interval: new_histogram(),
+            source_interval: new_histogram(),
             presented: 0,
         }
     }
@@ -51,6 +53,7 @@ impl WindowHistograms {
     pub fn reset(&mut self) {
         self.local_age.reset();
         self.present_interval.reset();
+        self.source_interval.reset();
         self.presented = 0;
     }
 }
@@ -60,6 +63,9 @@ impl WindowHistograms {
 pub struct Window {
     pub local_age: Percentiles,
     pub present_interval: Percentiles,
+    /// Cadence of whatever this machine sees first: a capture on the host, a
+    /// datagram on the client. The series a link stall shows up in.
+    pub source_interval: Percentiles,
     pub presented: u64,
     /// Wall time the window covered.
     pub span: Nanos,

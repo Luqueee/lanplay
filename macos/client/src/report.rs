@@ -99,7 +99,16 @@ pub struct Window {
     /// fast as the slot can be read, and the figure runs to thousands. See
     /// `run.drive_mode` before reading this as a display rate.
     pub callback_hz: f64,
+    /// Access units reassembled per second: what the link delivered.
+    pub source_hz: f64,
+    pub decode_hz: f64,
     pub render_hz: f64,
     pub superseded_pct: f64,
+    /// Refreshes that found nothing new, as a share of the window's ticks.
+    pub empty_pct: f64,
+    /// Cadence of arrivals inside the window. The cumulative figure cannot
+    /// be differenced, so this is the only place a link stall is visible.
+    pub source_interval_p99_ms: f64,
+    /// The client's `local_age`, not the sender's frame age.
     pub frame_age_p99_ms: f64,
 }

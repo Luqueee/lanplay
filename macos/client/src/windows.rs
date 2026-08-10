@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
+use lanplay_decoder_videotoolbox::DecoderCounters;
 use lanplay_renderer_metal::{LatestFrameSlot, LiveCounters};
 use lanplay_telemetry::{Nanos, Telemetry, Timestamp, wait_until};
 
@@ -23,6 +24,9 @@ pub fn sample(
     telemetry: &Telemetry,
     counters: &Arc<LiveCounters>,
     slot: &Arc<LatestFrameSlot>,
+    decoder: &DecoderCounters,
+    // Access units handed to the decoder, bumped by whatever feeds it.
+    arrived: &Arc<std::sync::atomic::AtomicU64>,
     every: Duration,
     stop: &Arc<AtomicBool>,
 ) -> Vec<Window> {
@@ -32,6 +36,8 @@ pub fn sample(
     let mut last_callbacks = counters.callbacks.load(Ordering::Relaxed);
     let mut last_rendered = counters.rendered.load(Ordering::Relaxed);
     let mut last_superseded = slot.superseded();
+    let mut last_decoded = decoder.decoded();
+    let mut last_arrived = arrived.load(Ordering::Relaxed);
     let mut index = 1u64;
 
     while !stop.load(Ordering::Acquire) {
@@ -43,6 +49,8 @@ pub fn sample(
         let taken = telemetry.take_window();
         let callbacks = counters.callbacks.load(Ordering::Relaxed);
         let rendered = counters.rendered.load(Ordering::Relaxed);
+        let decoded = decoder.decoded();
+        let reassembled = arrived.load(Ordering::Relaxed);
         let seconds = taken.span.as_secs_f64().max(f64::EPSILON);
 
         let drawn = rendered - last_rendered;
@@ -52,22 +60,36 @@ pub fn sample(
         let superseded_now = slot.superseded();
         let superseded = superseded_now - last_superseded;
         let offered = drawn + superseded;
+        let ticks = callbacks - last_callbacks;
         windows.push(Window {
             from_s: (index - 1) as f64 * every.as_secs_f64(),
             to_s: index as f64 * every.as_secs_f64(),
-            callback_hz: (callbacks - last_callbacks) as f64 / seconds,
+            callback_hz: ticks as f64 / seconds,
+            source_hz: (reassembled - last_arrived) as f64 / seconds,
+            decode_hz: (decoded - last_decoded) as f64 / seconds,
             render_hz: drawn as f64 / seconds,
             superseded_pct: if offered == 0 {
                 0.0
             } else {
                 superseded as f64 * 100.0 / offered as f64
             },
+            // A refresh with nothing new to show. High is not automatically
+            // wrong - a 60 fps source on a 120 Hz panel empties half of them
+            // by arithmetic - but a jump between windows is a stall.
+            empty_pct: if ticks == 0 {
+                0.0
+            } else {
+                (ticks - drawn) as f64 * 100.0 / ticks as f64
+            },
+            source_interval_p99_ms: taken.source_interval.p99.as_millis_f64(),
             frame_age_p99_ms: taken.local_age.p99.as_millis_f64(),
         });
 
         last_callbacks = callbacks;
         last_rendered = rendered;
         last_superseded = superseded_now;
+        last_decoded = decoded;
+        last_arrived = reassembled;
         index += 1;
     }
     windows
@@ -85,16 +107,23 @@ pub fn worst_callback_drop(windows: &[Window]) -> f64 {
         .fold(0.0f64, f64::max)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn spawn(
     telemetry: Arc<Telemetry>,
     counters: Arc<LiveCounters>,
     slot: Arc<LatestFrameSlot>,
+    decoder: DecoderCounters,
+    arrived: Arc<std::sync::atomic::AtomicU64>,
     every: Duration,
     stop: Arc<AtomicBool>,
 ) -> thread::JoinHandle<Vec<Window>> {
     thread::Builder::new()
         .name("windows".into())
-        .spawn(move || sample(&telemetry, &counters, &slot, every, &stop))
+        .spawn(move || {
+            sample(
+                &telemetry, &counters, &slot, &decoder, &arrived, every, &stop,
+            )
+        })
         .expect("spawn window sampler")
 }
 
@@ -107,8 +136,12 @@ mod tests {
             from_s: 0.0,
             to_s: 10.0,
             callback_hz,
+            source_hz: callback_hz,
+            decode_hz: callback_hz,
             render_hz: callback_hz,
             superseded_pct: 0.0,
+            empty_pct: 0.0,
+            source_interval_p99_ms: 8.3,
             frame_age_p99_ms: 9.0,
         }
     }

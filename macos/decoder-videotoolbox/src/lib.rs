@@ -121,6 +121,25 @@ pub struct VideoToolboxDecoder {
     previous_pts: Option<VideoTimestamp>,
 }
 
+/// The decoder's counters, readable from another thread.
+///
+/// The decoder itself is owned by whichever thread submits to it, so a
+/// sampler cannot ask it anything. This shares the same atomics rather than
+/// copying them, which is why a window can report decode rate without the
+/// receive loop publishing it.
+#[derive(Clone)]
+pub struct DecoderCounters(Arc<Shared>);
+
+impl DecoderCounters {
+    pub fn decoded(&self) -> u64 {
+        self.0.decoded()
+    }
+
+    pub fn in_flight(&self) -> usize {
+        self.0.in_flight()
+    }
+}
+
 // SAFETY: every field is owned by this struct and safe to use from whichever
 // thread owns it. VideoToolbox documents decompression sessions as callable
 // from any thread, CoreMedia format descriptions are immutable, and `Shared`
@@ -215,6 +234,12 @@ impl VideoToolboxDecoder {
     /// pipeline's point of view they are the same stall.
     pub fn in_flight(&self) -> usize {
         self.shared.in_flight()
+    }
+
+    /// A cheap, cloneable view of the counters, for a sampler that runs
+    /// beside the thread owning the decoder rather than inside it.
+    pub fn counters(&self) -> DecoderCounters {
+        DecoderCounters(Arc::clone(&self.shared))
     }
 
     pub fn submitted(&self) -> u64 {

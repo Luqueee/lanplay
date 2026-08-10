@@ -191,6 +191,10 @@ impl Telemetry {
                 "present interval",
                 &window.present_interval,
             ),
+            source_interval: Percentiles::from_histogram(
+                "source interval",
+                &window.source_interval,
+            ),
             presented: window.presented,
             span,
         };
@@ -494,6 +498,11 @@ fn fold(shared: &Shared, completed: &mut Vec<FrameTimeline>, pending: &mut Pendi
             {
                 Histograms::record(
                     &mut histograms.source_interval,
+                    delta,
+                    &mut histograms.clipped,
+                );
+                Histograms::record(
+                    &mut histograms.window.source_interval,
                     delta,
                     &mut histograms.clipped,
                 );
