@@ -267,38 +267,54 @@ impl Converter {
         let Some(frame) = slot.pending_frame.take() else {
             return Ok(None);
         };
-        let mut disjoint = D3D11_QUERY_DATA_TIMESTAMP_DISJOINT::default();
-        let mut start = 0u64;
-        let mut end = 0u64;
-        // SAFETY: NVENC completion made this pool slot reusable, which also
-        // completes the earlier conversion queries. All output buffers have
-        // their exact declared size and alignment.
-        unsafe {
-            self.immediate
-                .GetData(
-                    &slot.disjoint,
-                    Some((&raw mut disjoint).cast()),
-                    size_of::<D3D11_QUERY_DATA_TIMESTAMP_DISJOINT>() as u32,
-                    0,
-                )
-                .map_err(|error| format!("GetData(disjoint) frame {frame}: {error}"))?;
-            self.immediate
-                .GetData(
-                    &slot.start,
-                    Some((&raw mut start).cast()),
-                    size_of::<u64>() as u32,
-                    0,
-                )
-                .map_err(|error| format!("GetData(start) frame {frame}: {error}"))?;
-            self.immediate
-                .GetData(
-                    &slot.end,
-                    Some((&raw mut end).cast()),
-                    size_of::<u64>() as u32,
-                    0,
-                )
-                .map_err(|error| format!("GetData(end) frame {frame}: {error}"))?;
-        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let disjoint = loop {
+            let mut value = D3D11_QUERY_DATA_TIMESTAMP_DISJOINT::default();
+            // SAFETY: the output buffer has the query's exact data size.
+            unsafe {
+                self.immediate
+                    .GetData(
+                        &slot.disjoint,
+                        Some((&raw mut value).cast()),
+                        size_of::<D3D11_QUERY_DATA_TIMESTAMP_DISJOINT>() as u32,
+                        0,
+                    )
+                    .map_err(|error| format!("GetData(disjoint) frame {frame}: {error}"))?;
+            }
+            if value.Frequency != 0 {
+                break value;
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(format!("GPU timestamp timeout for frame {frame}"));
+            }
+            std::thread::yield_now();
+        };
+        let read_timestamp = |query: &ID3D11Query, name: &str| -> Result<u64, String> {
+            loop {
+                let mut value = u64::MAX;
+                // SAFETY: the output buffer has the timestamp query's exact
+                // data size.
+                unsafe {
+                    self.immediate
+                        .GetData(
+                            query,
+                            Some((&raw mut value).cast()),
+                            size_of::<u64>() as u32,
+                            0,
+                        )
+                        .map_err(|error| format!("GetData({name}) frame {frame}: {error}"))?;
+                }
+                if value != u64::MAX {
+                    return Ok(value);
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err(format!("GPU {name} timestamp timeout for frame {frame}"));
+                }
+                std::thread::yield_now();
+            }
+        };
+        let start = read_timestamp(&slot.start, "start")?;
+        let end = read_timestamp(&slot.end, "end")?;
         if disjoint.Disjoint.as_bool() || disjoint.Frequency == 0 || end < start {
             return Err(format!("invalid GPU timestamp interval for frame {frame}"));
         }
