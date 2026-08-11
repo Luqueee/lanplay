@@ -20,6 +20,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
+use lanplay_protocol::VideoCodec;
 use lanplay_telemetry::{Nanos, Timestamp};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -252,6 +253,30 @@ pub enum ControlMessage {
         height: u32,
         fps: u32,
     },
+    /// The codec configuration the media stream will actually use.
+    ///
+    /// Parameter sets belong on the wire because they belong to the encoder
+    /// that produced the stream. A decoder configured from anything else -
+    /// a fixture encoded elsewhere, a remembered blob - is describing a
+    /// different stream, and rejects real slices as corrupt data.
+    ///
+    /// `generation` exists before anything can change it on purpose. When a
+    /// resolution or a codec does change, frames of the old configuration are
+    /// still in flight, and a receiver that cannot tell which configuration a
+    /// frame belongs to can only guess.
+    VideoConfig {
+        generation: u32,
+        codec: VideoCodec,
+        width: u16,
+        height: u16,
+        /// Annex-B payloads, start codes removed.
+        sps: Vec<u8>,
+        pps: Vec<u8>,
+    },
+    /// The receiver has a decoder for that generation and will accept media.
+    ConfigAck {
+        generation: u32,
+    },
     StopStream,
     Ping {
         nonce: u64,
@@ -270,6 +295,8 @@ impl ControlMessage {
     pub const STOP_STREAM: u16 = 6;
     pub const PING: u16 = 7;
     pub const PONG: u16 = 8;
+    pub const VIDEO_CONFIG: u16 = 9;
+    pub const CONFIG_ACK: u16 = 10;
 
     pub const fn message_type(&self) -> u16 {
         match self {
@@ -281,6 +308,8 @@ impl ControlMessage {
             ControlMessage::StopStream => Self::STOP_STREAM,
             ControlMessage::Ping { .. } => Self::PING,
             ControlMessage::Pong { .. } => Self::PONG,
+            ControlMessage::VideoConfig { .. } => Self::VIDEO_CONFIG,
+            ControlMessage::ConfigAck { .. } => Self::CONFIG_ACK,
         }
     }
 

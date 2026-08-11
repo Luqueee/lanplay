@@ -113,6 +113,10 @@ struct Args {
     /// RTP datagram size, including headers.
     #[arg(long, default_value_t = lanplay_transport::MAX_UDP_PAYLOAD)]
     mtu: usize,
+    /// Serve the codec configuration on this TCP port and wait for the
+    /// receiver to acknowledge it before sending any media.
+    #[arg(long)]
+    control_port: Option<u16>,
     /// Overrides `--frames`; intended for soak runs.
     #[arg(long)]
     seconds: Option<u64>,
@@ -432,6 +436,89 @@ struct FrameMetrics {
     network: NetworkSample,
 }
 
+/// One configuration for now; the field exists so that the day a resolution
+/// changes, frames of the old generation still in flight can be told apart
+/// from frames of the new one instead of being guessed at.
+#[cfg(windows)]
+const CONFIG_GENERATION: u32 = 1;
+
+/// Splits an Annex-B sequence header into its first SPS and first PPS.
+#[cfg(windows)]
+fn split_parameter_sets(header: &[u8]) -> Result<(Vec<u8>, Vec<u8>), String> {
+    let mut sps = None;
+    let mut pps = None;
+    for nal in lanplay_video_core::split_annex_b(header) {
+        match nal
+            .first()
+            .map(|b| lanplay_video_core::NalUnitType::from_header(*b))
+        {
+            Some(lanplay_video_core::NalUnitType::Sps) => sps.get_or_insert_with(|| nal.to_vec()),
+            Some(lanplay_video_core::NalUnitType::Pps) => pps.get_or_insert_with(|| nal.to_vec()),
+            _ => continue,
+        };
+    }
+    match (sps, pps) {
+        (Some(sps), Some(pps)) => Ok((sps, pps)),
+        (sps, pps) => Err(format!(
+            "sequence header has {} SPS and {} PPS, needs one of each",
+            sps.is_some() as u8,
+            pps.is_some() as u8
+        )),
+    }
+}
+
+/// Hands the receiver the codec configuration and waits for it to say it has
+/// a decoder for it.
+#[cfg(windows)]
+fn serve_config(
+    port: u16,
+    generation: u32,
+    width: u16,
+    height: u16,
+    sps: &[u8],
+    pps: &[u8],
+) -> Result<(), String> {
+    use lanplay_telemetry::Nanos;
+    use lanplay_transport::{ControlMessage, ControlServer};
+
+    const WAIT: Nanos = Nanos(60_000_000_000);
+
+    let server = ControlServer::bind(("0.0.0.0", port), "lanplay-host")
+        .map_err(|error| format!("bind control port {port}: {error}"))?;
+    println!("control listening on 0.0.0.0:{port}");
+    let mut session = server
+        .accept_session(WAIT)
+        .map_err(|error| format!("no receiver connected: {error}"))?;
+    println!("control session with {}", session.peer_addr());
+
+    session
+        .send(&ControlMessage::VideoConfig {
+            generation,
+            codec: lanplay_protocol::VideoCodec::H264,
+            width,
+            height,
+            sps: sps.to_vec(),
+            pps: pps.to_vec(),
+        })
+        .map_err(|error| format!("send VideoConfig: {error}"))?;
+
+    match session.next_message(WAIT) {
+        Ok(Some(ControlMessage::ConfigAck { generation: acked })) if acked == generation => {
+            println!("config generation {generation} acknowledged");
+            Ok(())
+        }
+        Ok(Some(ControlMessage::ConfigAck { generation: acked })) => Err(format!(
+            "receiver acknowledged generation {acked}, not {generation}"
+        )),
+        Ok(Some(other)) => Err(format!(
+            "expected ConfigAck, got message type {}",
+            other.message_type()
+        )),
+        Ok(None) => Err("receiver never acknowledged the configuration".into()),
+        Err(error) => Err(format!("waiting for ConfigAck: {error}")),
+    }
+}
+
 #[cfg(windows)]
 fn windows_main() -> Result<(), String> {
     use std::sync::Arc;
@@ -510,6 +597,30 @@ fn windows_main() -> Result<(), String> {
             tuning: args.tuning.into(),
         })
         .map_err(|e| e.to_string())?;
+
+    // The parameter sets the decoder will be configured from come from the
+    // encoder that produced the stream, and from nowhere else.
+    let sequence_header = session.sequence_header().map_err(|e| e.to_string())?;
+    let (sps, pps) = split_parameter_sets(&sequence_header)?;
+    println!(
+        "sequence header {} bytes: SPS {} bytes, PPS {} bytes",
+        sequence_header.len(),
+        sps.len(),
+        pps.len()
+    );
+    if let Some(port) = args.control_port {
+        // No media before the receiver has acknowledged a decoder for this
+        // configuration. Buffering the first frames until config arrives would
+        // build exactly the queue the whole pipeline is designed to refuse.
+        serve_config(
+            port,
+            CONFIG_GENERATION,
+            args.width as u16,
+            args.height as u16,
+            &sps,
+            &pps,
+        )?;
+    }
 
     let mut inputs = Vec::with_capacity(SLOT_COUNT);
     let mut outputs = Vec::with_capacity(SLOT_COUNT);

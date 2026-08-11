@@ -29,6 +29,7 @@ SECONDS_TO_RUN="${1:-60}"
 IFACE="${IFACE:-${WIRED_IF:-en8}}"
 BITRATE="${BITRATE:-50}"
 PORT="${PORT:-5004}"
+CONTROL_PORT="${CONTROL_PORT:-5005}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CLIENT="$REPO/target/release/lanplay-client"
 REPORT="${REPORT:-/tmp/e2e-gate-${BITRATE}m-${SECONDS_TO_RUN}s.json}"
@@ -81,7 +82,6 @@ echo "clocks    host GPU locked to 2000-2700 MHz core, 9001 MHz memory"
 # Bringing both up here rather than assuming them is what keeps a long sweep
 # from silently measuring an output that went away an hour ago.
 
-scp -q "$REPO/tools/win/ensure-lab-source.ps1" windows:C:/Users/luque/ensure-lab-source.ps1
 source_state="$(WIN_TIMEOUT=60 "$REPO/tools/win-session.sh" \
     'C:\Users\luque\ensure-lab-source.log' \
     'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\luque\ensure-lab-source.ps1' 2>&1)" ||
@@ -91,20 +91,38 @@ echo "source    $(printf '%s' "$source_state" | tr -d '\r' | grep -E '^monitor' 
 # ---- receiver -------------------------------------------------------------
 # The renderer refuses to measure an occluded window, and a window opened by
 # a process launched over ssh does not come forward on its own.
+#
+# The negative control answers a question about the decoder, not about the
+# display, and it reaches preflight within a second of launch - before a
+# raise can land. Requiring an unoccluded window there would fail the run for
+# a reason that has nothing to do with what it is testing.
+DISPLAY_ARG="--require-clean-display"
+if [ "${PARAMETER_SETS:-host}" = "fixture" ]; then
+    DISPLAY_ARG=""
+fi
 
 CLIENT_LOG="$(mktemp -t e2e-gate-client)"
 "$CLIENT" \
-    --transport lan --bind "$LOCAL_IP:$PORT" \
+    --transport lan --bind "$LOCAL_IP:$PORT" --control "$WIN_IP:$CONTROL_PORT" \
+    --parameter-sets "${PARAMETER_SETS:-host}" \
     --width 1920 --height 1080 --fps 120 \
     --seconds "$SECONDS_TO_RUN" --fixture-seconds 10 --fixture-dir "$REPO/fixtures" \
-    --mode display-link --require-clean-display \
+    --mode display-link $DISPLAY_ARG \
     --window-seconds 10 --report "$REPORT" >"$CLIENT_LOG" 2>&1 &
 CLIENT_PID=$!
 trap 'kill "$CLIENT_PID" 2>/dev/null || true; restore_clocks' EXIT
 
-for _ in $(seq 1 60); do
+
+# What "ready" means depends on where the parameter sets come from. Normally
+# the receiver blocks on the host's VideoConfig, so the marker is the moment
+# it starts negotiating; waiting for the preflight block that comes after
+# would deadlock, since the client is waiting for a host this script has not
+# launched. The negative control never negotiates, and reaches preflight on
+# its own. Either line means the receiver is as ready as it will get.
+READY='control: connecting|preflight: complete'
+for _ in $(seq 1 100); do
     kill -0 "$CLIENT_PID" 2>/dev/null || break
-    if grep -q "preflight: complete" "$CLIENT_LOG" 2>/dev/null; then
+    if grep -qE "$READY" "$CLIENT_LOG" 2>/dev/null; then
         break
     fi
     osascript \
@@ -113,15 +131,23 @@ for _ in $(seq 1 60); do
         >/dev/null 2>&1 || true
     sleep 0.2
 done
-grep -q "preflight: complete" "$CLIENT_LOG" || {
+grep -qE "$READY" "$CLIENT_LOG" || {
     cat "$CLIENT_LOG" >&2
-    fail "client preflight refused the run"
+    fail "receiver never became ready"
 }
-echo "receiver  listening on $LOCAL_IP:$PORT"
-
+echo "receiver  listening on $LOCAL_IP:$PORT, negotiating on $CONTROL_PORT"
 # ---- sender ---------------------------------------------------------------
 # Through the interactive session: ssh lands in session 0, which has no
 # display devices, so Desktop Duplication finds nothing there.
+
+# The negative control reproduces the path that existed before the control
+# plane: the host sends without waiting for anything, and the receiver
+# configures itself from a fixture some other encoder produced. Leaving the
+# config gate on would simply deadlock, which proves nothing.
+CONTROL_ARG="--control-port $CONTROL_PORT"
+if [ "${PARAMETER_SETS:-host}" = "fixture" ]; then
+    CONTROL_ARG=""
+fi
 
 RUNNER='C:\Users\luque\e2e-gate.ps1'
 LOCAL_RUNNER="$(mktemp -t e2e-gate-runner)"
@@ -131,7 +157,7 @@ cat >"$LOCAL_RUNNER" <<PS1
 Get-Process lanplay-nvenc-probe -ErrorAction SilentlyContinue | Stop-Process -Force
 # One line: PowerShell continues with a backtick, not a backslash, and a
 # wrapped command that silently loses its tail is a run that measures nothing.
-& \$probe --mode paced --input nv12 --source dda --output 1 --send-to $LOCAL_IP:$PORT --mtu 1200 --seconds $SECONDS_TO_RUN --warmup 0 --fps 120 --width 1920 --height 1080 --bitrate-mbps $BITRATE --preset p1 --tuning ll --idr-interval 120 --window-seconds 10
+& \$probe --mode paced --input nv12 --source dda --output 1 --send-to $LOCAL_IP:$PORT $CONTROL_ARG --mtu 1200 --seconds $SECONDS_TO_RUN --warmup 0 --fps 120 --width 1920 --height 1080 --bitrate-mbps $BITRATE --preset p1 --tuning ll --idr-interval 120 --window-seconds 10
 exit \$LASTEXITCODE
 PS1
 scp -q "$LOCAL_RUNNER" "windows:$(printf '%s' "$RUNNER" | tr '\\' '/')"

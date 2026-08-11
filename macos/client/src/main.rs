@@ -6,6 +6,7 @@
 //! no encoder. If this cannot hold 1080p120 with a flat backlog, nothing built
 //! on top of it can.
 
+mod config;
 mod gate;
 mod nap;
 mod preflight;
@@ -62,6 +63,17 @@ pub struct Cli {
     /// Address to receive RTP on, for `--transport lan`.
     #[arg(long, default_value = "0.0.0.0:5004")]
     pub bind: std::net::SocketAddr,
+    /// Where the host serves its codec configuration. Required for
+    /// `--transport lan`: the decoder is built from the host's parameter
+    /// sets, never from the fixture's.
+    #[arg(long)]
+    pub control: Option<std::net::SocketAddr>,
+    /// Where the decoder's parameter sets come from. `fixture` exists to
+    /// reproduce the failure that motivated the control plane: decoding a
+    /// live stream against another encoder's SPS/PPS. It is the negative
+    /// control, and a run using it is expected to fail.
+    #[arg(long, value_enum, default_value_t = ParameterSetSource::Host)]
+    pub parameter_sets: ParameterSetSource,
     /// Compare every reconstructed access unit against the original by
     /// SHA-256, rather than trusting that the decoder did not complain.
     #[arg(long)]
@@ -97,6 +109,17 @@ pub struct Cli {
 pub enum Pattern {
     Motion,
     Detail,
+}
+
+/// Which encoder's parameter sets configure the decoder.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ParameterSetSource {
+    /// The sequence header of the encoder actually producing the stream,
+    /// carried by the control plane. The only correct answer.
+    Host,
+    /// The local fixture's. Wrong by construction for a live stream; kept so
+    /// the failure it causes can be demonstrated rather than argued about.
+    Fixture,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]

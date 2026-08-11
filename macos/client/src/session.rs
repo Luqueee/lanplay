@@ -161,10 +161,31 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     let slot = LatestFrameSlot::new();
     let stop = Arc::new(AtomicBool::new(false));
 
+    // Where the decoder's format description comes from. Over a real link it
+    // is the encoder's own sequence header, carried by the control plane
+    // before any media: parameter sets from the fixture describe a stream
+    // some other encoder produced, and VideoToolbox rejects real slices
+    // decoded against them as bad data.
+    let (parameter_sets, mut control) = match cli.transport {
+        crate::Transport::Lan if cli.parameter_sets == crate::ParameterSetSource::Host => {
+            let (config, control) = crate::config::negotiate(cli)?;
+            println!(
+                "codec config generation {} from the host: {}x{}, SPS {} B, PPS {} B",
+                config.generation,
+                config.width,
+                config.height,
+                config.sets.sps[0].len(),
+                config.sets.pps[0].len()
+            );
+            (config.sets, Some((control, config.generation)))
+        }
+        _ => (source.parameter_sets().clone(), None),
+    };
+
     let sink_slot = Arc::clone(&slot);
     let decoder = VideoToolboxDecoder::new(
         DecoderConfig {
-            parameter_sets: source.parameter_sets().clone(),
+            parameter_sets,
             width: cli.width,
             height: cli.height,
             pixel_format: PixelFormat::Nv12VideoRange,
@@ -353,6 +374,14 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             Pipeline::Receive(receiver)
         }
     };
+
+    // Only now is the receiver actually ready: a decoder exists and the UDP
+    // socket is bound. Acknowledging any earlier would invite the host to
+    // start sending at a port nothing is listening on yet.
+    if let Some((control, generation)) = control.as_mut() {
+        crate::config::acknowledge(control, *generation)?;
+        println!("control: acknowledged generation {generation}");
+    }
 
     // The closure below consumes its copy; the original stays for the
     // failure path, where the renderer never calls it.

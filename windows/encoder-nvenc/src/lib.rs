@@ -25,8 +25,9 @@ use nvenc_sys::{
     NV_ENC_PIC_PARAMS, NV_ENC_PIC_PARAMS_VER, NV_ENC_PIC_STRUCT, NV_ENC_PRESET_CONFIG,
     NV_ENC_PRESET_CONFIG_VER, NV_ENC_PRESET_P1_GUID, NV_ENC_PRESET_P2_GUID, NV_ENC_PRESET_P3_GUID,
     NV_ENC_REGISTER_RESOURCE, NV_ENC_REGISTER_RESOURCE_VER, NV_ENC_REGISTERED_PTR,
-    NV_ENC_TUNING_INFO, NV_ENCODE_API_FUNCTION_LIST, NV_ENCODE_API_FUNCTION_LIST_VER,
-    NVENC_INFINITE_GOPLENGTH, NVENCAPI_VERSION, NVENCSTATUS, NvEncodeApiCreateInstanceFn,
+    NV_ENC_SEQUENCE_PARAM_PAYLOAD, NV_ENC_SEQUENCE_PARAM_PAYLOAD_VER, NV_ENC_TUNING_INFO,
+    NV_ENCODE_API_FUNCTION_LIST, NV_ENCODE_API_FUNCTION_LIST_VER, NVENC_INFINITE_GOPLENGTH,
+    NVENCAPI_VERSION, NVENCSTATUS, NvEncodeApiCreateInstanceFn,
 };
 use windows::Win32::Foundation::{
     CloseHandle, GetLastError, HANDLE, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
@@ -516,6 +517,52 @@ impl NvencSession {
         self.width = width;
         self.height = height;
         Ok(())
+    }
+
+    /// The encoder's own sequence header: the SPS and PPS it will actually
+    /// use, in Annex-B.
+    ///
+    /// This is the only correct source for a decoder's format description.
+    /// Parameter sets from anywhere else - a fixture encoded by something
+    /// else, a hard-coded blob - describe a different stream, and a decoder
+    /// handed those rejects real slices as corrupt.
+    pub fn sequence_header(&self) -> Result<Vec<u8>, NvencError> {
+        if !self.initialized {
+            return Err(NvencError::NotInitialized);
+        }
+        // The API writes into a caller-owned buffer. A sequence header is a
+        // few hundred bytes; a kilobyte is room to spare and this is called
+        // once per session.
+        let mut buffer = vec![0u8; 1024];
+        let mut written = 0u32;
+        let mut payload = NV_ENC_SEQUENCE_PARAM_PAYLOAD {
+            version: NV_ENC_SEQUENCE_PARAM_PAYLOAD_VER,
+            inBufferSize: buffer.len() as u32,
+            spsId: 0,
+            ppsId: 0,
+            spsppsBuffer: buffer.as_mut_ptr().cast(),
+            outSPSPPSPayloadSize: &raw mut written,
+            ..Default::default()
+        };
+        let get = self
+            .api
+            .functions
+            .nvEncGetSequenceParams
+            .ok_or(NvencError::InvalidApiFunction("nvEncGetSequenceParams"))?;
+        // SAFETY: the payload points at a live buffer of the size it declares
+        // and at a live `u32` for the written length.
+        status(
+            unsafe { get(self.encoder, &mut payload) },
+            "nvEncGetSequenceParams",
+        )?;
+        let written = written as usize;
+        if written == 0 || written > buffer.len() {
+            return Err(NvencError::InvalidOutput(
+                "sequence header size outside the buffer",
+            ));
+        }
+        buffer.truncate(written);
+        Ok(buffer)
     }
 
     /// Registers one pool-owned BGRA texture for direct RGB input.
