@@ -1,6 +1,6 @@
 use core::ffi::c_void;
 use core::panic::AssertUnwindSafe;
-use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering};
 use core::time::Duration;
 use std::ptr::NonNull;
 use std::thread;
@@ -31,6 +31,13 @@ pub(crate) struct Shared {
     decoded: AtomicU64,
     dropped: AtomicU64,
     errors: AtomicU64,
+    /// The first non-zero `OSStatus` the callback ever reported.
+    ///
+    /// A count of errors says a decode failed; a status says why. One bad
+    /// access unit costs every frame up to the next IDR, so the difference
+    /// between "rejected the parameter sets" and "corrupt slice data" decides
+    /// whether the fix is on the wire or in the session.
+    first_error_status: AtomicI32,
     in_flight: AtomicUsize,
     /// Written once, before the first submit, from the session's own pixel
     /// buffer pool.
@@ -53,6 +60,7 @@ impl Shared {
             decoded: AtomicU64::new(0),
             dropped: AtomicU64::new(0),
             errors: AtomicU64::new(0),
+            first_error_status: AtomicI32::new(0),
             in_flight: AtomicUsize::new(0),
             metal_compatible: AtomicBool::new(false),
             description: Mutex::new(None),
@@ -76,6 +84,25 @@ impl Shared {
         self.in_flight.fetch_sub(1, Ordering::AcqRel);
         self.submitted.fetch_sub(1, Ordering::Relaxed);
         self.errors.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Keeps the first status only: after one failure the stream is broken
+    /// until the next IDR, so the statuses that follow describe the wreckage
+    /// rather than the cause.
+    pub(crate) fn record_error_status(&self, status: i32) {
+        let _ = self.first_error_status.compare_exchange(
+            0,
+            status,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        );
+    }
+
+    pub(crate) fn first_error_status(&self) -> Option<i32> {
+        match self.first_error_status.load(Ordering::Relaxed) {
+            0 => None,
+            status => Some(status),
+        }
     }
 
     pub(crate) fn in_flight(&self) -> usize {
@@ -125,6 +152,7 @@ impl Shared {
         }
 
         if status != 0 {
+            self.record_error_status(status);
             return Outcome::Failed;
         }
         let Some(image_buffer) = NonNull::new(image_buffer) else {

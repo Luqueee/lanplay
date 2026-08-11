@@ -138,6 +138,10 @@ impl DecoderCounters {
     pub fn in_flight(&self) -> usize {
         self.0.in_flight()
     }
+
+    pub fn first_error_status(&self) -> Option<i32> {
+        self.0.first_error_status()
+    }
 }
 
 // SAFETY: every field is owned by this struct and safe to use from whichever
@@ -236,6 +240,11 @@ impl VideoToolboxDecoder {
         self.shared.in_flight()
     }
 
+    /// The first `OSStatus` a decode ever failed with, or `None`.
+    pub fn first_error_status(&self) -> Option<i32> {
+        self.shared.first_error_status()
+    }
+
     /// A cheap, cloneable view of the counters, for a sampler that runs
     /// beside the thread owning the decoder rather than inside it.
     pub fn counters(&self) -> DecoderCounters {
@@ -310,6 +319,7 @@ impl VideoDecoder for VideoToolboxDecoder {
         if status != 0 {
             // No callback fires for a rejected frame, so the submit
             // bookkeeping has to be undone here or in_flight never settles.
+            self.shared.record_error_status(status);
             self.shared.rollback_submit();
             return Err(DecoderError::DecodeFrame(status));
         }

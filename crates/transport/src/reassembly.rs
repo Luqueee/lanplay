@@ -93,6 +93,12 @@ pub struct Depacketizer {
     ready: VecDeque<EncodedAccessUnit>,
     stats: RxStats,
     jitter: Jitter,
+    /// When the cursor's own packet was first noticed to be missing.
+    ///
+    /// Set when something ahead of the cursor arrives while the cursor slot
+    /// is empty, cleared when the cursor moves. The interval between the two
+    /// is what a NACK would have to beat to be worth sending.
+    gap_since: Option<Timestamp>,
 }
 
 impl Depacketizer {
@@ -106,6 +112,7 @@ impl Depacketizer {
             ready: VecDeque::with_capacity(READY_CAPACITY),
             stats: RxStats::default(),
             jitter: Jitter::default(),
+            gap_since: None,
         }
     }
 
@@ -185,6 +192,12 @@ impl Depacketizer {
 
         let delta = packet.header.sequence.distance_from(self.cursor);
         if delta == 0 {
+            if let Some(since) = self.gap_since.take() {
+                let waited = arrival.saturating_since(since).get();
+                self.stats.reorder_waits += 1;
+                self.stats.reorder_wait_sum_ns += waited;
+                self.stats.reorder_wait_max_ns = self.stats.reorder_wait_max_ns.max(waited);
+            }
             self.assembler.accept(
                 &packet.header,
                 packet.payload,
@@ -197,6 +210,7 @@ impl Depacketizer {
             // Behind the cursor: already delivered, or already written off.
             self.stats.duplicates += 1;
         } else if (delta as usize) <= self.ring.window {
+            self.stats.max_reorder_depth = self.stats.max_reorder_depth.max(delta as u32);
             if !self.ring.store(packet.header.sequence, datagram) {
                 self.stats.duplicates += 1;
             }
@@ -210,6 +224,15 @@ impl Depacketizer {
             );
             self.cursor = packet.header.sequence.next();
             self.drain();
+        }
+        // A hole exists for exactly as long as the ring holds anything: those
+        // packets are all ahead of the cursor, so something before them is
+        // missing. Arming here rather than only on the storing path keeps the
+        // clock running across a cursor advance that left the hole in place.
+        if self.ring.count > 0 {
+            self.gap_since.get_or_insert(arrival);
+        } else {
+            self.gap_since = None;
         }
     }
 
@@ -723,6 +746,71 @@ mod tests {
         assert_eq!(stats.access_units_completed, 1);
         assert_eq!(stats.access_units_dropped, 0);
         assert_eq!(stats.lost, 0);
+    }
+
+    /// The measurement a NACK delay has to be built from: how far ahead a
+    /// packet arrived, and how long the gap it left took to fill.
+    #[test]
+    fn a_reordered_packet_reports_its_depth_and_how_long_the_gap_stood_open() {
+        let nals = [vec![0x65; 40], vec![0x41; 30_000]];
+        let unit = EncodedAccessUnit {
+            id: FrameId::new(7),
+            pts: VideoTimestamp::new(1, 120),
+            is_idr: true,
+            data: to_avcc(nals.iter().map(|n| n.as_slice()), NAL_LENGTH_SIZE),
+        };
+        let mut packetizer = Packetizer::with_sequence(
+            Ssrc(random_u32()),
+            RtpClock::new(H264_CLOCK_RATE, 0),
+            H264_PAYLOAD_TYPE,
+            MAX_UDP_PAYLOAD,
+            SequenceNumber(0),
+        );
+        let mut datagrams = Vec::new();
+        packetizer
+            .packetize(&unit, |d| datagrams.push(d.to_vec()))
+            .expect("packetises");
+        assert!(datagrams.len() > 4, "need enough packets to reorder");
+
+        let mut depacketizer = Depacketizer::new(DepacketizerConfig {
+            reorder_window: 32,
+            ..DepacketizerConfig::default()
+        });
+        // The first packet a depacketiser ever sees defines the cursor: it
+        // cannot know what came before it, so the stream has to be running
+        // before anything counts as out of order.
+        let opened = Timestamp::now();
+        depacketizer.push(&datagrams[0], opened);
+
+        // Packet 1 is held back a millisecond while three later ones arrive:
+        // depth three, and a gap that stood open for that millisecond.
+        for (offset, datagram) in datagrams.iter().enumerate().skip(2).take(3) {
+            depacketizer.push(datagram, opened.add(Nanos(offset as u64)));
+        }
+        assert_eq!(depacketizer.stats().max_reorder_depth, 3);
+        assert_eq!(depacketizer.stats().reorder_waits, 0, "still missing");
+
+        depacketizer.push(&datagrams[1], opened.add(Nanos(1_000_000)));
+        for datagram in datagrams.iter().skip(5) {
+            depacketizer.push(datagram, Timestamp::now());
+        }
+        let stats = *depacketizer.stats();
+        assert_eq!(stats.reorder_waits, 1);
+        assert!(
+            (900_000..1_100_000).contains(&stats.reorder_wait_max_ns),
+            "gap stood open for {} ns",
+            stats.reorder_wait_max_ns
+        );
+        assert_eq!(stats.lost, 0);
+    }
+
+    #[test]
+    fn packets_in_order_never_open_a_gap() {
+        let nals = vec![vec![0x65; 40], vec![0x41; 30_000]];
+        let (_, stats) = round_trip(&nals, 32);
+        assert_eq!(stats.max_reorder_depth, 0);
+        assert_eq!(stats.reorder_waits, 0);
+        assert_eq!(stats.reorder_wait_max_ns, 0);
     }
 
     #[test]

@@ -40,6 +40,13 @@ pub struct Stream {
     pub au_loss: u64,
     pub corruption: u64,
     pub reordered: u64,
+    /// Furthest ahead of the missing packet that arrivals kept coming.
+    pub max_reorder_depth: u32,
+    /// How long a visible gap took to fill itself when nothing was lost.
+    /// A NACK delay shorter than this asks for packets already in flight.
+    pub reorder_wait_mean_ms: f64,
+    pub reorder_wait_max_ms: f64,
+    pub reorder_gaps: u64,
     pub duplicates: u64,
 }
 

@@ -1043,22 +1043,53 @@ fn report(
         .windows(2)
         .all(|pair| pair[1].frame == pair[0].frame + 1);
     let network_errors: u64 = metrics.iter().map(|metric| metric.network.errors).sum();
-    let passed = metrics.len() as u64 == frames
-        && completion.p99() <= period_ns
-        && total_bytes > 0
-        && ordered
-        && paced_ok
-        && network_errors == 0;
-    println!(
-        "gate: {} (completed {}/{}, ordered {}, completion p99 {:.3}/{:.3} ms, pool exhausted {})",
-        if passed { "PASS" } else { "FAIL" },
-        metrics.len(),
-        frames,
-        ordered,
-        completion.p99() as f64 / 1_000_000.0,
-        period_ns as f64 / 1_000_000.0,
-        pool_exhaustions
-    );
+    // Each criterion states its own verdict and its own numbers. A gate that
+    // prints only FAIL sends the reader back to rerun the experiment to find
+    // out which line moved.
+    let checks: [(bool, &str, String); 6] = [
+        (
+            metrics.len() as u64 == frames,
+            "frames completed",
+            format!("{} of {frames}", metrics.len()),
+        ),
+        (
+            completion.p99() <= period_ns,
+            "completion within a period",
+            format!(
+                "p99 {:.3} ms against {:.3} ms",
+                completion.p99() as f64 / 1_000_000.0,
+                period_ns as f64 / 1_000_000.0
+            ),
+        ),
+        (
+            total_bytes > 0,
+            "bitstream produced",
+            format!("{total_bytes} bytes"),
+        ),
+        (ordered, "frames in order", format!("{ordered}")),
+        (
+            paced_ok,
+            "paced rate held",
+            format!(
+                "{throughput:.2} of {} fps, {pool_exhaustions} pool exhaustions",
+                args.fps
+            ),
+        ),
+        (
+            network_errors == 0,
+            "socket accepted every datagram",
+            format!("{network_errors} send errors"),
+        ),
+    ];
+    let passed = checks.iter().all(|(ok, _, _)| *ok);
+    println!();
+    for (ok, name, detail) in &checks {
+        println!(
+            "  [{}] {name:32} {detail}",
+            if *ok { "pass" } else { "FAIL" }
+        );
+    }
+    println!("gate: {}", if passed { "PASS" } else { "FAIL" });
     if passed {
         Ok(())
     } else {
@@ -1094,8 +1125,25 @@ fn print_windows(metrics: &[FrameMetrics], seconds: f64, fps: u32) {
                 at >= from && at < to
             })
             .collect();
+        // An empty slice mid-run is a stall, not an ending, so it is printed
+        // and the table continues past it. Only running out of frames
+        // altogether stops it.
         if slice.is_empty() {
-            break;
+            if metrics
+                .iter()
+                .all(|metric| metric.completed_at.duration_since(origin) < from)
+            {
+                break;
+            }
+            println!(
+                "  {:>5.0}-{:<5.0} {:>7} fr {:>7.1} Hz  nothing completed in this window",
+                from.as_secs_f64(),
+                to.as_secs_f64(),
+                0,
+                0.0
+            );
+            index += 1;
+            continue;
         }
         // The slice's own span, not the nominal width: the last one is short.
         let span = slice

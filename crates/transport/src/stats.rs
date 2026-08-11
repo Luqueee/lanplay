@@ -79,6 +79,20 @@ pub struct RxStats {
     /// Packets that arrived early, waited in the reorder window and were
     /// recovered in sequence order.
     pub reordered: u64,
+    /// Furthest ahead of the cursor a packet has ever arrived, in sequence
+    /// numbers. What the reorder window has to be big enough for.
+    pub max_reorder_depth: u32,
+    /// How long the missing packet took to arrive once a gap became visible,
+    /// summarised rather than kept: this struct is `Copy` and lives on the
+    /// receive thread's stack.
+    ///
+    /// This is the number a NACK delay has to be built from. Sending a NACK
+    /// sooner than legitimate reordering resolves itself asks the sender to
+    /// retransmit a packet already in flight; sending it later wastes the
+    /// deadline the retransmission has to meet. Neither can be guessed.
+    pub reorder_wait_max_ns: u64,
+    pub reorder_wait_sum_ns: u64,
+    pub reorder_waits: u64,
     pub lost: u64,
     pub access_units_started: u64,
     pub access_units_completed: u64,
@@ -98,6 +112,14 @@ impl RxStats {
         }
         self.access_units_dropped as f64 / self.access_units_started as f64
     }
+
+    /// Mean time a visible gap took to fill itself, or zero if none did.
+    pub fn mean_reorder_wait_ns(&self) -> u64 {
+        if self.reorder_waits == 0 {
+            return 0;
+        }
+        self.reorder_wait_sum_ns / self.reorder_waits
+    }
 }
 
 impl fmt::Display for RxStats {
@@ -116,6 +138,14 @@ impl fmt::Display for RxStats {
             f,
             "    lost {}, duplicate {}, reordered {}, missing fragments {}",
             self.lost, self.duplicates, self.reordered, self.missing_fragments,
+        )?;
+        writeln!(
+            f,
+            "    reorder depth max {}, gap filled in {:.3} ms mean / {:.3} ms max over {} gaps",
+            self.max_reorder_depth,
+            self.mean_reorder_wait_ns() as f64 / 1e6,
+            self.reorder_wait_max_ns as f64 / 1e6,
+            self.reorder_waits,
         )?;
         write!(
             f,

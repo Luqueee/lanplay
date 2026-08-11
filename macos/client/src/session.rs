@@ -215,6 +215,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     let arrived = Arc::new(AtomicU64::new(0));
     // Cloned before the decoder is moved into whichever thread submits to it.
     let decoder_counters = decoder.counters();
+    let decoder_status = decoder_counters.clone();
 
     let pipeline = match cli.transport {
         crate::Transport::Direct => {
@@ -428,6 +429,17 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
         .published()
         .saturating_sub(render_stats.rendered + render_stats.superseded);
 
+    // One rejected access unit costs every frame up to the next IDR, so an
+    // error count without its status is a second of missing video with no
+    // lead. VideoToolbox's OSStatus is the only evidence there is.
+    if outcome.errors > 0
+        && let Some(status) = decoder_status.first_error_status()
+    {
+        println!(
+            "  decoder rejected {} frames, first OSStatus {status}",
+            outcome.errors
+        );
+    }
     report(cli, &outcome, &memory, &render_stats, &snapshot);
     if !slices.is_empty() {
         print_windows(&slices);
@@ -675,6 +687,17 @@ fn report(
             transport.rx.duplicates,
             transport.rx.reordered
         );
+        // The pair a retransmission scheme is sized from: how far ahead of
+        // the hole packets keep arriving, and how long the hole stays open
+        // when nothing was actually lost. A NACK sent inside that window asks
+        // for a packet already on its way.
+        println!(
+            "  reordering       depth max {}, gap filled in {:.3} ms mean / {:.3} ms max over {} gaps",
+            transport.rx.max_reorder_depth,
+            transport.rx.mean_reorder_wait_ns() as f64 / 1e6,
+            transport.rx.reorder_wait_max_ns as f64 / 1e6,
+            transport.rx.reorder_waits
+        );
         println!("  rfc3550 jitter   {}", transport.jitter);
         println!(
             "  packetization    p50 {} p95 {} p99 {}",
@@ -803,6 +826,10 @@ fn build_report(
             au_loss: expected_frames.saturating_sub(reconstructed),
             corruption,
             reordered: rx.reordered,
+            max_reorder_depth: rx.max_reorder_depth,
+            reorder_wait_mean_ms: rx.mean_reorder_wait_ns() as f64 / 1e6,
+            reorder_wait_max_ms: rx.reorder_wait_max_ns as f64 / 1e6,
+            reorder_gaps: rx.reorder_waits,
             duplicates: rx.duplicates,
         },
         network: crate::report::Network {
