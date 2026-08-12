@@ -574,6 +574,26 @@ fn windows_main() -> Result<(), String> {
         surfaces.push(benchmark_surface(device.device(), args.width, args.height)?);
     }
     let mut content = Content::new(args.source, &device)?;
+    // Two free-running clocks at the same nominal rate beat against each
+    // other. A live capture source already has one - whatever is drawing on
+    // the desktop - and `--mode paced` adds a second. When the phase is
+    // unfavourable the submit loop asks for a frame just before the producer
+    // presents, waits a whole period for it, and periodically loses one: the
+    // symptom is a capture p50 of exactly one frame period, a p95 of two, and
+    // a throughput around 110 instead of 120. Nothing downstream is at fault
+    // and no amount of GPU headroom fixes it.
+    //
+    // Uncapped takes frames as they appear, which is also what the product
+    // does: capture is event-driven and it is the encoder's admission that is
+    // paced, never the capture.
+    if args.mode == RunMode::Paced && matches!(args.source, ContentSource::Dda | ContentSource::Wgc)
+    {
+        println!(
+            "warning: paced mode against a live source measures the beat between \
+             two {} Hz clocks as much as the pipeline; prefer --mode uncapped",
+            args.fps
+        );
+    }
 
     let mut session =
         lanplay_encoder_nvenc::NvencSession::open(device.device()).map_err(|e| e.to_string())?;

@@ -153,7 +153,13 @@ cat >"$LOCAL_RUNNER" <<PS1
 Get-Process lanplay-nvenc-probe -ErrorAction SilentlyContinue | Stop-Process -Force
 # One line: PowerShell continues with a backtick, not a backslash, and a
 # wrapped command that silently loses its tail is a run that measures nothing.
-& \$probe --mode paced --input nv12 --source dda --output 1 --send-to $LOCAL_IP:$PORT --control-port $CONTROL_PORT --service-class ${SERVICE_CLASS:-best-effort} --mtu 1200 --seconds $SECONDS_TO_RUN --warmup 0 --fps 120 --width 1920 --height 1080 --bitrate-mbps $BITRATE --preset p1 --tuning ll --idr-interval 120 --window-seconds 10
+#
+# Uncapped, not paced: a live capture source already has a clock, and adding
+# a second one at the same nominal rate makes the two beat. That shows up as
+# a capture p50 of exactly one frame period and a throughput near 110, with
+# nothing downstream at fault. Uncapped follows the source, which is what the
+# product does anyway.
+& \$probe --mode uncapped --input nv12 --source dda --output 1 --send-to $LOCAL_IP:$PORT --control-port $CONTROL_PORT --service-class ${SERVICE_CLASS:-best-effort} --mtu 1200 --seconds $SECONDS_TO_RUN --warmup 0 --fps 120 --width 1920 --height 1080 --bitrate-mbps $BITRATE --preset p1 --tuning ll --idr-interval 120 --window-seconds 10
 exit \$LASTEXITCODE
 PS1
 scp -q "$LOCAL_RUNNER" "windows:$(printf '%s' "$RUNNER" | tr '\\' '/')"

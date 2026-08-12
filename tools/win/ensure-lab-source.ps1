@@ -60,3 +60,20 @@ Start-Missing -Name 'present-source' -Path $present `
     -Arguments @('--width', '1920', '--height', '1080', '--fps', '120', '--seconds', '0',
         '--fullscreen', '--monitor', '1') `
     -Prefix 'C:\Users\luque\idd-present' | Out-Null
+
+# Checked again, at the end, because a process that starts and then dies with
+# the scheduled task that launched it leaves this script looking successful
+# and every measurement after it capturing a desktop that never changes. The
+# failure this catches produced "capture produced no frame for one second"
+# three runs later, with nothing in between to say why.
+Start-Sleep -Seconds 1
+foreach ($name in 'LanPlayIddLabCtl', 'present-source') {
+    $alive = @(Get-Process $name -ErrorAction SilentlyContinue)
+    if ($alive.Count -eq 0) {
+        throw "$name is not running after the preflight that was supposed to start it"
+    }
+    if ($alive.Count -gt 1) {
+        throw "$($alive.Count) copies of $name are running; two producers fight over the display"
+    }
+    Write-Output "$name pid $($alive[0].Id)"
+}
