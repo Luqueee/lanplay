@@ -83,4 +83,4 @@ for rep in $(seq 1 "$REPEATS"); do
 done
 
 echo
-python3 "$REPO/tools/b1-report.py" "$OUT"
+python3 "$REPO/tools/link-report.py" "$OUT"

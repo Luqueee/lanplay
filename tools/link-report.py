@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""B1: the link, by position, with the radio that carried it.
+"""The link, by arm, with the radio that carried it.
 
 Only link metrics. No render rate, no fresh ticks, no frame age: those are
-statements about a screen, and this experiment moves a laptop.
+statements about a screen, and a link experiment must be readable on a
+machine whose screen is asleep, occluded or in use by somebody else.
 
-usage: tools/b1-report.py <dir> [<dir> ...]
+Arms are taken from the file name: everything before the trailing `-rN`.
+That is the position for B1, the datagram size for B5, the channel width
+for B2, and so on.
+
+usage: tools/link-report.py <dir> [<dir> ...]
 """
 
 import csv
@@ -131,7 +136,7 @@ def main(directories):
                     (measured, radio(directory, name) or {})
                 )
 
-        print("\nmedians by position")
+        print("\nmedians by arm")
         print(HEAD)
         for label, items in summary.items():
             measured = {
@@ -149,4 +154,4 @@ def main(directories):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:] or ["/tmp/b1"])
+    main(sys.argv[1:] or ["/tmp/link"])

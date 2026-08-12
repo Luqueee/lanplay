@@ -11,6 +11,10 @@
 # unit is about 45 datagrams; fewer, larger ones may aggregate differently.
 # It may equally do nothing, which is a cheap answer to have.
 #
+# Every run is `--link-only`: this experiment asks what the radio delivered,
+# and routing that question through a display link is what made the previous
+# attempt unreadable.
+#
 # The radio is sampled alongside every run, so a collapsed window can be
 # checked against RSSI and PHY rate instead of guessed at. Read from
 # CoreWLAN, never system_profiler: that tool scans, and scanning is what a
@@ -53,7 +57,7 @@ while read -r size rep; do
     "$REPO/target/release/radio-sample" $((SECONDS_TO_RUN + 30)) 1000 \
         >"$OUT/$size-r$rep.wifi.csv" 2>/dev/null &
     sampler=$!
-    IFACE="$IFACE" BITRATE="$BITRATE" MTU="$size" QUIET=1 \
+    IFACE="$IFACE" BITRATE="$BITRATE" MTU="$size" LINK_ONLY=1 QUIET=1 \
         REPORT="$OUT/$size-r$rep.json" \
         "$REPO/tools/e2e-gate.sh" "$SECONDS_TO_RUN" \
         >"$OUT/$size-r$rep.log" 2>&1 </dev/null ||
@@ -64,19 +68,4 @@ while read -r size rep; do
 done <"$OUT/schedule"
 
 echo
-python3 "$REPO/tools/qos-report.py" "$OUT"
-echo
-echo "radio during the runs"
-python3 - "$OUT" <<'PY'
-import csv, glob, statistics, sys
-for path in sorted(glob.glob(f"{sys.argv[1]}/*.wifi.csv")):
-    rows = [r for r in csv.DictReader(open(path)) if r.get("rssi_dbm")]
-    if not rows:
-        continue
-    rssi = [float(r["rssi_dbm"]) for r in rows]
-    rate = [float(r["tx_rate_mbps"]) for r in rows if r["tx_rate_mbps"]]
-    channels = {f"{r['channel']}/{r.get('width_mhz', '?')}MHz" for r in rows}
-    name = path.split("/")[-1].replace(".wifi.csv", "")
-    print(f"  {name:<12} n={len(rows):>3} rssi {min(rssi):.0f}..{max(rssi):.0f} dBm  "
-          f"tx {min(rate):.0f}..{max(rate):.0f} Mbps  channel {'/'.join(sorted(channels))}")
-PY
+python3 "$REPO/tools/link-report.py" "$OUT"
