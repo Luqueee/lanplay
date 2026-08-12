@@ -1,0 +1,74 @@
+600 s, 1080p120, 40 Mbps, MTU 1200, channel 36/80 non-DFS, renderer active
+
+[stream]
+  expected                     72000
+  reconstructed                72000
+  packet_loss                  0
+  au_loss                      0
+  corruption                   0
+  reordered                    22557
+  max_reorder_depth            17
+  reorder_wait_mean_ms         0.024173
+  reorder_wait_p50_ms          0.002042
+  reorder_wait_p99_ms          0.116031
+  reorder_wait_max_ms          6.183125
+  reorder_gaps                 51036
+  duplicates                   0
+
+[delivery]
+  delivered                    72000
+  au_interval_p50_ms           8.065023
+  au_interval_p95_ms           10.166271
+  au_interval_p99_ms           10.805247
+  au_interval_max_ms           106.627071
+  first_interval_p50_ms        8.052735
+  first_interval_p95_ms        10.289151
+  first_interval_p99_ms        11.649023
+  first_interval_max_ms        106.364927
+  span_s                       599.970285667
+  over_1_25t_per_min           151.90752305120859
+  over_1_5t_per_min            15.900787468823019
+  over_2t_per_min              7.700381352826241
+  over_3t_per_min              6.700331826485171
+  over_4t_per_min              5.5002723948758865
+  over_6t_per_min              2.3001139105844617
+  stall_clusters_per_min       7.700381352826241
+  mean_catch_up_units          7.363636363636363
+  max_catch_up_units           17
+  stall_gap_p50_ms             2766.143487
+  stall_gap_p95_ms             10007.609343
+
+[decode]
+  decoded                      72000
+  errors                       0
+  p50_ms                       1.011711
+  p95_ms                       1.196031
+  p99_ms                       1.327103
+  backlog_slope_per_min        0.0
+
+[display]
+  nominal_hz                   119.97083748882322
+  cadence_valid                True
+  invalid_reason               None
+  callbacks                    71648
+  rendered                     68633
+  superseded                   3367
+  empty_refreshes              3015
+  callback_interval_p50_ms     8.335359
+  callback_interval_p95_ms     8.359935
+  fresh_tick_ratio             95.7919271996427
+  callback_interval_p99_ms     8.445951
+  callback_interval_max_ms     25.657343
+  frame_age_p50_ms             5.439487
+  frame_age_p95_ms             8.847359
+  frame_age_p99_ms             9.502719
+
+[windows] 59 of ten seconds
+  metric                     min    median       max
+  fresh_pct                80.95     98.91    100.00
+  render_hz                93.66    117.72    119.71
+  frame_age_p99_ms          5.05      8.45     12.58
+  over_2t_per_min           0.00      6.00     54.02
+  au_loss                   0.00      0.00      1.00
+  decode_hz                96.89    120.00    120.09
+  au_interval_p99_ms       10.22     10.70     13.96
