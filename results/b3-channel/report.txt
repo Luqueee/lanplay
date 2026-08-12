@@ -1,0 +1,20 @@
+=== results/b3-channel ===
+per run
+run               rssi  noise    phy    ch/MHz  aup50  aup95  aup99   aumax  1st99  >2T/m  >3T/m  >4T/m  clu/m  cmean   sgap  spn99  spnmx  reord  dpth  fil99  filmx  ploss auloss
+ch36-r1            -48    -93   1200     36/80   8.07  10.22  11.54   50.59  11.95   18.0    6.5    5.0   14.5    4.1   1140   3.44  44.56   4502    12   0.13   4.87      0      0
+ch36-r2            -45    -93   1200     36/80   8.08  10.19  10.92   98.57  11.80    5.5    2.5    1.5    4.5    4.2   1600   3.49  16.12   4446    14   0.14   7.61      0      0
+ch36-r3            -46    -94   1200     36/80   8.07  10.13  10.70   26.07  11.65    2.0    0.5    0.0    2.0    2.5  10008   3.51   7.05   4519    16   0.14   4.62      0      0
+
+medians by arm
+run               rssi  noise    phy    ch/MHz  aup50  aup95  aup99   aumax  1st99  >2T/m  >3T/m  >4T/m  clu/m  cmean   sgap  spn99  spnmx  reord  dpth  fil99  filmx  ploss auloss
+ch36 (n=3)         -46    -93   1200     36/80   8.07  10.19  10.92   50.59  11.80    5.5    2.5    1.5    4.5    4.1   1600   3.49  16.12   4502    14   0.14   4.87      0      0
+
+periodicity on channel 36
+  ch36-r1
+    stall period     48 ms  sd 17.1  24% of 25 gaps within 30 ms of it  (2 in the mode bin)
+    stall size       mean 28.7 ms  sd 11.4  max 52.9  duty 0.6%
+  ch36-r2
+    stall period     296 ms  sd 0.0  10% of 10 gaps within 30 ms of it  (1 in the mode bin)
+    stall size       mean 31.3 ms  sd 22.6  max 97.5  duty 0.3%
+  ch36-r3
+    stall period     3 stalls, none within a second of each other

@@ -1,0 +1,23 @@
+{
+  "delivered": 14400,
+  "au_interval_p50_ms": 8.032255,
+  "au_interval_p95_ms": 10.076159,
+  "au_interval_p99_ms": 10.739711,
+  "au_interval_max_ms": 97.583103,
+  "first_interval_p50_ms": 8.024063,
+  "first_interval_p95_ms": 10.117119,
+  "first_interval_p99_ms": 11.542527,
+  "first_interval_max_ms": 97.583103,
+  "span_s": 119.983323,
+  "over_1_25t_per_min": 103.0143,
+  "over_1_5t_per_min": 21.0029,
+  "over_2t_per_min": 5.5008,
+  "over_3t_per_min": 2.5003,
+  "over_4t_per_min": 1.5002,
+  "over_6t_per_min": 0.5001,
+  "stall_clusters_per_min": 5.0007,
+  "mean_catch_up_units": 5.0000,
+  "max_catch_up_units": 11,
+  "stall_gap_p50_ms": 950.0099,
+  "stall_gap_p95_ms": 10007.6093
+}

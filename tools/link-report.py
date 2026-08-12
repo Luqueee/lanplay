@@ -24,6 +24,10 @@ def runs(directory):
     """Every report in the directory, grouped by the label before -rN."""
     grouped = {}
     for path in sorted(glob.glob(os.path.join(directory, "*.json"))):
+        # A capture analysis is the delivery section on its own, not a run
+        # report; tools/pcap-report.py is what pairs the two.
+        if path.endswith(".pcap.json"):
+            continue
         name = os.path.basename(path)[: -len(".json")]
         label = name.rsplit("-r", 1)[0]
         with open(path) as handle:
