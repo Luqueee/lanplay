@@ -1,0 +1,16 @@
+[package]
+name = "lanplay-pcap-analyse"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pcap-analyse"
+path = "src/main.rs"
+
+[dependencies]
+lanplay-link-metrics = { workspace = true }
+lanplay-protocol = { workspace = true }
+lanplay-telemetry = { workspace = true }
+lanplay-transport = { workspace = true }

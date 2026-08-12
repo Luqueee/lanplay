@@ -1,0 +1,56 @@
+=== /tmp/pcap ===
+control: the same measurement with and without the capture running
+  metric            no capture   capturing     delta
+  au p50                  8.09        8.09      0.00
+  au p95                 10.40       10.31     -0.10
+  au p99                 24.30       15.63     -8.67
+  au max                 58.75       80.81     22.05
+  first p99              22.64       15.61     -7.04
+  >1.25T/min             350.7       276.4     -74.4
+  >1.5T/min              124.9        89.0     -35.9
+  >2T/min                 79.9        70.0     -10.0
+  >3T/min                 71.4        63.5      -8.0
+  >4T/min                 45.0        47.5       2.5
+  >6T/min                  0.5         0.5       0.0
+  clusters/min            78.4        69.0      -9.5
+  catch-up mean           4.64        4.99      0.35
+  catch-up max               9          10         1
+  stall gap p50            222         222         0
+  stall gap p95           3915        3915         0
+
+tap against socket, median of 2 runs
+  metric               BPF tap      socket     delta
+  au p50                  8.03        8.06      0.03
+  au p95                 10.22       10.48      0.26
+  au p99                 25.31       25.81      0.50
+  au max                105.97      107.91      1.93
+  first p99              25.58       25.86      0.29
+  >1.25T/min             256.0       396.2     140.2
+  >1.5T/min              117.4       122.4       5.1
+  >2T/min                 93.6        95.2       1.6
+  >3T/min                 87.0        88.6       1.6
+  >4T/min                 62.8        67.7       4.9
+  >6T/min                 22.4        22.4       0.0
+  clusters/min            93.3        94.3       1.1
+  catch-up mean           6.24        6.23     -0.01
+  catch-up max              16          16         0
+  stall gap p50            222         222         0
+  stall gap p95           3197        3196        -1
+
+per run
+  run            tap >2T/m app >2T/m tap clu/m app clu/m  tap p99  app p99
+  parallel-r1         69.0      71.0      69.0      70.5    15.82    15.93
+  parallel-r2        118.2     119.4     117.6     118.2    34.80    35.68
+
+periodicity
+  cap-control
+    stall period     220 ms  sd 2.9  66% of 137 gaps within 30 ms of it  (56 in the mode bin)
+    stall size       mean 33.9 ms  sd 6.5  max 79.9  duty 3.9%
+  parallel-r1
+    stall period     220 ms  sd 3.4  67% of 136 gaps within 30 ms of it  (64 in the mode bin)
+    stall size       mean 34.0 ms  sd 6.9  max 98.7  duty 3.9%
+  parallel-r2
+    stall period     220 ms  sd 11.2  51% of 194 gaps within 30 ms of it  (47 in the mode bin)
+    stall size       mean 54.9 ms  sd 29.4  max 116.7  duty 10.8%
+  parallel-r3
+    stall period     too few access units

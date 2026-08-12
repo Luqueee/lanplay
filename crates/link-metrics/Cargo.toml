@@ -1,0 +1,11 @@
+[package]
+name = "lanplay-link-metrics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+hdrhistogram = { workspace = true }
+lanplay-telemetry = { workspace = true }
+parking_lot = { workspace = true }

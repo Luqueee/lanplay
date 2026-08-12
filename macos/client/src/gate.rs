@@ -68,7 +68,7 @@ pub struct GateInputs {
     /// This is the link's own cadence: it stays a measurement when the
     /// display link is suspended, which is exactly when the presentation
     /// series stops being one.
-    pub link: crate::delivery::Window,
+    pub link: lanplay_link_metrics::Window,
     pub snapshot: Snapshot,
     /// Present only when the run went through RTP over UDP.
     pub transport: Option<TransportInputs>,
@@ -682,7 +682,7 @@ mod tests {
             span_missed_drawables: 0,
             presents: true,
             // A link delivering exactly on the 8.33 ms source period.
-            link: crate::delivery::Window {
+            link: lanplay_link_metrics::Window {
                 delivered: frames,
                 p50_ms: 8.3,
                 p95_ms: 8.4,
@@ -937,7 +937,7 @@ mod tests {
         inputs.rendered = 2_386;
         inputs.superseded = 2_414;
         // A 240 fps source delivers on a 4.17 ms period.
-        inputs.link = crate::delivery::Window {
+        inputs.link = lanplay_link_metrics::Window {
             delivered: 4_800,
             p50_ms: 4.1,
             p95_ms: 4.3,

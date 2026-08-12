@@ -7,7 +7,6 @@
 //! on top of it can.
 
 mod config;
-mod delivery;
 mod dscp;
 mod gate;
 mod nap;

@@ -290,6 +290,7 @@ dependencies = [
  "clap",
  "hdrhistogram",
  "lanplay-decoder-videotoolbox",
+ "lanplay-link-metrics",
  "lanplay-protocol",
  "lanplay-renderer-metal",
  "lanplay-telemetry",
@@ -330,6 +331,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lanplay-link-metrics"
+version = "0.1.0"
+dependencies = [
+ "hdrhistogram",
+ "lanplay-telemetry",
+ "parking_lot",
+]
+
+[[package]]
 name = "lanplay-net-bench"
 version = "0.1.0"
 dependencies = [
@@ -356,6 +366,16 @@ dependencies = [
  "lanplay-transport",
  "lanplay-video-core",
  "windows",
+]
+
+[[package]]
+name = "lanplay-pcap-analyse"
+version = "0.1.0"
+dependencies = [
+ "lanplay-link-metrics",
+ "lanplay-protocol",
+ "lanplay-telemetry",
+ "lanplay-transport",
 ]
 
 [[package]]

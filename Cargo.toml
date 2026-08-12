@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/link-metrics",
     "crates/protocol",
     "crates/telemetry",
     "crates/transport",
@@ -9,6 +10,7 @@ members = [
     "macos/decoder-videotoolbox",
     "macos/renderer-metal",
     "tools/benchmark",
+    "tools/pcap-analyse",
     "tools/radio-sample",
     "tools/capture-bench",
     "tools/net-bench",
@@ -30,6 +32,7 @@ lanplay-capabilities = { path = "crates/capabilities" }
 lanplay-capture = { path = "windows/capture" }
 lanplay-encoder-nvenc = { path = "windows/encoder-nvenc" }
 lanplay-decoder-videotoolbox = { path = "macos/decoder-videotoolbox" }
+lanplay-link-metrics = { path = "crates/link-metrics" }
 lanplay-protocol = { path = "crates/protocol" }
 lanplay-renderer-metal = { path = "macos/renderer-metal" }
 lanplay-present-source = { path = "tools/present-source" }

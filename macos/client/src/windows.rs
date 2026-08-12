@@ -31,7 +31,7 @@ pub fn sample(
     // Delivery cadence for this window, taken from the depacketiser rather
     // than from the presentation clock: a suspended display link must not be
     // able to make a healthy link look like a stalling one.
-    delivery: &Arc<crate::delivery::Delivery>,
+    delivery: &Arc<lanplay_link_metrics::Delivery>,
     every: Duration,
     stop: &Arc<AtomicBool>,
 ) -> Vec<Window> {
@@ -125,7 +125,7 @@ pub fn spawn(
     slot: Arc<LatestFrameSlot>,
     decoder: DecoderCounters,
     arrived: Arc<std::sync::atomic::AtomicU64>,
-    delivery: Arc<crate::delivery::Delivery>,
+    delivery: Arc<lanplay_link_metrics::Delivery>,
     every: Duration,
     stop: Arc<AtomicBool>,
 ) -> thread::JoinHandle<Vec<Window>> {

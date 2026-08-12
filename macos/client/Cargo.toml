@@ -13,6 +13,7 @@ path = "src/main.rs"
 lanplay-decoder-videotoolbox = { workspace = true }
 libc = { workspace = true }
 hdrhistogram = { workspace = true }
+lanplay-link-metrics = { workspace = true }
 lanplay-protocol = { workspace = true }
 lanplay-renderer-metal = { workspace = true }
 lanplay-telemetry = { workspace = true }

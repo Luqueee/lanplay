@@ -264,7 +264,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     // the display later managed to show.
     // The thresholds are multiples of the source period, so delivery has to
     // be told what the host was asked to produce.
-    let delivery = Arc::new(crate::delivery::Delivery::new(Nanos::from_millis_f64(
+    let delivery = Arc::new(lanplay_link_metrics::Delivery::new(Nanos::from_millis_f64(
         1000.0 / feed_fps.max(1.0),
     )));
     // Cloned before the decoder is moved into whichever thread submits to it.
@@ -714,7 +714,7 @@ fn report(
     snapshot: &Snapshot,
     // Delivery cadence, measured at the depacketiser rather than inferred
     // from presentation.
-    link: crate::delivery::Window,
+    link: lanplay_link_metrics::Window,
 ) {
     let decode = snapshot.segment(Segment::Decode);
     let wait = snapshot.segment(Segment::PresentationWait);
@@ -936,7 +936,7 @@ fn build_report(
     snapshot: &Snapshot,
     // Delivery cadence, already summarised: measured at the depacketiser, so
     // it stays valid whatever the display was doing.
-    link: crate::delivery::Window,
+    link: lanplay_link_metrics::Window,
     slices: Vec<crate::report::Window>,
 ) -> crate::report::Report {
     let arrival = snapshot.segment(Segment::Arrival);

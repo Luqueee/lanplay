@@ -272,7 +272,7 @@ pub fn receive_loop(
     progress: Arc<std::sync::atomic::AtomicU64>,
     // Delivery cadence, timestamped where delivery happens rather than
     // inferred from when a frame was eventually shown.
-    delivery: Arc<crate::delivery::Delivery>,
+    delivery: Arc<lanplay_link_metrics::Delivery>,
     stop: Arc<AtomicBool>,
 ) -> Result<(ReceiverOutcome, VideoToolboxDecoder), Box<dyn Error + Send + Sync>> {
     socket.set_read_timeout(Some(RECV_TIMEOUT))?;
