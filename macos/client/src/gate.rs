@@ -23,9 +23,6 @@ const MEMORY_WARMUP: Nanos = Nanos::from_millis(10_000);
 /// How far a single present interval may exceed the display period before it
 /// is a stall rather than jitter.
 const STALL_MULTIPLE: f64 = 4.0;
-/// Share of display ticks that may find the slot empty before phase noise
-/// stops being a credible explanation.
-const MAX_EMPTY_TICK_FRACTION: f64 = 0.05;
 /// How far the interval between arriving access units may exceed the source
 /// period at p99 before the link is bunching rather than jittering. One whole
 /// extra period means the link missed a slot and caught up, once in a
@@ -53,7 +50,6 @@ pub struct GateInputs {
 
     pub rendered: u64,
     pub superseded: u64,
-    pub empty_ticks: u64,
     pub still_in_slot: u64,
     /// Display-link callbacks over the measured span, which ends with the
     /// stream rather than with the run.
@@ -64,9 +60,6 @@ pub struct GateInputs {
     pub span_missed_drawables: u64,
 
     pub memory: Trend,
-    /// True when the renderer is driven by the display link, so `empty_ticks`
-    /// counts refreshes rather than idle polls.
-    pub display_driven: bool,
     /// False for a run with no renderer at all. Everything downstream of the
     /// decoder is then unmeasured rather than failing, and the run is judged
     /// on the link alone.
@@ -683,12 +676,10 @@ mod tests {
             trailing_backlog: 0,
             rendered: frames,
             superseded: 0,
-            empty_ticks: 0,
             still_in_slot: 0,
             span_callbacks: frames,
             span_empty_ticks: 0,
             span_missed_drawables: 0,
-            display_driven: true,
             presents: true,
             // A link delivering exactly on the 8.33 ms source period.
             link: crate::delivery::Window {
@@ -879,7 +870,6 @@ mod tests {
         inputs.still_in_slot = 0;
         inputs.span_callbacks = 0;
         inputs.display_hz = 0.0;
-        inputs.display_driven = false;
         let verdict = evaluate(&inputs);
         assert!(verdict.passed(), "{verdict}");
         assert!(
@@ -945,7 +935,6 @@ mod tests {
         inputs.run_seconds = 20.0;
         inputs.rendered = 2_386;
         inputs.superseded = 2_414;
-        inputs.empty_ticks = 36;
         // A 240 fps source delivers on a 4.17 ms period.
         inputs.link = crate::delivery::Window {
             delivered: 4_800,
@@ -971,7 +960,6 @@ mod tests {
         inputs.run_seconds = 60.0;
         inputs.rendered = 3_591;
         inputs.superseded = 9;
-        inputs.empty_ticks = 3_626;
         let check = named(&inputs, "link holds cadence");
         assert!(check.passed, "{}", check.detail);
     }
@@ -986,7 +974,6 @@ mod tests {
         inputs.run_seconds = 60.0;
         inputs.rendered = 3_591;
         inputs.superseded = 9;
-        inputs.empty_ticks = 3_626;
         inputs.snapshot = snapshot_of(Run {
             period_ms: 16.667,
             ..Run::of(3_600)
