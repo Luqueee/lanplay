@@ -270,6 +270,9 @@ pub fn receive_loop(
     // Bumped for every access unit handed to the decoder, so a watchdog can
     // tell a live stream from a finished one.
     progress: Arc<std::sync::atomic::AtomicU64>,
+    // Highest frame id seen on the wire, whether or not its access unit
+    // ever completed. What the host produced, as against what arrived.
+    highest_frame: Arc<std::sync::atomic::AtomicU64>,
     // Delivery cadence, timestamped where delivery happens rather than
     // inferred from when a frame was eventually shown.
     delivery: Arc<lanplay_link_metrics::Delivery>,
@@ -317,6 +320,7 @@ pub fn receive_loop(
         if let Ok(packet) = parse_packet(bytes)
             && let Some(frame) = packet.header.frame_id
         {
+            highest_frame.fetch_max(frame.get(), Ordering::Relaxed);
             if marked.arrived(frame) {
                 recorder.mark(frame, Stage::NetworkReceiveFirst);
                 // The other half of the delivery split: when the unit

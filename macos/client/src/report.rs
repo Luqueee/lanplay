@@ -198,6 +198,11 @@ pub struct Window {
     /// the delivery clock, not the presentation one.
     pub au_interval_p50_ms: f64,
     pub au_interval_p99_ms: f64,
+    /// Counted crossings of two source periods inside this window. A run's
+    /// median cannot show a bad twenty seconds; this can.
+    pub over_2t_per_min: f64,
+    /// Access units the host produced in this window that never arrived.
+    pub au_loss: u64,
     /// The client's `local_age`, not the sender's frame age.
     pub frame_age_p99_ms: f64,
 }

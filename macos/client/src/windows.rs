@@ -32,6 +32,11 @@ pub fn sample(
     // than from the presentation clock: a suspended display link must not be
     // able to make a healthy link look like a stalling one.
     delivery: &Arc<lanplay_link_metrics::Delivery>,
+    // Highest frame id the network has shown, which is what the host
+    // actually produced. Access units missing from a window are the
+    // difference between that and what arrived, rather than a shortfall
+    // against a nominal rate the host may never have hit.
+    highest_frame: &Arc<std::sync::atomic::AtomicU64>,
     every: Duration,
     stop: &Arc<AtomicBool>,
 ) -> Vec<Window> {
@@ -43,6 +48,7 @@ pub fn sample(
     let mut last_superseded = slot.superseded();
     let mut last_decoded = decoder.decoded();
     let mut last_arrived = arrived.load(Ordering::Relaxed);
+    let mut last_highest = highest_frame.load(Ordering::Relaxed);
     let mut index = 1u64;
 
     while !stop.load(Ordering::Acquire) {
@@ -57,6 +63,7 @@ pub fn sample(
         let rendered = counters.rendered.load(Ordering::Relaxed);
         let decoded = decoder.decoded();
         let reassembled = arrived.load(Ordering::Relaxed);
+        let highest = highest_frame.load(Ordering::Relaxed);
         let seconds = taken.span.as_secs_f64().max(f64::EPSILON);
 
         let drawn = rendered - last_rendered;
@@ -93,6 +100,14 @@ pub fn sample(
             // the link was losing nothing at all.
             au_interval_p50_ms: link.p50_ms,
             au_interval_p99_ms: link.p99_ms,
+            // The counted tail, per window. A ten-minute median cannot show
+            // a bad twenty seconds, and this is the number the channel
+            // experiment moved by a factor of twelve.
+            over_2t_per_min: link.tail.per_minute(2, link.span_s),
+            // What the host produced in this window minus what arrived.
+            au_loss: highest
+                .saturating_sub(last_highest)
+                .saturating_sub(reassembled - last_arrived),
             frame_age_p99_ms: taken.local_age.p99.as_millis_f64(),
         });
 
@@ -101,6 +116,7 @@ pub fn sample(
         last_superseded = superseded_now;
         last_decoded = decoded;
         last_arrived = reassembled;
+        last_highest = highest;
         index += 1;
     }
     windows
@@ -126,6 +142,7 @@ pub fn spawn(
     decoder: DecoderCounters,
     arrived: Arc<std::sync::atomic::AtomicU64>,
     delivery: Arc<lanplay_link_metrics::Delivery>,
+    highest_frame: Arc<std::sync::atomic::AtomicU64>,
     every: Duration,
     stop: Arc<AtomicBool>,
 ) -> thread::JoinHandle<Vec<Window>> {
@@ -133,7 +150,15 @@ pub fn spawn(
         .name("windows".into())
         .spawn(move || {
             sample(
-                &telemetry, &counters, &slot, &decoder, &arrived, &delivery, every, &stop,
+                &telemetry,
+                &counters,
+                &slot,
+                &decoder,
+                &arrived,
+                &delivery,
+                &highest_frame,
+                every,
+                &stop,
             )
         })
         .expect("spawn window sampler")
@@ -155,6 +180,8 @@ mod tests {
             fresh_pct: 100.0,
             au_interval_p50_ms: 8.3,
             au_interval_p99_ms: 8.3,
+            over_2t_per_min: 0.0,
+            au_loss: 0,
             frame_age_p99_ms: 9.0,
         }
     }

@@ -260,6 +260,11 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     // LAN watchdog, which needs to know the stream is still alive, and the
     // window sampler, which turns it into the delivered rate.
     let arrived = Arc::new(AtomicU64::new(0));
+    // The highest frame id the network has shown. Together with `arrived` it
+    // says how many access units the host produced that never turned up,
+    // which a count of arrivals alone cannot distinguish from a host that
+    // simply produced fewer.
+    let highest_frame = Arc::new(AtomicU64::new(0));
     // Delivery cadence lives here, beside the arrival counter, because both
     // describe what the network did and neither may be inferred from what
     // the display later managed to show.
@@ -300,6 +305,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             let receive_ledger = Arc::clone(&ledger);
             let receive_recorder = recorder.clone();
             let receive_arrived = Arc::clone(&arrived);
+            let receive_highest = Arc::clone(&highest_frame);
             let receive_delivery = Arc::clone(&delivery);
             let receiver = thread::Builder::new()
                 .name("rtp-rx".into())
@@ -311,6 +317,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                         receive_ledger,
                         SAMPLE_INTERVAL,
                         receive_arrived,
+                        receive_highest,
                         Arc::clone(&receive_delivery),
                         receive_stop,
                     )
@@ -359,6 +366,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             let receive_stop = Arc::clone(&stop);
             let receive_progress = Arc::clone(&progress);
             let receive_delivery = Arc::clone(&delivery);
+            let receive_highest = Arc::clone(&highest_frame);
             let receiver = thread::Builder::new()
                 .name("rtp-rx".into())
                 .spawn(move || {
@@ -369,6 +377,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                         transport::VerifyLedger::new(false),
                         SAMPLE_INTERVAL,
                         receive_progress,
+                        receive_highest,
                         Arc::clone(&receive_delivery),
                         receive_stop,
                     )
@@ -441,6 +450,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
         decoder_counters,
         Arc::clone(&arrived),
         Arc::clone(&delivery),
+        Arc::clone(&highest_frame),
         Duration::from_secs_f64(cli.window_seconds.max(1.0)),
         sampler_stop,
     );
@@ -611,12 +621,23 @@ fn print_windows(windows: &[crate::report::Window]) {
     println!();
     println!("Windows");
     println!(
-        "  {:>12}  {:>7} {:>7} {:>7} {:>7}  {:>8} {:>8}  {:>7} {:>7}",
-        "window", "src/s", "dec/s", "rnd/s", "tick/s", "aup99", "agep99", "super%", "fresh%"
+        "  {:>12}  {:>7} {:>7} {:>7} {:>7}  {:>8} {:>7} {:>5} {:>8}  {:>7} {:>7}",
+        "window",
+        "src/s",
+        "dec/s",
+        "rnd/s",
+        "tick/s",
+        "aup99",
+        ">2T/m",
+        "loss",
+        "agep99",
+        "super%",
+        "fresh%"
     );
     for window in windows {
         println!(
-            "  {:>5.0}-{:<6.0}  {:>7.1} {:>7.1} {:>7.1} {:>7.1}  {:>8.2} {:>8.2}  {:>7.1} {:>7.1}",
+            "  {:>5.0}-{:<6.0}  {:>7.1} {:>7.1} {:>7.1} {:>7.1}  {:>8.2} {:>7.1} {:>5} {:>8.2}  \
+             {:>7.1} {:>7.1}",
             window.from_s,
             window.to_s,
             window.source_hz,
@@ -624,6 +645,8 @@ fn print_windows(windows: &[crate::report::Window]) {
             window.render_hz,
             window.callback_hz,
             window.au_interval_p99_ms,
+            window.over_2t_per_min,
+            window.au_loss,
             window.frame_age_p99_ms,
             window.superseded_pct,
             window.fresh_pct
