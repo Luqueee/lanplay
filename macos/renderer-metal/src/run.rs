@@ -66,6 +66,11 @@ pub struct RendererConfig {
 #[derive(Clone, Debug)]
 pub struct RenderStats {
     pub rendered: u64,
+    /// What the display is capable of, as distinct from `display_hz`, which
+    /// is what the link actually delivered. A suspended link drags the
+    /// achieved rate down with it, so only the nominal rate can tell a run
+    /// that was throttled from one that had nothing to show.
+    pub nominal_hz: f64,
     /// Frames the producer threw away because the renderer had not taken the
     /// previous one yet. Read from the slot, so it counts drops that happened
     /// while the renderer was busy or asleep.
@@ -382,6 +387,14 @@ impl RenderLoop {
             rendered: self.rendered,
             superseded: self.slot.superseded(),
             empty_ticks: self.empty_ticks,
+            // The loop already carries the display's period; the rate is its
+            // reciprocal, and threading a second copy of the same fact would
+            // be one more thing that can disagree with itself.
+            nominal_hz: if self.expected_period.get() > 0 {
+                1e9 / self.expected_period.get() as f64
+            } else {
+                0.0
+            },
             drawable_wait: self.drawable_wait.percentiles(),
             encode_cpu: self.encode_cpu.percentiles(),
             display_hz: environment.display_hz,

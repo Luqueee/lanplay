@@ -89,15 +89,24 @@ source_state="$(WIN_TIMEOUT=60 "$REPO/tools/win-session.sh" \
 echo "source    $(printf '%s' "$source_state" | tr -d '\r' | grep -E '^monitor' || echo 'monitor unknown')"
 
 # ---- receiver -------------------------------------------------------------
-# The renderer refuses to measure an occluded window, and a window opened by
-# a process launched over ssh does not come forward on its own.
+# The renderer refuses to measure an occluded window, because an occluded
+# window has its display link suspended and every presentation number would
+# be a number about a screensaver.
 #
-# The negative control answers a question about the decoder, not about the
-# display, and it reaches preflight within a second of launch - before a
-# raise can land. Requiring an unoccluded window there would fail the run for
-# a reason that has nothing to do with what it is testing.
+# That guard is right for a run that ranks on presentation and wrong for one
+# that ranks on delivery. The receive thread does not care what is in front
+# of the window: packet loss, arrival spread and source cadence are as valid
+# behind another app as in front of it, and insisting on the window turns a
+# link experiment into a fight with the window server. `REQUIRE_CLEAN_DISPLAY=0`
+# says the run is about the link; the report still records occlusion changes
+# under `invalidating_events`, so nobody can later mistake its presentation
+# figures for measurements.
+#
+# The negative control is in the same position: it answers a question about
+# the decoder, and reaches preflight within a second of launch, before any
+# raise could land.
 DISPLAY_ARG="--require-clean-display"
-if [ "${PARAMETER_SETS:-host}" = "fixture" ]; then
+if [ "${PARAMETER_SETS:-host}" = "fixture" ] || [ "${REQUIRE_CLEAN_DISPLAY:-1}" = "0" ]; then
     DISPLAY_ARG=""
 fi
 

@@ -876,15 +876,32 @@ fn build_report(
     // numbers untrustworthy even if it recovered, so it is named rather than
     // averaged away.
     let mut invalidating = Vec::new();
-    let mut blame = |count: u64, what: &str| {
-        if count > 0 {
-            invalidating.push(format!("{count} {what}"));
-        }
-    };
-    blame(render.occlusion_changes, "occlusion changes");
-    blame(render.space_changes, "Space changes");
-    blame(render.miniaturise_events, "miniaturise events");
-    blame(render.display_changes, "display changes");
+    {
+        let mut blame = |count: u64, what: &str| {
+            if count > 0 {
+                invalidating.push(format!("{count} {what}"));
+            }
+        };
+        blame(render.occlusion_changes, "occlusion changes");
+        blame(render.space_changes, "Space changes");
+        blame(render.miniaturise_events, "miniaturise events");
+        blame(render.display_changes, "display changes");
+    }
+
+    // A display link that was suspended did not measure presentation, it
+    // measured a screensaver. Occlusion *changes* are zero when the window
+    // was behind something for the whole run, so the count alone calls that
+    // run clean. The comparison has to be against what the display is
+    // capable of, not against the rate that was achieved: a suspended link
+    // drags the measured rate down with it and would excuse itself.
+    let expected_ticks = render.nominal_hz * cli.seconds;
+    if expected_ticks > 0.0 && (render.callbacks as f64) < expected_ticks * 0.5 {
+        invalidating.push(format!(
+            "display link delivered {} of about {:.0} refreshes; presentation \
+             figures from this run are not measurements",
+            render.callbacks, expected_ticks
+        ));
+    }
 
     // The one number that says whether a QoS marking survived the path,
     // rather than whether the sender asked for it.
