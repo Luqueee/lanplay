@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 lanplay-decoder-videotoolbox = { workspace = true }
+libc = { workspace = true }
 lanplay-protocol = { workspace = true }
 lanplay-renderer-metal = { workspace = true }
 lanplay-telemetry = { workspace = true }

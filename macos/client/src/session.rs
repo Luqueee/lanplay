@@ -99,6 +99,7 @@ impl Pipeline {
                         mismatched: received.mismatched,
                         wire_bytes,
                         payload_bytes,
+                        dscp: received.dscp,
                     }),
                 })
             }
@@ -122,6 +123,7 @@ impl Pipeline {
                         mismatched: received.mismatched,
                         wire_bytes: received.rx.bytes,
                         payload_bytes: 0,
+                        dscp: received.dscp,
                     }),
                 })
             }
@@ -358,25 +360,34 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                 })?;
 
             // The run ends when the stream does; the clock is only a
-            // backstop. Its origin is the acknowledgement, not process start:
-            // everything before that is the receiver waiting for a host that
-            // has not been told to begin yet, and charging that to the
-            // measurement is how a ten-second run grew to forty.
+            // backstop. Two deadlines rather than one sum, because they mean
+            // different things: the host has `HOST_STARTUP_GRACE` to produce
+            // a first frame after being acknowledged, and once it has, the
+            // run lasts exactly as long as it was asked to. Adding the grace
+            // to every run instead would pad the measurement with idle time
+            // in the healthy case, which is precisely what the twenty-five
+            // second version did.
             let deadline_stop = Arc::clone(&stop);
             let watchdog_counters = Arc::clone(&counters);
             let watchdog_mark = Arc::clone(&spans_end);
             let watchdog_ended = Arc::clone(&stream_ended);
-            let backstop = Duration::from_secs_f64(cli.seconds) + HOST_STARTUP_GRACE + DRAIN_GRACE;
+            let run_for = Duration::from_secs_f64(cli.seconds) + DRAIN_GRACE;
             thread::Builder::new()
                 .name("deadline".into())
                 .spawn(move || {
-                    let until = Timestamp::now().add(Nanos(backstop.as_nanos() as u64));
+                    let mut until =
+                        Timestamp::now().add(Nanos(HOST_STARTUP_GRACE.as_nanos() as u64));
                     let mut last_seen = 0u64;
                     let mut idle = Duration::ZERO;
                     while !deadline_stop.load(Ordering::Acquire) && Timestamp::now() < until {
                         thread::sleep(POLL);
                         let seen = progress.load(Ordering::Relaxed);
                         if seen != last_seen {
+                            if last_seen == 0 {
+                                // First frame. From here the run is on its
+                                // own clock, and the startup watchdog is done.
+                                until = Timestamp::now().add(Nanos(run_for.as_nanos() as u64));
+                            }
                             last_seen = seen;
                             idle = Duration::ZERO;
                             watchdog_mark.mark(&watchdog_counters);
@@ -748,6 +759,10 @@ fn report(
             transport.rx.reorder_waits
         );
         println!("  rfc3550 jitter   {}", transport.jitter);
+        // What the sender asked for is on the host's side of the run; this is
+        // what survived the path, and it is the only half that can decide a
+        // QoS experiment.
+        println!("  service class    observed {}", transport.dscp);
         println!(
             "  packetization    p50 {} p95 {} p99 {}",
             packetization.p50, packetization.p95, packetization.p99
@@ -857,6 +872,13 @@ fn build_report(
     blame(render.miniaturise_events, "miniaturise events");
     blame(render.display_changes, "display changes");
 
+    // The one number that says whether a QoS marking survived the path,
+    // rather than whether the sender asked for it.
+    let dominant_dscp = outcome
+        .transport
+        .as_ref()
+        .and_then(|transport| transport.dscp.dominant());
+
     crate::report::Report {
         run: crate::report::Run {
             drive_mode: match cli.mode {
@@ -887,6 +909,8 @@ fn build_report(
             arrival_p99_ms: arrival.p99.as_millis_f64(),
             arrival_max_ms: arrival.max.as_millis_f64(),
             rtp_jitter_us: jitter.get() as f64 / 1000.0,
+            observed_dscp: dominant_dscp.map(|(dscp, _)| dscp),
+            observed_dscp_share: dominant_dscp.map_or(0.0, |(_, share)| share),
         },
         decode: crate::report::Decode {
             decoded: outcome.decoded,

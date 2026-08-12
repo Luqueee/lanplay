@@ -106,6 +106,8 @@ pub struct TransportOutcome {
     /// Bytes handed to the socket, against the bytes the access units held.
     pub wire_bytes: u64,
     pub payload_bytes: u64,
+    /// The service class the datagrams carried when they got here.
+    pub dscp: crate::dscp::Observed,
 }
 
 impl TransportOutcome {
@@ -246,6 +248,9 @@ pub struct ReceiverOutcome {
     pub max_backlog: usize,
     pub trailing_backlog: usize,
     pub backlog: Trend,
+    /// What service class the datagrams actually carried on arrival. The only
+    /// evidence that a QoS marking survived the path.
+    pub dscp: crate::dscp::Observed,
 }
 
 /// Reassembles access units and submits them to the decoder.
@@ -278,15 +283,20 @@ pub fn receive_loop(
         max_backlog: 0,
         trailing_backlog: 0,
         backlog: Trend::new(),
+        dscp: crate::dscp::Observed::default(),
     };
+    if !crate::dscp::request_tos(&socket) {
+        eprintln!("transport: the kernel refused IP_RECVTOS; arriving DSCP is unobservable");
+    }
     let mut next_sample = Timestamp::now();
 
     while !stop.load(Ordering::Acquire) {
-        let received = match socket.recv(&mut datagram) {
-            Ok(len) => len,
+        let (received, dscp) = match crate::dscp::recv_with_dscp(&socket, &mut datagram) {
+            Ok(result) => result,
             // A timeout is the loop's chance to notice `stop`, not an error.
             Err(_) => continue,
         };
+        outcome.dscp.record(dscp);
         let arrival = Timestamp::now();
         let bytes = &datagram[..received];
 

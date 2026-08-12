@@ -57,6 +57,10 @@ pub struct Network {
     pub arrival_p99_ms: f64,
     pub arrival_max_ms: f64,
     pub rtp_jitter_us: f64,
+    /// The DSCP most arriving datagrams carried, and its share. `None` when
+    /// the kernel would not report the TOS byte.
+    pub observed_dscp: Option<u8>,
+    pub observed_dscp_share: f64,
 }
 
 #[derive(Serialize)]

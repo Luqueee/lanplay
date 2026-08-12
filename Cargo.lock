@@ -294,6 +294,7 @@ dependencies = [
  "lanplay-telemetry",
  "lanplay-transport",
  "lanplay-video-core",
+ "libc",
  "objc2",
  "objc2-foundation",
  "parking_lot",

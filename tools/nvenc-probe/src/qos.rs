@@ -130,6 +130,12 @@ fn set_tos(socket: &UdpSocket) -> String {
     }
 }
 
+/// Adds the socket to a qWAVE flow of the given class, and asks for nothing
+/// else.
+///
+/// `QOSSetFlow` is what would request rate shaping, and it is deliberately
+/// never called: an arm asking for both a class and a rate while another
+/// asks for neither would be two variables wearing one name.
 fn add_flow(
     socket: &UdpSocket,
     class: ServiceClass,
@@ -170,7 +176,7 @@ fn add_flow(
         Marking {
             handle: Some(handle),
             requested: class,
-            applied: format!("qWAVE flow {flow_id} as {traffic:?}"),
+            applied: format!("qWAVE flow {flow_id} as {traffic:?}, no rate shaping requested"),
         }
     } else {
         let reason = last_error();
