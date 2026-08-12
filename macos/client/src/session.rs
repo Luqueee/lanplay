@@ -28,8 +28,16 @@ const SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
 /// Time given to the pipeline to drain after the last access unit is
 /// submitted, so frames already in flight are not counted as losses.
 const DRAIN_GRACE: Duration = Duration::from_millis(300);
-/// Extra listening time in LAN mode, to cover launching the remote sender.
-const LAN_STARTUP_GRACE: Duration = Duration::from_secs(25);
+/// How long the host is given to produce its first frame after being told the
+/// receiver is ready.
+///
+/// This used to be twenty-five seconds, because the sender was launched by
+/// hand at some unknown moment after the receiver started listening and the
+/// run had to be padded to cover it. The control plane removed the unknown:
+/// the receiver acknowledges the configuration itself, and the host sends its
+/// first frame immediately afterwards. Twenty-two of those seconds were pure
+/// idle in every measurement, which made a ten-second run cost forty.
+const HOST_STARTUP_GRACE: Duration = Duration::from_secs(3);
 /// How often the LAN watchdog looks at the stream.
 const POLL: Duration = Duration::from_millis(50);
 /// Silence that means the remote sender has finished.
@@ -167,7 +175,11 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     // some other encoder produced, and VideoToolbox rejects real slices
     // decoded against them as bad data.
     let (parameter_sets, mut control) = match cli.transport {
-        crate::Transport::Lan if cli.parameter_sets == crate::ParameterSetSource::Host => {
+        crate::Transport::Lan => {
+            // Negotiated whatever the sets are eventually taken from: the
+            // handshake is also what stops the host sending before this
+            // process can receive, and a negative control that skipped it
+            // would be changing two things at once.
             let (config, control) = crate::config::negotiate(cli)?;
             println!(
                 "codec config generation {} from the host: {}x{}, SPS {} B, PPS {} B",
@@ -177,11 +189,20 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                 config.sets.sps[0].len(),
                 config.sets.pps[0].len()
             );
-            (config.sets, Some((control, config.generation)))
+            let sets = match cli.parameter_sets {
+                crate::ParameterSetSource::Host => config.sets,
+                crate::ParameterSetSource::Fixture => {
+                    println!(
+                        "negative control: decoding the host's stream against the \
+                         fixture's parameter sets instead"
+                    );
+                    source.parameter_sets().clone()
+                }
+            };
+            (sets, Some((control, config.generation)))
         }
         _ => (source.parameter_sets().clone(), None),
     };
-
     let sink_slot = Arc::clone(&slot);
     let decoder = VideoToolboxDecoder::new(
         DecoderConfig {
@@ -336,17 +357,16 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                     )
                 })?;
 
-            // The remote sender is launched by hand after this process starts
-            // listening, so a fixed deadline would either cut the run short or
-            // leave the renderer drawing into silence afterwards. Counting
-            // those idle refreshes as "the link found nothing new" would be a
-            // lie about the link. So the run ends when the stream does, and
-            // the clock is only a backstop.
+            // The run ends when the stream does; the clock is only a
+            // backstop. Its origin is the acknowledgement, not process start:
+            // everything before that is the receiver waiting for a host that
+            // has not been told to begin yet, and charging that to the
+            // measurement is how a ten-second run grew to forty.
             let deadline_stop = Arc::clone(&stop);
             let watchdog_counters = Arc::clone(&counters);
             let watchdog_mark = Arc::clone(&spans_end);
             let watchdog_ended = Arc::clone(&stream_ended);
-            let backstop = Duration::from_secs_f64(cli.seconds) + LAN_STARTUP_GRACE + DRAIN_GRACE;
+            let backstop = Duration::from_secs_f64(cli.seconds) + HOST_STARTUP_GRACE + DRAIN_GRACE;
             thread::Builder::new()
                 .name("deadline".into())
                 .spawn(move || {

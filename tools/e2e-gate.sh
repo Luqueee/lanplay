@@ -113,13 +113,11 @@ CLIENT_PID=$!
 trap 'kill "$CLIENT_PID" 2>/dev/null || true; restore_clocks' EXIT
 
 
-# What "ready" means depends on where the parameter sets come from. Normally
-# the receiver blocks on the host's VideoConfig, so the marker is the moment
-# it starts negotiating; waiting for the preflight block that comes after
-# would deadlock, since the client is waiting for a host this script has not
-# launched. The negative control never negotiates, and reaches preflight on
-# its own. Either line means the receiver is as ready as it will get.
-READY='control: connecting|preflight: complete'
+# The receiver blocks on the host's VideoConfig before it can build a
+# decoder, so the marker to wait for is the moment it starts negotiating,
+# not the preflight block that comes after. Waiting for preflight here would
+# deadlock: the client waits for a host this script has not launched yet.
+READY='control: connecting'
 for _ in $(seq 1 100); do
     kill -0 "$CLIENT_PID" 2>/dev/null || break
     if grep -qE "$READY" "$CLIENT_LOG" 2>/dev/null; then
@@ -136,18 +134,16 @@ grep -qE "$READY" "$CLIENT_LOG" || {
     fail "receiver never became ready"
 }
 echo "receiver  listening on $LOCAL_IP:$PORT, negotiating on $CONTROL_PORT"
+
 # ---- sender ---------------------------------------------------------------
 # Through the interactive session: ssh lands in session 0, which has no
 # display devices, so Desktop Duplication finds nothing there.
-
-# The negative control reproduces the path that existed before the control
-# plane: the host sends without waiting for anything, and the receiver
-# configures itself from a fixture some other encoder produced. Leaving the
-# config gate on would simply deadlock, which proves nothing.
-CONTROL_ARG="--control-port $CONTROL_PORT"
-if [ "${PARAMETER_SETS:-host}" = "fixture" ]; then
-    CONTROL_ARG=""
-fi
+#
+# The config handshake stays on in every arm, including the negative control.
+# It is what stops the host sending before the receiver exists, and switching
+# it off alongside the parameter sets would confound the two: an arm without
+# it loses a large and variable slice of every stream at startup, which is a
+# different defect wearing the same clothes.
 
 RUNNER='C:\Users\luque\e2e-gate.ps1'
 LOCAL_RUNNER="$(mktemp -t e2e-gate-runner)"
@@ -157,7 +153,7 @@ cat >"$LOCAL_RUNNER" <<PS1
 Get-Process lanplay-nvenc-probe -ErrorAction SilentlyContinue | Stop-Process -Force
 # One line: PowerShell continues with a backtick, not a backslash, and a
 # wrapped command that silently loses its tail is a run that measures nothing.
-& \$probe --mode paced --input nv12 --source dda --output 1 --send-to $LOCAL_IP:$PORT $CONTROL_ARG --mtu 1200 --seconds $SECONDS_TO_RUN --warmup 0 --fps 120 --width 1920 --height 1080 --bitrate-mbps $BITRATE --preset p1 --tuning ll --idr-interval 120 --window-seconds 10
+& \$probe --mode paced --input nv12 --source dda --output 1 --send-to $LOCAL_IP:$PORT --control-port $CONTROL_PORT --mtu 1200 --seconds $SECONDS_TO_RUN --warmup 0 --fps 120 --width 1920 --height 1080 --bitrate-mbps $BITRATE --preset p1 --tuning ll --idr-interval 120 --window-seconds 10
 exit \$LASTEXITCODE
 PS1
 scp -q "$LOCAL_RUNNER" "windows:$(printf '%s' "$RUNNER" | tr '\\' '/')"

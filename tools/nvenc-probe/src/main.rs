@@ -1,6 +1,8 @@
 //! Isolated D3D11-to-NVENC latency, throughput, and cadence benchmark.
 #[cfg(windows)]
 mod nv12;
+#[cfg(windows)]
+mod qos;
 
 #[cfg(windows)]
 const SLOT_COUNT: usize = 4;
@@ -117,6 +119,11 @@ struct Args {
     /// receiver to acknowledge it before sending any media.
     #[arg(long)]
     control_port: Option<u16>,
+    /// Service class to request for the media socket. W2 showed cadence is
+    /// not a bandwidth problem, so the next variable is when datagrams are
+    /// allowed to leave rather than how many.
+    #[arg(long, value_enum, default_value_t = qos::ServiceClass::BestEffort)]
+    service_class: qos::ServiceClass,
     /// Overrides `--frames`; intended for soak runs.
     #[arg(long)]
     seconds: Option<u64>,
@@ -171,16 +178,25 @@ struct MediaSender {
     socket: std::net::UdpSocket,
     packetizer: lanplay_transport::Packetizer,
     fps: u32,
+    /// Held for the life of the sender: dropping it removes the qWAVE flow.
+    _marking: qos::Marking,
 }
 
 #[cfg(windows)]
 impl MediaSender {
-    fn new(target: std::net::SocketAddr, fps: u32, mtu: usize) -> Result<Self, String> {
+    fn new(
+        target: std::net::SocketAddr,
+        fps: u32,
+        mtu: usize,
+        class: qos::ServiceClass,
+    ) -> Result<Self, String> {
         let socket = std::net::UdpSocket::bind("0.0.0.0:0")
             .map_err(|error| format!("bind RTP sender: {error}"))?;
         socket
             .connect(target)
             .map_err(|error| format!("connect RTP sender to {target}: {error}"))?;
+        let marking = qos::Marking::apply(&socket, class, target);
+        println!("service class {:?}: {}", marking.requested, marking.applied);
         let packetizer = lanplay_transport::Packetizer::new(
             lanplay_transport::Ssrc(lanplay_transport::random_u32()),
             lanplay_transport::RtpClock::new(
@@ -194,6 +210,7 @@ impl MediaSender {
             socket,
             packetizer,
             fps,
+            _marking: marking,
         })
     }
 
@@ -706,7 +723,7 @@ fn windows_main() -> Result<(), String> {
 
     let sender = args
         .send_to
-        .map(|target| MediaSender::new(target, args.fps, args.mtu))
+        .map(|target| MediaSender::new(target, args.fps, args.mtu, args.service_class))
         .transpose()?;
     let run = run_pipeline(
         &session,
@@ -926,7 +943,7 @@ fn run_pipeline<'a>(
 fn complete_work(
     session: &lanplay_encoder_nvenc::NvencSession,
     work: Work<'_>,
-    mut sender: Option<&mut MediaSender>,
+    sender: Option<&mut MediaSender>,
 ) -> Result<FrameMetrics, String> {
     let frame = work.submitted.frame_index();
     let is_idr = work.submitted.is_idr();
@@ -959,7 +976,7 @@ fn complete_work(
         .map_err(|e| format!("unlock frame {frame}: {e}"))?;
     let unlock_end = std::time::Instant::now();
     stage::complete(5);
-    let network = match sender.as_deref_mut() {
+    let network = match sender {
         Some(sender) => sender.send(frame, is_idr, bytes)?,
         None => NetworkSample::default(),
     };

@@ -73,7 +73,9 @@ while :; do
         ssh -o BatchMode=yes "$HOST" "type \"$LOG\"" 2>/dev/null || true
         exit 124
     fi
-    sleep 2
+    # A quarter of a second, not two. Every remote call pays this latency
+    # twice, and a gate of forty short runs pays it eighty times.
+    sleep 0.25
 done
 
 ssh -o BatchMode=yes "$HOST" "type \"$LOG\"" || true
