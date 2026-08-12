@@ -1,0 +1,140 @@
+{
+  "run": {
+    "drive_mode": "display-link",
+    "seconds": 60.0,
+    "target_fps": 120.0,
+    "invalidated": false,
+    "invalidating_events": []
+  },
+  "stream": {
+    "expected": 7200,
+    "reconstructed": 7200,
+    "packet_loss": 0,
+    "au_loss": 0,
+    "corruption": 0,
+    "reordered": 5053,
+    "max_reorder_depth": 17,
+    "reorder_wait_mean_ms": 0.040844,
+    "reorder_wait_p50_ms": 0.002917,
+    "reorder_wait_p99_ms": 0.355839,
+    "reorder_wait_max_ms": 5.9135,
+    "reorder_gaps": 7332,
+    "duplicates": 0
+  },
+  "network": {
+    "arrival_p50_ms": 0.060927,
+    "arrival_p95_ms": 1.032191,
+    "arrival_p99_ms": 3.571711,
+    "arrival_max_ms": 5.963775,
+    "rtp_jitter_us": 197.794,
+    "observed_dscp": 0,
+    "observed_dscp_share": 100.0
+  },
+  "delivery": {
+    "delivered": 7200,
+    "au_interval_p50_ms": 8.110079,
+    "au_interval_p95_ms": 10.264575,
+    "au_interval_p99_ms": 13.533183,
+    "au_interval_max_ms": 47.611903
+  },
+  "decode": {
+    "decoded": 7200,
+    "errors": 0,
+    "p50_ms": 0.937983,
+    "p95_ms": 1.318911,
+    "p99_ms": 1.597439,
+    "backlog_slope_per_min": 0.0
+  },
+  "display": {
+    "nominal_hz": 0.0,
+    "cadence_valid": true,
+    "invalid_reason": null,
+    "callbacks": 0,
+    "rendered": 0,
+    "superseded": 0,
+    "empty_refreshes": 0,
+    "callback_interval_p50_ms": 0.0,
+    "callback_interval_p95_ms": 0.0,
+    "fresh_tick_ratio": 0.0,
+    "callback_interval_p99_ms": 0.0,
+    "callback_interval_max_ms": 0.0,
+    "frame_age_p50_ms": 0.0,
+    "frame_age_p95_ms": 0.0,
+    "frame_age_p99_ms": 0.0
+  },
+  "environment": {
+    "occlusion_changes": 0,
+    "space_changes": 0,
+    "miniaturise_events": 0,
+    "display_changes": 0,
+    "link_pauses": 0,
+    "app_nap_protection": true
+  },
+  "windows": [
+    {
+      "from_s": 0.0,
+      "to_s": 10.0,
+      "callback_hz": 0.0,
+      "source_hz": 102.43965267801356,
+      "decode_hz": 102.43965267801356,
+      "render_hz": 0.0,
+      "superseded_pct": 100.0,
+      "fresh_pct": 0.0,
+      "au_interval_p50_ms": 8.114175,
+      "au_interval_p99_ms": 11.182079,
+      "frame_age_p99_ms": 0.0
+    },
+    {
+      "from_s": 10.0,
+      "to_s": 20.0,
+      "callback_hz": 0.0,
+      "source_hz": 119.82404419226773,
+      "decode_hz": 119.82404419226773,
+      "render_hz": 0.0,
+      "superseded_pct": 100.0,
+      "fresh_pct": 0.0,
+      "au_interval_p50_ms": 8.105983,
+      "au_interval_p99_ms": 15.040511,
+      "frame_age_p99_ms": 0.0
+    },
+    {
+      "from_s": 20.0,
+      "to_s": 30.0,
+      "callback_hz": 0.0,
+      "source_hz": 119.99999750400006,
+      "decode_hz": 119.99999750400006,
+      "render_hz": 0.0,
+      "superseded_pct": 100.0,
+      "fresh_pct": 0.0,
+      "au_interval_p50_ms": 8.122367,
+      "au_interval_p99_ms": 14.934015,
+      "frame_age_p99_ms": 0.0
+    },
+    {
+      "from_s": 30.0,
+      "to_s": 40.0,
+      "callback_hz": 0.0,
+      "source_hz": 119.88764307272962,
+      "decode_hz": 119.88764307272962,
+      "render_hz": 0.0,
+      "superseded_pct": 100.0,
+      "fresh_pct": 0.0,
+      "au_interval_p50_ms": 8.097791,
+      "au_interval_p99_ms": 13.942783,
+      "frame_age_p99_ms": 0.0
+    },
+    {
+      "from_s": 40.0,
+      "to_s": 50.0,
+      "callback_hz": 0.0,
+      "source_hz": 119.89372406709873,
+      "decode_hz": 119.89372406709873,
+      "render_hz": 0.0,
+      "superseded_pct": 100.0,
+      "fresh_pct": 0.0,
+      "au_interval_p50_ms": 8.097791,
+      "au_interval_p99_ms": 30.195711,
+      "frame_age_p99_ms": 0.0
+    }
+  ]
+}
