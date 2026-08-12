@@ -28,7 +28,7 @@ pub use rtp::{
 };
 
 pub use h264::{MINIMUM_MTU, NAL_LENGTH_SIZE, PacketizeError, PacketizedAu, Packetizer};
-pub use reassembly::{Depacketizer, DepacketizerConfig, MAX_REORDER_WINDOW};
+pub use reassembly::{Depacketizer, DepacketizerConfig, MAX_REORDER_WINDOW, ReorderWait};
 pub use stats::{RxStats, TxStats};
 
 pub use control::{

@@ -45,8 +45,12 @@ pub struct Stream {
     /// Furthest ahead of the missing packet that arrivals kept coming.
     pub max_reorder_depth: u32,
     /// How long a visible gap took to fill itself when nothing was lost.
-    /// A NACK delay shorter than this asks for packets already in flight.
+    /// A NACK delay shorter than this asks for packets already in flight,
+    /// and the mean hides exactly the tail that decides whether one is
+    /// worth building.
     pub reorder_wait_mean_ms: f64,
+    pub reorder_wait_p50_ms: f64,
+    pub reorder_wait_p99_ms: f64,
     pub reorder_wait_max_ms: f64,
     pub reorder_gaps: u64,
     pub duplicates: u64,

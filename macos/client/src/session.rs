@@ -94,6 +94,7 @@ impl Pipeline {
                     transport: Some(transport::TransportOutcome {
                         tx,
                         rx: received.rx,
+                        reorder_wait: received.reorder_wait,
                         jitter: received.jitter,
                         verified: received.verified,
                         mismatched: received.mismatched,
@@ -118,6 +119,7 @@ impl Pipeline {
                         // Nothing was sent from this machine.
                         tx: TxStats::default(),
                         rx: received.rx,
+                        reorder_wait: received.reorder_wait,
                         jitter: received.jitter,
                         verified: received.verified,
                         mismatched: received.mismatched,
@@ -800,9 +802,11 @@ fn report(
         // when nothing was actually lost. A NACK sent inside that window asks
         // for a packet already on its way.
         println!(
-            "  reordering       depth max {}, gap filled in {:.3} ms mean / {:.3} ms max over {} gaps",
+            "  reordering       depth max {}, gap filled in {:.3} ms p50 / {:.3} ms p99 / \
+             {:.3} ms max over {} gaps",
             transport.rx.max_reorder_depth,
-            transport.rx.mean_reorder_wait_ns() as f64 / 1e6,
+            transport.reorder_wait.p50_ns as f64 / 1e6,
+            transport.reorder_wait.p99_ns as f64 / 1e6,
             transport.rx.reorder_wait_max_ns as f64 / 1e6,
             transport.rx.reorder_waits
         );
@@ -903,9 +907,14 @@ fn build_report(
 ) -> crate::report::Report {
     let arrival = snapshot.segment(Segment::Arrival);
     let decode = snapshot.segment(Segment::Decode);
-    let (rx, jitter, corruption) = match &outcome.transport {
-        Some(transport) => (transport.rx, transport.jitter, transport.mismatched),
-        None => (Default::default(), Nanos::ZERO, 0),
+    let (rx, reorder_wait, jitter, corruption) = match &outcome.transport {
+        Some(transport) => (
+            transport.rx,
+            transport.reorder_wait,
+            transport.jitter,
+            transport.mismatched,
+        ),
+        None => (Default::default(), Default::default(), Nanos::ZERO, 0),
     };
     let reconstructed = if outcome.transport.is_some() {
         rx.access_units_completed
@@ -974,6 +983,8 @@ fn build_report(
             reordered: rx.reordered,
             max_reorder_depth: rx.max_reorder_depth,
             reorder_wait_mean_ms: rx.mean_reorder_wait_ns() as f64 / 1e6,
+            reorder_wait_p50_ms: reorder_wait.p50_ns as f64 / 1e6,
+            reorder_wait_p99_ms: reorder_wait.p99_ns as f64 / 1e6,
             reorder_wait_max_ms: rx.reorder_wait_max_ns as f64 / 1e6,
             reorder_gaps: rx.reorder_waits,
             duplicates: rx.duplicates,

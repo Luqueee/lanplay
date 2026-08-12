@@ -409,6 +409,7 @@ name = "lanplay-transport"
 version = "0.1.0"
 dependencies = [
  "getrandom",
+ "hdrhistogram",
  "lanplay-protocol",
  "lanplay-telemetry",
  "lanplay-video-core",

@@ -10,6 +10,7 @@ lanplay-protocol = { workspace = true }
 lanplay-telemetry = { workspace = true }
 lanplay-video-core = { workspace = true }
 getrandom = { workspace = true }
+hdrhistogram = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -21,6 +21,7 @@
 use core::fmt;
 use std::collections::VecDeque;
 
+use hdrhistogram::Histogram;
 use lanplay_protocol::FrameId;
 use lanplay_telemetry::{Nanos, Timestamp};
 use lanplay_video_core::{EncodedAccessUnit, VideoTimestamp};
@@ -83,6 +84,23 @@ impl Default for DepacketizerConfig {
     }
 }
 
+/// Widest gap fill a histogram can hold: one second. A hole open longer
+/// than that has already missed every deadline the tail is consulted for.
+const MAX_WAIT_NANOS: u64 = 1_000_000_000;
+
+/// How long holes took to fill, summarised.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReorderWait {
+    pub count: u64,
+    pub p50_ns: u64,
+    pub p99_ns: u64,
+    pub max_ns: u64,
+}
+
+fn new_wait_histogram() -> Histogram<u32> {
+    Histogram::new_with_bounds(1, MAX_WAIT_NANOS, 3).expect("valid histogram bounds")
+}
+
 pub struct Depacketizer {
     payload_type: u8,
     ssrc: Option<Ssrc>,
@@ -99,6 +117,12 @@ pub struct Depacketizer {
     /// is empty, cleared when the cursor moves. The interval between the two
     /// is what a NACK would have to beat to be worth sending.
     gap_since: Option<Timestamp>,
+    /// How long each gap took to fill.
+    ///
+    /// The sum and the maximum live in [`RxStats`], which is `Copy` and has
+    /// to stay that way. A tail figure needs a histogram, and one gap fill
+    /// per reordering event is a rate no hot path notices.
+    reorder_wait: Histogram<u32>,
 }
 
 impl Depacketizer {
@@ -113,6 +137,7 @@ impl Depacketizer {
             stats: RxStats::default(),
             jitter: Jitter::default(),
             gap_since: None,
+            reorder_wait: new_wait_histogram(),
         }
     }
 
@@ -125,6 +150,20 @@ impl Depacketizer {
 
     pub fn stats(&self) -> &RxStats {
         &self.stats
+    }
+
+    /// Percentiles of the interval between noticing a hole and filling it.
+    ///
+    /// This is the deadline a retransmission scheme would have to beat, and
+    /// the mean in [`RxStats`] hides exactly the tail that decides whether
+    /// one is worth building.
+    pub fn reorder_wait(&self) -> ReorderWait {
+        ReorderWait {
+            count: self.reorder_wait.len(),
+            p50_ns: self.reorder_wait.value_at_quantile(0.50),
+            p99_ns: self.reorder_wait.value_at_quantile(0.99),
+            max_ns: self.reorder_wait.max(),
+        }
     }
 
     /// RFC 3550 interarrival jitter estimate.
@@ -197,6 +236,12 @@ impl Depacketizer {
                 self.stats.reorder_waits += 1;
                 self.stats.reorder_wait_sum_ns += waited;
                 self.stats.reorder_wait_max_ns = self.stats.reorder_wait_max_ns.max(waited);
+                // Clamped rather than dropped: a wait past the ceiling is
+                // still a wait, and losing it would flatter the tail.
+                let clamped = waited.clamp(1, MAX_WAIT_NANOS);
+                self.reorder_wait
+                    .record(clamped)
+                    .expect("value clamped into histogram range");
             }
             self.assembler.accept(
                 &packet.header,

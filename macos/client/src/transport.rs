@@ -98,6 +98,9 @@ impl MarkedFrames {
 }
 
 pub struct TransportOutcome {
+    /// Gap fill percentiles, kept beside `rx` because `RxStats` is `Copy`
+    /// and a tail figure needs a histogram.
+    pub reorder_wait: lanplay_transport::ReorderWait,
     pub tx: TxStats,
     pub rx: RxStats,
     pub jitter: Nanos,
@@ -241,6 +244,9 @@ pub fn send_loop(
 
 pub struct ReceiverOutcome {
     pub rx: RxStats,
+    /// Percentiles of the gap fill interval, which `RxStats` cannot hold:
+    /// it is `Copy` and a tail needs a histogram.
+    pub reorder_wait: lanplay_transport::ReorderWait,
     pub jitter: Nanos,
     pub verified: u64,
     pub mismatched: u64,
@@ -280,6 +286,7 @@ pub fn receive_loop(
     let mut marked = MarkedFrames::new();
     let mut outcome = ReceiverOutcome {
         rx: RxStats::default(),
+        reorder_wait: lanplay_transport::ReorderWait::default(),
         jitter: Nanos::ZERO,
         verified: 0,
         mismatched: 0,
@@ -344,6 +351,7 @@ pub fn receive_loop(
 
     decoder.flush()?;
     outcome.rx = *depacketizer.stats();
+    outcome.reorder_wait = depacketizer.reorder_wait();
     outcome.jitter = depacketizer.jitter();
     outcome.trailing_backlog = decoder.in_flight();
     Ok((outcome, decoder))
