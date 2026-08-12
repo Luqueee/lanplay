@@ -1,0 +1,21 @@
+awdl0 down, video capture
+  awdl-down-r1
+    stall period     220 ms  sd 4.4  48% of 181 gaps within 30 ms of it  (49 in the mode bin)
+    stall size       mean 31.1 ms  sd 7.5  max 49.8  duty 4.7%
+  awdl-down-r2
+    stall period     220 ms  sd 3.7  64% of 126 gaps within 30 ms of it  (53 in the mode bin)
+    stall size       mean 33.5 ms  sd 6.0  max 71.4  duty 3.6%
+
+awdl0 up, from results/pcap-parallel
+  parallel-r1
+    stall period     220 ms  sd 3.4  67% of 136 gaps within 30 ms of it  (64 in the mode bin)
+    stall size       mean 34.0 ms  sd 6.9  max 98.7  duty 3.9%
+  cap-control
+    stall period     220 ms  sd 2.9  66% of 137 gaps within 30 ms of it  (56 in the mode bin)
+    stall size       mean 33.9 ms  sd 6.5  max 79.9  duty 3.9%
+
+ping to the router, 900 replies each
+  awdl up    2.4% held, depth 24.7/31.4 ms
+  awdl up    2.7% held, depth 22.5/35.6 ms
+  awdl down  2.6% held, depth 18.5/29.7 ms
+  awdl down  3.0% held, depth 22.0/33.8 ms
