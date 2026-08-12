@@ -241,6 +241,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             preflight::Item::fail("decoder", "session is not hardware accelerated")
         },
         preflight::Item::ok("app-nap", "LatencyCritical activity held for the run"),
+        radio_check(),
     ];
     let memory_stop = Arc::clone(&stop);
     let memory_sampler = thread::Builder::new()
@@ -925,6 +926,47 @@ fn report(
 /// not comparable until phase 9 estimates the offset, so `frame_age` here is
 /// the client's `local_age`: its first sight of a frame to putting it on
 /// screen.
+#[allow(clippy::too_many_arguments)]
+/// What the link is running over, and whether that is a configuration this
+/// pipeline is known to stall on.
+///
+/// A warning rather than a refusal. Measuring a radar band on purpose is how
+/// the problem was found, and a check that blocked it would make the finding
+/// unrepeatable. Read at the start of every session rather than assumed:
+/// this access point was on Auto and moved itself from channel 108 to 116
+/// between two sittings.
+fn radio_check() -> preflight::Item {
+    let Some(link) = lanplay_capabilities::wifi::association() else {
+        return preflight::Item::ok("radio", "not on Wi-Fi");
+    };
+    let (low, high) = link.span_mhz();
+    let where_ = format!(
+        "channel {} at {} MHz wide, {low}-{high} MHz, {} dBm",
+        link.channel, link.width_mhz, link.rssi_dbm
+    );
+    if link.uses_radar_band() {
+        // Measured here: moving off channel 116 took access units arriving
+        // more than two source periods late from 69 a minute to 5.5. The
+        // regulation requires radar detection in this band; it does not
+        // prescribe the 34 ms pause every 220 ms that produced those
+        // numbers, so this names the band and not a mechanism.
+        return preflight::Item::warn(
+            "radio",
+            format!(
+                "{where_} - this band requires radar detection, and delivery \
+                 stalled badly here. Prefer a non-radar channel: 36-48."
+            ),
+        );
+    }
+    if link.outside_es_rlan() {
+        return preflight::Item::warn(
+            "radio",
+            format!("{where_} - outside the 5150-5725 MHz allocated to these networks here"),
+        );
+    }
+    preflight::Item::ok("radio", where_)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_report(
     cli: &Cli,

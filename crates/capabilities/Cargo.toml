@@ -7,3 +7,7 @@ license.workspace = true
 
 [dependencies]
 lanplay-protocol = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true }
+objc2-foundation = { workspace = true }

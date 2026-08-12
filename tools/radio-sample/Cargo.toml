@@ -9,5 +9,5 @@ license.workspace = true
 name = "radio-sample"
 path = "src/main.rs"
 
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2 = { workspace = true }
+[dependencies]
+lanplay-capabilities = { workspace = true }

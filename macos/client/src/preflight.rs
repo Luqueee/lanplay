@@ -10,10 +10,24 @@
 
 use core::fmt;
 
+/// How much a check's finding matters.
+///
+/// A warning is not a soft failure: it is a fact about the environment that
+/// will show up in the numbers and that the operator has to know, on a run
+/// that is still worth doing. Measuring a DFS channel on purpose is exactly
+/// that, and a check that refused it would make the experiment that found
+/// the problem impossible to repeat.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Level {
+    Ok,
+    Warn,
+    Fail,
+}
+
 #[derive(Clone)]
 pub struct Item {
     pub name: &'static str,
-    pub passed: bool,
+    pub level: Level,
     pub detail: String,
 }
 
@@ -34,7 +48,15 @@ impl Item {
     pub fn ok(name: &'static str, detail: impl Into<String>) -> Item {
         Item {
             name,
-            passed: true,
+            level: Level::Ok,
+            detail: detail.into(),
+        }
+    }
+
+    pub fn warn(name: &'static str, detail: impl Into<String>) -> Item {
+        Item {
+            name,
+            level: Level::Warn,
             detail: detail.into(),
         }
     }
@@ -42,18 +64,23 @@ impl Item {
     pub fn fail(name: &'static str, detail: impl Into<String>) -> Item {
         Item {
             name,
-            passed: false,
+            level: Level::Fail,
             detail: detail.into(),
         }
+    }
+
+    /// Whether the run may proceed. Warnings may.
+    pub fn passed(&self) -> bool {
+        self.level != Level::Fail
     }
 }
 
 impl fmt::Display for Item {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.passed {
-            write!(f, "preflight: ok {} — {}", self.name, self.detail)
-        } else {
-            write!(f, "preflight: FAIL {} — {}", self.name, self.detail)
+        match self.level {
+            Level::Ok => write!(f, "preflight: ok {} — {}", self.name, self.detail),
+            Level::Warn => write!(f, "preflight: WARN {} — {}", self.name, self.detail),
+            Level::Fail => write!(f, "preflight: FAIL {} — {}", self.name, self.detail),
         }
     }
 }
@@ -67,7 +94,7 @@ pub fn report(items: &[Item]) -> bool {
     for item in items {
         println!("{item}");
     }
-    let failed = items.iter().filter(|item| !item.passed).count();
+    let failed = items.iter().filter(|item| !item.passed()).count();
     if failed == 0 {
         println!("preflight: complete");
         true
@@ -84,6 +111,16 @@ mod tests {
     #[test]
     fn the_terminator_says_which_way_it_went() {
         assert!(report(&[Item::ok("display", "Built-in, 120 Hz")]));
+        // A warning is information, not a veto: the run that discovered the
+        // DFS problem had to be able to run on a DFS channel.
+        assert!(report(&[
+            Item::ok("display", "Built-in, 120 Hz"),
+            Item::warn("wifi", "channel 116 requires radar detection"),
+        ]));
+        assert!(
+            Item::warn("wifi", "x").to_string().contains("WARN"),
+            "a warning must be greppable as one"
+        );
         assert!(!report(&[
             Item::ok("display", "Built-in, 120 Hz"),
             Item::fail("space", "window is on another Space"),

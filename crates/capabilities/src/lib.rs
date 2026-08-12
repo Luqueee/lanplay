@@ -17,6 +17,13 @@ mod macos;
 #[cfg(windows)]
 mod windows;
 
+/// The Wi-Fi association, and whether it sits in a band that requires radar
+/// detection. Public on its own rather than folded into the capability
+/// exchange: this is about the link a session runs over, not about what the
+/// two machines can do.
+#[cfg(target_os = "macos")]
+pub mod wifi;
+
 #[cfg(target_os = "macos")]
 use macos as platform;
 #[cfg(windows)]

@@ -260,6 +260,8 @@ name = "lanplay-capabilities"
 version = "0.1.0"
 dependencies = [
  "lanplay-protocol",
+ "objc2",
+ "objc2-foundation",
 ]
 
 [[package]]
@@ -289,6 +291,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "hdrhistogram",
+ "lanplay-capabilities",
  "lanplay-decoder-videotoolbox",
  "lanplay-link-metrics",
  "lanplay-protocol",
@@ -399,7 +402,7 @@ dependencies = [
 name = "lanplay-radio-sample"
 version = "0.1.0"
 dependencies = [
- "objc2",
+ "lanplay-capabilities",
 ]
 
 [[package]]
