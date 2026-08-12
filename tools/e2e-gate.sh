@@ -101,8 +101,17 @@ if [ "${PARAMETER_SETS:-host}" = "fixture" ]; then
     DISPLAY_ARG=""
 fi
 
+# A run that measures presentation needs a display that is awake. The client
+# holds a LatencyCritical activity, which stops App Nap but does not stop the
+# screen sleeping, and CoreGraphics then reports no active displays at all:
+# the preflight fails on occlusion, the client exits without a report, and a
+# fifteen-minute sweep quietly loses half its runs to a screensaver. `-u`
+# asserts user activity to wake a display that has already gone, `-d` holds it
+# awake for as long as the client runs.
+caffeinate -u -t 2 >/dev/null 2>&1 || true
+
 CLIENT_LOG="$(mktemp -t e2e-gate-client)"
-"$CLIENT" \
+caffeinate -d "$CLIENT" \
     --transport lan --bind "$LOCAL_IP:$PORT" --control "$WIN_IP:$CONTROL_PORT" \
     --parameter-sets "${PARAMETER_SETS:-host}" \
     --width 1920 --height 1080 --fps 120 \
