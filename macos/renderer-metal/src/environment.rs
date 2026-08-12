@@ -59,7 +59,10 @@ pub(crate) fn read(counter: &AtomicU64) -> u64 {
 }
 
 /// The window and display as they were when the run started.
-#[derive(Clone, Debug)]
+/// `Default` is what a run with no renderer at all reports: a link-only
+/// measurement has no window, no display and nothing to say about either,
+/// and saying so with zeros beats inventing a plausible screen.
+#[derive(Clone, Debug, Default)]
 pub struct Environment {
     pub display_name: String,
     /// The link's own figure once it is running. Before that it is what the

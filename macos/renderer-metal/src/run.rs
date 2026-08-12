@@ -63,7 +63,10 @@ pub struct RendererConfig {
     pub on_ready: Option<Box<dyn FnOnce() + Send>>,
 }
 
-#[derive(Clone, Debug)]
+/// `Default` describes a run that never rendered: `--link-only`, where there
+/// is no window and no display link, and every field below is an honest zero
+/// rather than a measurement.
+#[derive(Clone, Debug, Default)]
 pub struct RenderStats {
     pub rendered: u64,
     /// What the display is capable of, as distinct from `display_hz`, which

@@ -7,6 +7,7 @@
 //! on top of it can.
 
 mod config;
+mod delivery;
 mod dscp;
 mod gate;
 mod nap;
@@ -75,6 +76,15 @@ pub struct Cli {
     /// control, and a run using it is expected to fail.
     #[arg(long, value_enum, default_value_t = ParameterSetSource::Host)]
     pub parameter_sets: ParameterSetSource,
+    /// Measure the link and stop there: no renderer, no window, no display
+    /// link.
+    ///
+    /// Delivery cadence, loss, reordering and decode are all measured before
+    /// anything touches a screen, so a radio experiment has no business
+    /// depending on what the Mac's display is doing. Runs that rank on
+    /// presentation need the window; runs that rank on the link must not.
+    #[arg(long)]
+    pub link_only: bool,
     /// Compare every reconstructed access unit against the original by
     /// SHA-256, rather than trusting that the decoder did not complain.
     #[arg(long)]

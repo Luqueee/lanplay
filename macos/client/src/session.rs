@@ -257,6 +257,10 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     // LAN watchdog, which needs to know the stream is still alive, and the
     // window sampler, which turns it into the delivered rate.
     let arrived = Arc::new(AtomicU64::new(0));
+    // Delivery cadence lives here, beside the arrival counter, because both
+    // describe what the network did and neither may be inferred from what
+    // the display later managed to show.
+    let delivery = Arc::new(crate::delivery::Delivery::new());
     // Cloned before the decoder is moved into whichever thread submits to it.
     let decoder_counters = decoder.counters();
     let decoder_status = decoder_counters.clone();
@@ -289,6 +293,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             let receive_ledger = Arc::clone(&ledger);
             let receive_recorder = recorder.clone();
             let receive_arrived = Arc::clone(&arrived);
+            let receive_delivery = Arc::clone(&delivery);
             let receiver = thread::Builder::new()
                 .name("rtp-rx".into())
                 .spawn(move || {
@@ -299,6 +304,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                         receive_ledger,
                         SAMPLE_INTERVAL,
                         receive_arrived,
+                        Arc::clone(&receive_delivery),
                         receive_stop,
                     )
                 })?;
@@ -345,6 +351,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             let progress = Arc::clone(&arrived);
             let receive_stop = Arc::clone(&stop);
             let receive_progress = Arc::clone(&progress);
+            let receive_delivery = Arc::clone(&delivery);
             let receiver = thread::Builder::new()
                 .name("rtp-rx".into())
                 .spawn(move || {
@@ -355,6 +362,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                         transport::VerifyLedger::new(false),
                         SAMPLE_INTERVAL,
                         receive_progress,
+                        Arc::clone(&receive_delivery),
                         receive_stop,
                     )
                 })?;
@@ -425,6 +433,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
         Arc::clone(&slot),
         decoder_counters,
         Arc::clone(&arrived),
+        Arc::clone(&delivery),
         Duration::from_secs_f64(cli.window_seconds.max(1.0)),
         sampler_stop,
     );
@@ -432,35 +441,49 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     // AppKit owns this thread from here until the run stops. The renderer
     // prints its own preflight items and then calls `on_ready`, which is
     // where the block is terminated.
-    let render = lanplay_renderer_metal::run(
-        RendererConfig {
-            width: cli.width,
-            height: cli.height,
-            title: format!("lanplay — {}x{}@{}", cli.width, cli.height, cli.fps),
-            mode: cli.drive_mode(),
-            recorder: telemetry.recorder(),
-            stop: Arc::clone(&stop),
-            render_delay: cli.render_delay_ms.map(Duration::from_millis),
-            present_limit: None,
-            counters: Arc::clone(&counters),
-            require_clean_environment: cli.require_clean_display.then_some(feed_fps),
-            on_ready: Some(Box::new(move || {
-                preflight::report(&ready_checks);
-            })),
-        },
-        Arc::clone(&slot),
-    );
-    let render_stats = match render {
-        Ok(stats) => stats,
-        Err(RendererError::DirtyEnvironment(problems)) => {
-            for problem in &problems {
-                checks.push(preflight::Item::fail("display", problem));
-            }
-            preflight::report(&checks);
-            stop.store(true, Ordering::Release);
-            return Err(preflight::Refused.into());
+    //
+    // Unless there is no renderer. A link-only run measures delivery, loss,
+    // reordering and decode, all of which happen before anything reaches a
+    // screen, so it waits on the watchdog instead of on AppKit and reports
+    // zeros for presentation rather than a plausible-looking screen.
+    let render_stats = if cli.link_only {
+        preflight::report(&ready_checks);
+        println!("link-only: no renderer, no window, no display link");
+        while !stop.load(Ordering::Acquire) {
+            thread::sleep(POLL);
         }
-        Err(other) => return Err(other.into()),
+        RenderStats::default()
+    } else {
+        let render = lanplay_renderer_metal::run(
+            RendererConfig {
+                width: cli.width,
+                height: cli.height,
+                title: format!("lanplay — {}x{}@{}", cli.width, cli.height, cli.fps),
+                mode: cli.drive_mode(),
+                recorder: telemetry.recorder(),
+                stop: Arc::clone(&stop),
+                render_delay: cli.render_delay_ms.map(Duration::from_millis),
+                present_limit: None,
+                counters: Arc::clone(&counters),
+                require_clean_environment: cli.require_clean_display.then_some(feed_fps),
+                on_ready: Some(Box::new(move || {
+                    preflight::report(&ready_checks);
+                })),
+            },
+            Arc::clone(&slot),
+        );
+        match render {
+            Ok(stats) => stats,
+            Err(RendererError::DirtyEnvironment(problems)) => {
+                for problem in &problems {
+                    checks.push(preflight::Item::fail("display", problem));
+                }
+                preflight::report(&checks);
+                stop.store(true, Ordering::Release);
+                return Err(preflight::Refused.into());
+            }
+            Err(other) => return Err(other.into()),
+        }
     };
 
     stop.store(true, Ordering::Release);
@@ -500,7 +523,14 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             outcome.errors
         );
     }
-    report(cli, &outcome, &memory, &render_stats, &snapshot);
+    report(
+        cli,
+        &outcome,
+        &memory,
+        &render_stats,
+        &snapshot,
+        delivery.cumulative(),
+    );
     if !slices.is_empty() {
         print_windows(&slices);
         println!(
@@ -518,6 +548,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             &render_stats,
             &spans_end,
             &snapshot,
+            delivery.cumulative(),
             slices,
         );
         std::fs::write(path, serde_json::to_string_pretty(&json)?)?;
@@ -545,6 +576,8 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
         span_missed_drawables: spans_end.missed_drawables(render_stats.missed_drawables),
         still_in_slot,
         display_driven: matches!(cli.mode, crate::Mode::DisplayLink),
+        presents: !cli.link_only,
+        link: delivery.cumulative(),
         memory: memory.clone(),
         snapshot,
         zero_copy_render_path: true,
@@ -574,7 +607,7 @@ fn print_windows(windows: &[crate::report::Window]) {
     println!("Windows");
     println!(
         "  {:>12}  {:>7} {:>7} {:>7} {:>7}  {:>8} {:>8}  {:>7} {:>7}",
-        "window", "src/s", "dec/s", "rnd/s", "tick/s", "srcp99", "agep99", "super%", "fresh%"
+        "window", "src/s", "dec/s", "rnd/s", "tick/s", "aup99", "agep99", "super%", "fresh%"
     );
     for window in windows {
         println!(
@@ -585,7 +618,7 @@ fn print_windows(windows: &[crate::report::Window]) {
             window.decode_hz,
             window.render_hz,
             window.callback_hz,
-            window.source_interval_p99_ms,
+            window.au_interval_p99_ms,
             window.frame_age_p99_ms,
             window.superseded_pct,
             window.fresh_pct
@@ -675,6 +708,9 @@ fn report(
     memory: &Trend,
     render: &RenderStats,
     snapshot: &Snapshot,
+    // Delivery cadence, measured at the depacketiser rather than inferred
+    // from presentation.
+    link: crate::delivery::Window,
 ) {
     let decode = snapshot.segment(Segment::Decode);
     let wait = snapshot.segment(Segment::PresentationWait);
@@ -773,6 +809,10 @@ fn report(
             transport.rx.reorder_waits
         );
         println!("  rfc3550 jitter   {}", transport.jitter);
+        // The link's own cadence, taken at the depacketiser. This is the
+        // series a radio experiment is ranked by, and the only one that stays
+        // a measurement when the display link does not.
+        println!("  au delivery      {}", link);
         // What the sender asked for is on the host's side of the run; this is
         // what survived the path, and it is the only half that can decide a
         // QoS experiment.
@@ -858,6 +898,9 @@ fn build_report(
     render: &RenderStats,
     span_end: &SpanEnd,
     snapshot: &Snapshot,
+    // Delivery cadence, already summarised: measured at the depacketiser, so
+    // it stays valid whatever the display was doing.
+    link: crate::delivery::Window,
     slices: Vec<crate::report::Window>,
 ) -> crate::report::Report {
     let arrival = snapshot.segment(Segment::Arrival);
@@ -903,6 +946,9 @@ fn build_report(
         ));
     }
 
+    // Whether anything below the display link is a measurement at all.
+    let cadence_valid = expected_ticks <= 0.0 || (render.callbacks as f64) >= expected_ticks * 0.5;
+
     // The one number that says whether a QoS marking survived the path,
     // rather than whether the sender asked for it.
     let dominant_dscp = outcome
@@ -943,6 +989,13 @@ fn build_report(
             observed_dscp: dominant_dscp.map(|(dscp, _)| dscp),
             observed_dscp_share: dominant_dscp.map_or(0.0, |(_, share)| share),
         },
+        delivery: crate::report::Delivery {
+            delivered: link.delivered,
+            au_interval_p50_ms: link.p50_ms,
+            au_interval_p95_ms: link.p95_ms,
+            au_interval_p99_ms: link.p99_ms,
+            au_interval_max_ms: link.max_ms,
+        },
         decode: crate::report::Decode {
             decoded: outcome.decoded,
             errors: outcome.errors,
@@ -952,7 +1005,14 @@ fn build_report(
             backlog_slope_per_min: outcome.backlog.slope_per_minute().unwrap_or(0.0),
         },
         display: crate::report::Display {
-            nominal_hz: render.display_hz,
+            nominal_hz: render.nominal_hz,
+            cadence_valid,
+            invalid_reason: (!cadence_valid).then(|| {
+                format!(
+                    "display link delivered {} of about {:.0} refreshes",
+                    render.callbacks, expected_ticks
+                )
+            }),
             callbacks: span_end.callbacks(render.callbacks),
             rendered: render.rendered,
             superseded: render.superseded,

@@ -107,8 +107,16 @@ struct Args {
     source: ContentSource,
     /// Which DXGI output to capture. Synthetic sources still create their
     /// D3D11/NVENC device on the adapter that owns this output.
+    ///
+    /// Indices are perishable: attaching a monitor renumbers them. Prefer
+    /// `--output-name` for anything that has to mean the same thing tomorrow.
     #[arg(long, default_value_t = 0)]
     output: u32,
+    /// Capture the output whose monitor name contains this fragment, e.g.
+    /// `IDD-LAB`. Takes precedence over `--output`, and refuses the run
+    /// rather than guessing when it matches no output or more than one.
+    #[arg(long)]
+    output_name: Option<String>,
     /// Send each completed H.264 access unit as RTP/UDP to this receiver.
     #[arg(long)]
     send_to: Option<std::net::SocketAddr>,
@@ -567,7 +575,11 @@ fn windows_main() -> Result<(), String> {
         .checked_mul(1_000_000)
         .ok_or_else(|| "bitrate overflows u32".to_owned())?;
 
-    let device = lanplay_capture::CaptureDevice::open(args.output).map_err(|e| e.to_string())?;
+    let output = match args.output_name.as_deref() {
+        Some(fragment) => lanplay_capture::output_named(fragment).map_err(|e| e.to_string())?,
+        None => args.output,
+    };
+    let device = lanplay_capture::CaptureDevice::open(output).map_err(|e| e.to_string())?;
     println!("device {}", device.identity());
     let mut surfaces = Vec::with_capacity(SLOT_COUNT);
     for _ in 0..SLOT_COUNT {

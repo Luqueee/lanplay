@@ -12,6 +12,8 @@ pub struct Report {
     pub run: Run,
     pub stream: Stream,
     pub network: Network,
+    /// The link's own cadence, independent of everything after it.
+    pub delivery: Delivery,
     pub decode: Decode,
     pub display: Display,
     pub environment: Environment,
@@ -63,6 +65,24 @@ pub struct Network {
     pub observed_dscp_share: f64,
 }
 
+/// What the network delivered, measured where delivery happens.
+///
+/// Kept apart from [`Display`] on purpose. Delivery cadence used to be read
+/// off the presentation clock, and a suspended display link then made a
+/// healthy link look like one stalling for 141 ms at p99. A stage is
+/// measured at that stage or not at all.
+#[derive(Serialize)]
+pub struct Delivery {
+    /// Complete access units the depacketiser handed over.
+    pub delivered: u64,
+    /// Interval between consecutive complete access units, on the receiver's
+    /// own clock. The series a link experiment is ranked by.
+    pub au_interval_p50_ms: f64,
+    pub au_interval_p95_ms: f64,
+    pub au_interval_p99_ms: f64,
+    pub au_interval_max_ms: f64,
+}
+
 #[derive(Serialize)]
 pub struct Decode {
     pub decoded: u64,
@@ -76,6 +96,15 @@ pub struct Decode {
 #[derive(Serialize)]
 pub struct Display {
     pub nominal_hz: f64,
+    /// Whether the display link ran at a rate that makes anything below it a
+    /// measurement.
+    ///
+    /// `false` means the instrument was not observing: the window was behind
+    /// something, the screen slept, the Space changed. Not a failure of the
+    /// pipeline - an absence of evidence about it, and the two must never be
+    /// reported as the same thing.
+    pub cadence_valid: bool,
+    pub invalid_reason: Option<String>,
     pub callbacks: u64,
     pub rendered: u64,
     pub superseded: u64,
@@ -128,9 +157,12 @@ pub struct Window {
     /// ticks. The per-window form of `fresh_tick_ratio`, and the column to
     /// rank a link configuration by.
     pub fresh_pct: f64,
-    /// Cadence of arrivals inside the window. The cumulative figure cannot
-    /// be differenced, so this is the only place a link stall is visible.
-    pub source_interval_p99_ms: f64,
+    /// Interval between complete access units inside the window, measured at
+    /// the depacketiser. A cumulative percentile cannot be differenced, so
+    /// this is the only place a link stall is visible - and it is taken from
+    /// the delivery clock, not the presentation one.
+    pub au_interval_p50_ms: f64,
+    pub au_interval_p99_ms: f64,
     /// The client's `local_age`, not the sender's frame age.
     pub frame_age_p99_ms: f64,
 }

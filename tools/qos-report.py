@@ -38,7 +38,7 @@ def load(path):
         "dscp_share": net["observed_dscp_share"],
         "arrival_p99": net["arrival_p99_ms"],
         "arrival_max": net["arrival_max_ms"],
-        "src_p99": median([w["source_interval_p99_ms"] for w in steady]),
+        "src_p99": median([w["au_interval_p99_ms"] for w in steady]),
         "render_hz": display["rendered"] / seconds,
         "fresh_pct": median([w["fresh_pct"] for w in steady]),
         "age_p99": display["frame_age_p99_ms"],
@@ -59,7 +59,7 @@ def main(directory):
 
     print("per run")
     print(
-        f"{'arm':<12} {'dscp':>5} {'share':>6} {'srcp99':>7} {'arrp99':>7} {'arrmax':>7} "
+        f"{'arm':<12} {'dscp':>5} {'share':>6} {'aup99':>7} {'arrp99':>7} {'arrmax':>7} "
         f"{'rndHz':>6} {'fresh%':>7} {'agep99':>7} {'sup%':>6} {'auloss':>7} {'err':>4}"
     )
     for arm in arms:
@@ -75,7 +75,7 @@ def main(directory):
     print()
     print("medians")
     print(
-        f"{'arm':<12} {'runs':>5} {'dscp':>5} {'srcp99':>7} {'arrp99':>7} {'rndHz':>6} "
+        f"{'arm':<12} {'runs':>5} {'dscp':>5} {'aup99':>7} {'arrp99':>7} {'rndHz':>6} "
         f"{'fresh%':>7} {'agep99':>7} {'auloss':>7}"
     )
     baseline = None
@@ -108,7 +108,7 @@ def main(directory):
             src = median([r["src_p99"] for r in rows]) - baseline["src_p99"]
             hz = median([r["render_hz"] for r in rows]) - baseline["render_hz"]
             age = median([r["age_p99"] for r in rows]) - baseline["age_p99"]
-            print(f"  {arm:<12} srcp99 {src:+7.2f} ms   render {hz:+6.1f} Hz   age p99 {age:+6.2f} ms")
+            print(f"  {arm:<12} aup99  {src:+7.2f} ms   render {hz:+6.1f} Hz   age p99 {age:+6.2f} ms")
     return 0
 
 

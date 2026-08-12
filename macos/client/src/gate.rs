@@ -26,6 +26,11 @@ const STALL_MULTIPLE: f64 = 4.0;
 /// Share of display ticks that may find the slot empty before phase noise
 /// stops being a credible explanation.
 const MAX_EMPTY_TICK_FRACTION: f64 = 0.05;
+/// How far the interval between arriving access units may exceed the source
+/// period at p99 before the link is bunching rather than jittering. One whole
+/// extra period means the link missed a slot and caught up, once in a
+/// hundred - past that the receiver is being fed in groups.
+const MAX_ARRIVAL_MULTIPLE: f64 = 2.0;
 
 /// Everything the gate judges. Every field is measured during the run except
 /// the two marked structural, which record how the code is built.
@@ -62,6 +67,15 @@ pub struct GateInputs {
     /// True when the renderer is driven by the display link, so `empty_ticks`
     /// counts refreshes rather than idle polls.
     pub display_driven: bool,
+    /// False for a run with no renderer at all. Everything downstream of the
+    /// decoder is then unmeasured rather than failing, and the run is judged
+    /// on the link alone.
+    pub presents: bool,
+    /// Interval between complete access units, measured at the depacketiser.
+    /// This is the link's own cadence: it stays a measurement when the
+    /// display link is suspended, which is exactly when the presentation
+    /// series stops being one.
+    pub link: crate::delivery::Window,
     pub snapshot: Snapshot,
     /// Present only when the run went through RTP over UDP.
     pub transport: Option<TransportInputs>,
@@ -246,42 +260,48 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
         },
     });
 
-    // Every decoded frame must be accounted for: shown, deliberately skipped,
-    // or still held. A frame that is none of those has leaked.
-    let accounted = inputs.rendered + inputs.superseded + inputs.still_in_slot;
-    checks.push(Check {
-        name: "frames accounted",
-        owner: Owner::Pipeline,
-        passed: accounted == inputs.decoded,
-        detail: format!(
-            "{} decoded = {} rendered + {} superseded + {} held",
-            inputs.decoded, inputs.rendered, inputs.superseded, inputs.still_in_slot
-        ),
-    });
+    // Everything from here to the transport section is a statement about
+    // presentation, and a run with no renderer has nothing to say about it.
+    // Reporting zeros as failures would bury the link result the run exists
+    // to produce.
+    if inputs.presents {
+        // Every decoded frame must be accounted for: shown, deliberately
+        // skipped, or still held. A frame that is none of those has leaked.
+        let accounted = inputs.rendered + inputs.superseded + inputs.still_in_slot;
+        checks.push(Check {
+            name: "frames accounted",
+            owner: Owner::Pipeline,
+            passed: accounted == inputs.decoded,
+            detail: format!(
+                "{} decoded = {} rendered + {} superseded + {} held",
+                inputs.decoded, inputs.rendered, inputs.superseded, inputs.still_in_slot
+            ),
+        });
 
-    // Every refresh drew a frame, found nothing new, or took a frame and lost
-    // the race for a drawable. There is no fourth outcome, so the three close
-    // on the callback count exactly. Two assumptions ride on that equality and
-    // neither is enforced anywhere else: that the decoder stops publishing
-    // before the drain starts, which is why the whole run's renders can be
-    // compared against the span's refreshes; and that no refresh goes
-    // unaccounted. Publishing into the drain makes the left side outgrow the
-    // right; losing refreshes to a fourth outcome makes it fall short. Either
-    // way the rate in the report is wrong, and this says so rather than
-    // letting it read as a slow link.
-    let accounted = inputs.rendered + inputs.span_empty_ticks + inputs.span_missed_drawables;
-    checks.push(Check {
-        name: "span accounted",
-        owner: Owner::Pipeline,
-        passed: accounted == inputs.span_callbacks,
-        detail: format!(
-            "{} callbacks = {} rendered + {} empty + {} without a drawable",
-            inputs.span_callbacks,
-            inputs.rendered,
-            inputs.span_empty_ticks,
-            inputs.span_missed_drawables
-        ),
-    });
+        // Every refresh drew a frame, found nothing new, or took a frame and
+        // lost the race for a drawable. There is no fourth outcome, so the
+        // three close on the callback count exactly. Two assumptions ride on
+        // that equality and neither is enforced anywhere else: that the
+        // decoder stops publishing before the drain starts, which is why the
+        // whole run's renders can be compared against the span's refreshes;
+        // and that no refresh goes unaccounted. Publishing into the drain
+        // makes the left side outgrow the right; losing refreshes to a fourth
+        // outcome makes it fall short. Either way the rate in the report is
+        // wrong, and this says so rather than letting it read as a slow link.
+        let accounted = inputs.rendered + inputs.span_empty_ticks + inputs.span_missed_drawables;
+        checks.push(Check {
+            name: "span accounted",
+            owner: Owner::Pipeline,
+            passed: accounted == inputs.span_callbacks,
+            detail: format!(
+                "{} callbacks = {} rendered + {} empty + {} without a drawable",
+                inputs.span_callbacks,
+                inputs.rendered,
+                inputs.span_empty_ticks,
+                inputs.span_missed_drawables
+            ),
+        });
+    }
 
     // Two different failures used to share one check. Separating them is the
     // whole point now that the client is permanently on Wi-Fi: the decoder
@@ -291,97 +311,110 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
     // screen: the lower of the source rate and the refresh rate. A 60 fps
     // source on a 120 Hz panel leaves half the refreshes with nothing new by
     // arithmetic, and calling that starvation would condemn a healthy
-    // pipeline.
+    // pipeline. With no renderer there is no such ceiling, and the source
+    // rate is the whole bar.
     let decoded_per_second = inputs.decoded as f64 / inputs.run_seconds.max(f64::EPSILON);
-    let deliverable = inputs.target_fps.min(inputs.display_hz);
+    let deliverable = if inputs.presents {
+        inputs.target_fps.min(inputs.display_hz)
+    } else {
+        inputs.target_fps
+    };
     checks.push(Check {
         name: "decoder keeps up",
         owner: Owner::Pipeline,
         passed: decoded_per_second >= deliverable * 0.99,
+        detail: if inputs.presents {
+            format!(
+                "decoded {decoded_per_second:.1}/s against {deliverable:.1}/s deliverable \
+                 on a {:.1} Hz display",
+                inputs.display_hz
+            )
+        } else {
+            format!("decoded {decoded_per_second:.1}/s against a {deliverable:.1}/s source")
+        },
+    });
+
+    // Measured where delivery happens, not where presentation does.
+    //
+    // This check used to count refreshes that found nothing new, which made
+    // it a statement about the display link and only indirectly about the
+    // radio: a suspended link reported a stalling network while the network
+    // was losing nothing at all. The interval between complete access units
+    // is the same phenomenon seen from the only place that can see it, and it
+    // survives a run with no display attached.
+    let period = Nanos::from_millis_f64(1000.0 / inputs.target_fps.max(1.0));
+    let arrival_limit = period.get() as f64 * MAX_ARRIVAL_MULTIPLE;
+    checks.push(Check {
+        name: "link holds cadence",
+        owner: Owner::Link,
+        passed: inputs.link.delivered > 0 && inputs.link.p99_ms * 1e6 <= arrival_limit,
         detail: format!(
-            "decoded {decoded_per_second:.1}/s against {deliverable:.1}/s deliverable \
-             on a {:.1} Hz display",
-            inputs.display_hz
+            "access units arrive p50 {:.2} ms p95 {:.2} ms p99 {:.2} ms max {:.2} ms \
+             over {} access units, against a {period} source period \
+             ({MAX_ARRIVAL_MULTIPLE:.0}x allowed at p99)",
+            inputs.link.p50_ms,
+            inputs.link.p95_ms,
+            inputs.link.p99_ms,
+            inputs.link.max_ms,
+            inputs.link.delivered
         ),
     });
 
-    // A refresh with nothing new is only meaningful when a tick is a refresh:
-    // a decoder-driven renderer polls, so its empty ticks count spin
-    // iterations and say nothing about anything.
-    let ticks = inputs.rendered + inputs.empty_ticks;
-    let empty_fraction = if ticks == 0 {
-        1.0
-    } else {
-        inputs.empty_ticks as f64 / ticks as f64
-    };
-    let predicted_empty =
-        (1.0 - (inputs.target_fps / inputs.display_hz.max(1.0)).min(1.0)).max(0.0);
-    let unexplained_empty = empty_fraction - predicted_empty;
-    if inputs.display_driven {
+    if inputs.presents {
+        // Whatever the link does, the client must not make it worse.
+        // Presenting no less regularly than frames arrive is the honest test
+        // of that, and it holds on a jittery link as well as a clean one.
+        let arrival_p99 = Nanos::from_millis_f64(inputs.link.p99_ms);
+        let present_p99 = snapshot.present_interval.p99;
         checks.push(Check {
-            name: "link holds cadence",
-            owner: Owner::Link,
-            passed: unexplained_empty <= MAX_EMPTY_TICK_FRACTION,
+            name: "presentation tracks arrival",
+            owner: Owner::Pipeline,
+            passed: present_p99.get() <= arrival_p99.get() + period.get(),
             detail: format!(
-                "{:.2}% of {ticks} refreshes found nothing new, {:.2}% predicted by the \
-                 rate difference; source interval p50 {} p99 {} max {} against a {} period",
-                empty_fraction * 100.0,
-                predicted_empty * 100.0,
-                snapshot.source_interval.p50,
-                snapshot.source_interval.p99,
-                snapshot.source_interval.max,
-                Nanos::from_millis_f64(1000.0 / deliverable.max(1.0)),
+                "present interval p99 {present_p99} against arrival p99 {arrival_p99} \
+                 plus one {period} period"
             ),
         });
     }
 
-    // Whatever the link does, the client must not make it worse. Presenting no
-    // less regularly than frames arrive is the honest test of that, and it
-    // holds on a jittery link as well as a clean one.
-    let arrival_p99 = snapshot.source_interval.p99;
-    let present_p99 = snapshot.present_interval.p99;
-    let period = Nanos::from_millis_f64(1000.0 / deliverable.max(1.0));
-    checks.push(Check {
-        name: "presentation tracks arrival",
-        owner: Owner::Pipeline,
-        passed: present_p99.get() <= arrival_p99.get() + period.get(),
-        detail: format!(
-            "present interval p99 {present_p99} against arrival p99 {arrival_p99} \
-             plus one {period} period"
-        ),
-    });
-
-    // Judged against the period presents actually have, which is set by the
-    // slower of source and display: a 60 fps source on a 120 Hz panel presents
-    // every 16.7 ms by design, and measuring its gaps against the 8.3 ms
-    // refresh would call every normal interval a stall.
-    //
-    // A gap is also only the presenter's fault if the source did not gap
-    // first. When the feed thread loses the CPU for four periods the pipeline
-    // faithfully reproduces that hole, and blaming Metal for it would send the
-    // next investigation to the wrong component. The source gap is reported
-    // either way: in later phases it is the network, and then it stops being
-    // someone else's problem.
-    let present_period = Nanos::from_millis_f64(1000.0 / deliverable.max(1.0));
-    let stall_limit = Nanos((present_period.get() as f64 * STALL_MULTIPLE) as u64);
-    let worst_interval = snapshot.present_interval.max;
-    let worst_source_gap = snapshot.source_interval.max;
-    let inherited = worst_interval <= worst_source_gap;
-    checks.push(Check {
-        name: "no present stalls",
-        owner: Owner::Pipeline,
-        passed: worst_interval <= stall_limit || inherited,
-        detail: format!(
-            "worst present interval {worst_interval} against a {stall_limit} limit \
-         ({STALL_MULTIPLE:.0}x the {present_period} present period); \
-         worst source gap {worst_source_gap}{}",
-            if worst_interval > stall_limit && inherited {
-                " - the stall came in with the source, not from the presenter"
-            } else {
-                ""
-            }
-        ),
-    });
+    if inputs.presents {
+        // Judged against the period presents actually have, which is set by
+        // the slower of source and display: a 60 fps source on a 120 Hz panel
+        // presents every 16.7 ms by design, and measuring its gaps against
+        // the 8.3 ms refresh would call every normal interval a stall.
+        //
+        // A gap is also only the presenter's fault if the source did not gap
+        // first. When the feed thread loses the CPU for four periods the
+        // pipeline faithfully reproduces that hole, and blaming Metal for it
+        // would send the next investigation to the wrong component. The
+        // arrival gap is reported either way, and it comes from the delivery
+        // clock so that a suspended display link cannot excuse a stall.
+        let present_period = Nanos::from_millis_f64(1000.0 / deliverable.max(1.0));
+        let stall_limit = Nanos((present_period.get() as f64 * STALL_MULTIPLE) as u64);
+        let worst_interval = snapshot.present_interval.max;
+        let worst_arrival_gap = Nanos::from_millis_f64(inputs.link.max_ms);
+        // Plus one period, because these are two different clocks now. A
+        // frame that arrives 58 ms late cannot present before the next
+        // refresh, so the presented gap is the arrival gap plus up to one
+        // whole period of quantisation. Demanding it be no larger would
+        // convict the presenter of the display's grid.
+        let inherited = worst_interval.get() <= worst_arrival_gap.get() + present_period.get();
+        checks.push(Check {
+            name: "no present stalls",
+            owner: Owner::Pipeline,
+            passed: worst_interval <= stall_limit || inherited,
+            detail: format!(
+                "worst present interval {worst_interval} against a {stall_limit} limit \
+                 ({STALL_MULTIPLE:.0}x the {present_period} present period); \
+                 worst arrival gap {worst_arrival_gap}{}",
+                if worst_interval > stall_limit && inherited {
+                    " - the stall arrived with the frames, not from the presenter"
+                } else {
+                    ""
+                }
+            ),
+        });
+    }
 
     // Judged after warm-up: filling a decoder pool, compiling a shader and
     // reading a fixture all cost memory once, and a line fitted through them
@@ -423,32 +456,42 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
         ),
     });
 
-    // A frame that never presents is expected here: that is what superseding
-    // means. What must not happen is a frame going missing for any other
-    // reason, so every incomplete timeline has to be explained by one.
-    let unexplained = snapshot
-        .counters
-        .frames_incomplete
-        .saturating_sub(inputs.superseded + inputs.still_in_slot);
-    checks.push(Check { name: "drops explained", owner: Owner::Pipeline, passed: unexplained == 0, detail: format!(
-        "{} frames never presented, {} superseded + {} held explain them ({unexplained} unexplained)",
-        snapshot.counters.frames_incomplete, inputs.superseded, inputs.still_in_slot
-    ) });
+    if inputs.presents {
+        // A frame that never presents is expected here: that is what
+        // superseding means. What must not happen is a frame going missing
+        // for any other reason, so every incomplete timeline has to be
+        // explained by one.
+        let unexplained = snapshot
+            .counters
+            .frames_incomplete
+            .saturating_sub(inputs.superseded + inputs.still_in_slot);
+        checks.push(Check {
+            name: "drops explained",
+            owner: Owner::Pipeline,
+            passed: unexplained == 0,
+            detail: format!(
+                "{} frames never presented, {} superseded + {} held explain them \
+                 ({unexplained} unexplained)",
+                snapshot.counters.frames_incomplete, inputs.superseded, inputs.still_in_slot
+            ),
+        });
 
-    // The gap is allowed to be non-zero here: this pipeline has no capture or
-    // network stages to mark. It is not allowed to be unmeasured.
-    checks.push(Check {
-        name: "gap instrumented",
-        owner: Owner::Pipeline,
-        passed: snapshot.unattributed_gap.count == snapshot.counters.frames_presented
-            && snapshot.counters.frames_presented > 0,
-        detail: format!(
-            "{} of {} presented frames have a measured gap, p99 {}",
-            snapshot.unattributed_gap.count,
-            snapshot.counters.frames_presented,
-            snapshot.unattributed_gap.p99
-        ),
-    });
+        // The gap is allowed to be non-zero here: this pipeline has no
+        // capture or network stages to mark. It is not allowed to be
+        // unmeasured.
+        checks.push(Check {
+            name: "gap instrumented",
+            owner: Owner::Pipeline,
+            passed: snapshot.unattributed_gap.count == snapshot.counters.frames_presented
+                && snapshot.counters.frames_presented > 0,
+            detail: format!(
+                "{} of {} presented frames have a measured gap, p99 {}",
+                snapshot.unattributed_gap.count,
+                snapshot.counters.frames_presented,
+                snapshot.unattributed_gap.p99
+            ),
+        });
+    }
 
     checks.push(Check {
         name: "zero copy path",
@@ -646,6 +689,15 @@ mod tests {
             span_empty_ticks: 0,
             span_missed_drawables: 0,
             display_driven: true,
+            presents: true,
+            // A link delivering exactly on the 8.33 ms source period.
+            link: crate::delivery::Window {
+                delivered: frames,
+                p50_ms: 8.3,
+                p95_ms: 8.4,
+                p99_ms: 8.5,
+                max_ms: 9.0,
+            },
             transport: None,
             memory: flat_trend(200e6, 60),
             snapshot: snapshot_of(Run::of(frames)),
@@ -769,13 +821,16 @@ mod tests {
         // The feed thread loses the CPU for ten refreshes; the pipeline
         // faithfully reproduces the hole. Failing the presenter for that would
         // send the next investigation to the wrong component.
-        let inputs = GateInputs {
+        let mut inputs = GateInputs {
             snapshot: snapshot_of(Run {
                 source_stall_at: Some(2_000),
                 ..Run::of(4_000)
             }),
             ..healthy(4_000)
         };
+        // The hole is in the arrivals, and the delivery clock is where it is
+        // visible: the presenter reproduced a gap it was handed.
+        inputs.link.max_ms = 92.0;
         let verdict = evaluate(&inputs);
         let check = verdict
             .checks
@@ -784,7 +839,7 @@ mod tests {
             .unwrap();
         assert!(check.passed, "{}", check.detail);
         assert!(
-            check.detail.contains("came in with the source"),
+            check.detail.contains("arrived with the frames"),
             "the report must say where the stall came from: {}",
             check.detail
         );
@@ -799,15 +854,47 @@ mod tests {
         // A 60 Hz panel refreshes half as often as the source produces, so it
         // cannot offer more refreshes than it drew.
         inputs.span_callbacks = 2_000;
-        // Half the frames never present, and the cadence follows the 60 Hz
-        // panel rather than the 120 fps source.
+        // Frames arrive on the source's 8.33 ms period and half of them are
+        // superseded, so presents land 16.7 ms apart. Spacing the arrivals at
+        // the panel period instead would have described a 60 fps source,
+        // which is the opposite of what this test is about.
         inputs.snapshot = snapshot_of(Run {
-            period_ms: 16.667,
             supersede_every: Some(2),
             ..Run::of(4_000)
         });
         let verdict = evaluate(&inputs);
         assert!(verdict.passed(), "{verdict}");
+    }
+
+    #[test]
+    fn a_run_with_no_renderer_is_judged_on_the_link_alone() {
+        // Nothing presented, nothing refreshed, nothing drawn: a link-only
+        // run measures delivery and stops. Every presentation number is zero
+        // by construction, and reporting those zeros as failures would bury
+        // the one result the run exists to produce.
+        let mut inputs = healthy(4_000);
+        inputs.presents = false;
+        inputs.rendered = 0;
+        inputs.superseded = 0;
+        inputs.still_in_slot = 0;
+        inputs.span_callbacks = 0;
+        inputs.display_hz = 0.0;
+        inputs.display_driven = false;
+        let verdict = evaluate(&inputs);
+        assert!(verdict.passed(), "{verdict}");
+        assert!(
+            verdict
+                .checks
+                .iter()
+                .any(|check| check.name == "link holds cadence"),
+            "the link verdict is the whole point of the run"
+        );
+        for absent in ["span accounted", "gap instrumented", "no present stalls"] {
+            assert!(
+                !verdict.checks.iter().any(|check| check.name == absent),
+                "{absent} is a statement about presentation"
+            );
+        }
     }
 
     #[test]
@@ -859,6 +946,14 @@ mod tests {
         inputs.rendered = 2_386;
         inputs.superseded = 2_414;
         inputs.empty_ticks = 36;
+        // A 240 fps source delivers on a 4.17 ms period.
+        inputs.link = crate::delivery::Window {
+            delivered: 4_800,
+            p50_ms: 4.1,
+            p95_ms: 4.3,
+            p99_ms: 4.5,
+            max_ms: 5.0,
+        };
         inputs.snapshot = snapshot_of(Run {
             supersede_every: Some(2),
             ..Run::of(4_800)
@@ -913,10 +1008,12 @@ mod tests {
     #[test]
     fn a_bursty_link_fails_the_link_and_not_the_pipeline() {
         // What Wi-Fi actually did: every access unit arrived and decoded, but
-        // in bursts, so refreshes went empty. Blaming the decoder for that
-        // would send the next investigation to the wrong machine.
+        // in bursts. Bunching is a property of the arrivals, so this is
+        // stated on the delivery clock - stating it in empty refreshes is
+        // what let a suspended display link masquerade as a bad radio.
         let mut inputs = healthy(4_000);
-        inputs.empty_ticks = 1_000;
+        inputs.link.p99_ms = 25.0;
+        inputs.link.max_ms = 60.0;
         let verdict = evaluate(&inputs);
         assert!(!verdict.link_passed());
         assert!(verdict.pipeline_passed(), "{verdict}");

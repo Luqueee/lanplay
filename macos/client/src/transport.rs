@@ -254,6 +254,7 @@ pub struct ReceiverOutcome {
 }
 
 /// Reassembles access units and submits them to the decoder.
+#[allow(clippy::too_many_arguments)]
 pub fn receive_loop(
     socket: UdpSocket,
     mut decoder: VideoToolboxDecoder,
@@ -263,6 +264,9 @@ pub fn receive_loop(
     // Bumped for every access unit handed to the decoder, so a watchdog can
     // tell a live stream from a finished one.
     progress: Arc<std::sync::atomic::AtomicU64>,
+    // Delivery cadence, timestamped where delivery happens rather than
+    // inferred from when a frame was eventually shown.
+    delivery: Arc<crate::delivery::Delivery>,
     stop: Arc<AtomicBool>,
 ) -> Result<(ReceiverOutcome, VideoToolboxDecoder), Box<dyn Error + Send + Sync>> {
     socket.set_read_timeout(Some(RECV_TIMEOUT))?;
@@ -316,6 +320,10 @@ pub fn receive_loop(
 
         if let Some(unit) = depacketizer.push(bytes, arrival) {
             recorder.mark(unit.id, Stage::FrameReassembled);
+            // Before the decoder, before the sink, before anything that
+            // could block: this is the instant the network finished with the
+            // frame, and nothing downstream may be allowed to move it.
+            delivery.completed(arrival);
             match ledger.check(unit.id, &unit.data) {
                 Some(true) => outcome.verified += 1,
                 Some(false) => outcome.mismatched += 1,

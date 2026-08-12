@@ -30,7 +30,7 @@ pub use backend::{
 #[cfg(windows)]
 pub use dda::DesktopDuplication;
 #[cfg(windows)]
-pub use device::{CaptureDevice, DeviceIdentity};
+pub use device::{CaptureDevice, DeviceIdentity, OutputInfo, output_named, outputs};
 #[cfg(windows)]
 pub use texture_pool::{PoolHandle, TexturePool};
 #[cfg(windows)]

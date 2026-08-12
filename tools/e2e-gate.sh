@@ -105,8 +105,14 @@ echo "source    $(printf '%s' "$source_state" | tr -d '\r' | grep -E '^monitor' 
 # The negative control is in the same position: it answers a question about
 # the decoder, and reaches preflight within a second of launch, before any
 # raise could land.
+# `LINK_ONLY=1` drops the renderer entirely: no window, no display link, no
+# AppKit. Delivery, loss, reordering and decode are all measured before
+# anything reaches a screen, so a radio experiment has no business waiting on
+# one. Runs that rank on presentation still need the window and still say so.
 DISPLAY_ARG="--require-clean-display"
-if [ "${PARAMETER_SETS:-host}" = "fixture" ] || [ "${REQUIRE_CLEAN_DISPLAY:-1}" = "0" ]; then
+if [ "${LINK_ONLY:-0}" = "1" ]; then
+    DISPLAY_ARG="--link-only"
+elif [ "${PARAMETER_SETS:-host}" = "fixture" ] || [ "${REQUIRE_CLEAN_DISPLAY:-1}" = "0" ]; then
     DISPLAY_ARG=""
 fi
 
@@ -192,7 +198,7 @@ Get-Process lanplay-nvenc-probe -ErrorAction SilentlyContinue | Stop-Process -Fo
 # a capture p50 of exactly one frame period and a throughput near 110, with
 # nothing downstream at fault. Uncapped follows the source, which is what the
 # product does anyway.
-& \$probe --mode uncapped --input nv12 --source dda --output 1 --send-to $LOCAL_IP:$PORT --control-port $CONTROL_PORT --service-class ${SERVICE_CLASS:-best-effort} --mtu ${MTU:-1200} --seconds $SECONDS_TO_RUN --warmup 0 --fps 120 --width 1920 --height 1080 --bitrate-mbps $BITRATE --preset p1 --tuning ll --idr-interval 120 --window-seconds 10
+& \$probe --mode uncapped --input nv12 --source dda --output-name IDD-LAB --send-to $LOCAL_IP:$PORT --control-port $CONTROL_PORT --service-class ${SERVICE_CLASS:-best-effort} --mtu ${MTU:-1200} --seconds $SECONDS_TO_RUN --warmup 0 --fps 120 --width 1920 --height 1080 --bitrate-mbps $BITRATE --preset p1 --tuning ll --idr-interval 120 --window-seconds 10
 exit \$LASTEXITCODE
 PS1
 scp -q "$LOCAL_RUNNER" "windows:$(printf '%s' "$RUNNER" | tr '\\' '/')"

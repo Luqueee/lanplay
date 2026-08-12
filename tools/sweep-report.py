@@ -67,7 +67,7 @@ def client_metrics(path):
         "age_p99": display["frame_age_p99_ms"],
         "superseded_pct": 100.0 * display["superseded"] / offered if offered else 0.0,
         "worst_window_render": min((w["render_hz"] for w in steady), default=float("nan")),
-        "src_p99": median([w["source_interval_p99_ms"] for w in steady]),
+        "src_p99": median([w["au_interval_p99_ms"] for w in steady]),
         "windows": len(steady),
     }
 
@@ -93,7 +93,7 @@ def main(directory):
     header = (
         f"{'Mbps':>5} {'host':>5} {'hfps':>6} {'late':>5} {'encp99':>7} "
         f"{'AUs':>10} {'ploss':>6} {'auloss':>6} {'arrp99':>7} {'arrmax':>7} "
-        f"{'rndHz':>6} {'wrst':>6} {'srcp99':>7} {'agep99':>7} {'sup%':>5}"
+        f"{'rndHz':>6} {'wrst':>6} {'aup99':>7} {'agep99':>7} {'sup%':>5}"
     )
     print(header)
     for bitrate in sorted(runs, reverse=True):
@@ -111,7 +111,7 @@ def main(directory):
     print("medians")
     print(
         f"{'Mbps':>5} {'runs':>5} {'auloss':>7} {'ploss':>7} {'arrp99':>7} {'arrmax':>8} "
-        f"{'rndHz':>6} {'wrst':>6} {'srcp99':>7} {'agep99':>7} {'late':>5}"
+        f"{'rndHz':>6} {'wrst':>6} {'aup99':>7} {'agep99':>7} {'late':>5}"
     )
     for bitrate in sorted(runs, reverse=True):
         rows = runs[bitrate]

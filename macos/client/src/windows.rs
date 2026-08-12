@@ -20,6 +20,7 @@ use crate::report::Window;
 /// Samples both halves of the picture on one timer: the renderer's counters
 /// and the telemetry window have to describe the same slice of time, and
 /// reading them from different threads would smear the boundary.
+#[allow(clippy::too_many_arguments)]
 pub fn sample(
     telemetry: &Telemetry,
     counters: &Arc<LiveCounters>,
@@ -27,6 +28,10 @@ pub fn sample(
     decoder: &DecoderCounters,
     // Access units handed to the decoder, bumped by whatever feeds it.
     arrived: &Arc<std::sync::atomic::AtomicU64>,
+    // Delivery cadence for this window, taken from the depacketiser rather
+    // than from the presentation clock: a suspended display link must not be
+    // able to make a healthy link look like a stalling one.
+    delivery: &Arc<crate::delivery::Delivery>,
     every: Duration,
     stop: &Arc<AtomicBool>,
 ) -> Vec<Window> {
@@ -47,6 +52,7 @@ pub fn sample(
         }
 
         let taken = telemetry.take_window();
+        let link = delivery.take_window();
         let callbacks = counters.callbacks.load(Ordering::Relaxed);
         let rendered = counters.rendered.load(Ordering::Relaxed);
         let decoded = decoder.decoded();
@@ -82,7 +88,11 @@ pub fn sample(
             } else {
                 drawn as f64 * 100.0 / ticks as f64
             },
-            source_interval_p99_ms: taken.source_interval.p99.as_millis_f64(),
+            // Delivery cadence, measured at the depacketiser. Replaces the
+            // presentation-derived series, which said 141 ms at p99 while
+            // the link was losing nothing at all.
+            au_interval_p50_ms: link.p50_ms,
+            au_interval_p99_ms: link.p99_ms,
             frame_age_p99_ms: taken.local_age.p99.as_millis_f64(),
         });
 
@@ -115,6 +125,7 @@ pub fn spawn(
     slot: Arc<LatestFrameSlot>,
     decoder: DecoderCounters,
     arrived: Arc<std::sync::atomic::AtomicU64>,
+    delivery: Arc<crate::delivery::Delivery>,
     every: Duration,
     stop: Arc<AtomicBool>,
 ) -> thread::JoinHandle<Vec<Window>> {
@@ -122,7 +133,7 @@ pub fn spawn(
         .name("windows".into())
         .spawn(move || {
             sample(
-                &telemetry, &counters, &slot, &decoder, &arrived, every, &stop,
+                &telemetry, &counters, &slot, &decoder, &arrived, &delivery, every, &stop,
             )
         })
         .expect("spawn window sampler")
@@ -142,7 +153,8 @@ mod tests {
             render_hz: callback_hz,
             superseded_pct: 0.0,
             fresh_pct: 100.0,
-            source_interval_p99_ms: 8.3,
+            au_interval_p50_ms: 8.3,
+            au_interval_p99_ms: 8.3,
             frame_age_p99_ms: 9.0,
         }
     }

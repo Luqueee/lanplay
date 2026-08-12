@@ -288,6 +288,7 @@ name = "lanplay-client"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "hdrhistogram",
  "lanplay-decoder-videotoolbox",
  "lanplay-protocol",
  "lanplay-renderer-metal",

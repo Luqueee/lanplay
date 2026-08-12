@@ -14,6 +14,12 @@
 
 use core::fmt;
 
+use windows::Win32::Devices::Display::{
+    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+    DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
+    DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME, DisplayConfigGetDeviceInfo,
+    GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
+};
 use windows::Win32::Foundation::{HMODULE, LUID};
 use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
@@ -26,6 +32,7 @@ use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_ERROR_INVALID_CALL, IDXGIAdapter1, IDXGIDevice, IDXGIFactory1,
     IDXGIOutput,
 };
+use windows::Win32::Graphics::Gdi::{DISPLAY_DEVICEW, EnumDisplayDevicesW};
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
@@ -63,6 +70,216 @@ impl fmt::Display for DeviceIdentity {
             self.output_width,
             self.output_height
         )
+    }
+}
+
+/// One attached output, as DXGI enumerates it, paired with the name Windows
+/// shows for the monitor on the other end of it.
+///
+/// DXGI identifies an output by a position in a list and a GDI device name,
+/// and neither survives plugging a monitor in: attaching a display renumbers
+/// `\\.\DISPLAYn` and shifts every index after it. The monitor's own name
+/// does survive, which is the only reason a benchmark can name its source
+/// once and still be measuring it a week later.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutputInfo {
+    /// The index [`CaptureDevice::open`] takes, valid only until the set of
+    /// attached displays changes.
+    pub index: u32,
+    /// `\\.\DISPLAY10`, and just as perishable as the index.
+    pub device_name: String,
+    /// What Windows calls the monitor, e.g. `LG ULTRAWIDE`. Empty for a
+    /// display with no EDID name of its own, which includes indirect
+    /// displays: an IddCx monitor is named by its driver, not by itself.
+    pub monitor_name: String,
+    /// The GDI adapter behind the output, e.g. `LanPlay IDD-LAB 1080p120`
+    /// or `NVIDIA GeForce RTX 4060 Ti`. For an indirect display this is the
+    /// only distinctive name there is.
+    pub adapter_name: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl fmt::Display for OutputInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} {} {}x{} \"{}\" via \"{}\"",
+            self.index,
+            self.device_name,
+            self.width,
+            self.height,
+            self.monitor_name,
+            self.adapter_name
+        )
+    }
+}
+
+/// Every output of the first adapter that has any, in the order
+/// [`CaptureDevice::open`] indexes them.
+pub fn outputs() -> Result<Vec<OutputInfo>, CaptureError> {
+    // SAFETY: every call takes valid pointers and its result is checked
+    // before use; the COM objects are refcounted by `windows`.
+    unsafe {
+        let factory: IDXGIFactory1 = CreateDXGIFactory1().map_err(|e| CaptureError::Api {
+            call: "CreateDXGIFactory1",
+            hresult: e.code().0,
+        })?;
+        let mut found = Vec::new();
+        for adapter_index in 0.. {
+            let Ok(adapter) = factory.EnumAdapters1(adapter_index) else {
+                break;
+            };
+            for index in 0.. {
+                let Ok(output) = adapter.EnumOutputs(index) else {
+                    break;
+                };
+                let desc = output.GetDesc().map_err(|e| CaptureError::Api {
+                    call: "IDXGIOutput::GetDesc",
+                    hresult: e.code().0,
+                })?;
+                let device_name = String::from_utf16_lossy(trim_nul(&desc.DeviceName));
+                found.push(OutputInfo {
+                    index,
+                    monitor_name: monitor_name(&desc.DeviceName),
+                    adapter_name: adapter_name(&desc.DeviceName),
+                    device_name,
+                    width: (desc.DesktopCoordinates.right - desc.DesktopCoordinates.left) as u32,
+                    height: (desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top) as u32,
+                });
+            }
+            // The first adapter with outputs is the one `open` will pick, so
+            // listing a second adapter's outputs would list indices `open`
+            // cannot reach.
+            if !found.is_empty() {
+                break;
+            }
+        }
+        Ok(found)
+    }
+}
+
+/// Resolves a name fragment to the index `open` takes, matching the monitor
+/// name, the adapter name or the GDI device name.
+///
+/// Ambiguity is an error rather than a first match: a sweep that silently
+/// changed which display it measured is the failure this exists to prevent.
+pub fn output_named(fragment: &str) -> Result<u32, CaptureError> {
+    let all = outputs()?;
+    let matched: Vec<&OutputInfo> = all
+        .iter()
+        .filter(|o| {
+            o.monitor_name.contains(fragment)
+                || o.adapter_name.contains(fragment)
+                || o.device_name.contains(fragment)
+        })
+        .collect();
+    let listing = || {
+        all.iter()
+            .map(|o| o.to_string())
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    match matched.as_slice() {
+        [one] => Ok(one.index),
+        [] => Err(CaptureError::Unsupported(format!(
+            "no output matches {fragment:?}; attached: {}",
+            listing()
+        ))),
+        many => Err(CaptureError::Unsupported(format!(
+            "{} outputs match {fragment:?}; attached: {}",
+            many.len(),
+            listing()
+        ))),
+    }
+}
+
+/// The GDI adapter string for a display device name.
+///
+/// This is the driver's own name for the thing driving the output, which is
+/// what identifies an indirect display: an IddCx monitor exposes no EDID
+/// name, so the adapter is the only place `LanPlay IDD-LAB 1080p120` appears.
+fn adapter_name(device_name: &[u16; 32]) -> String {
+    let wanted = trim_nul(device_name);
+    for index in 0.. {
+        let mut adapter = DISPLAY_DEVICEW {
+            cb: core::mem::size_of::<DISPLAY_DEVICEW>() as u32,
+            ..Default::default()
+        };
+        // SAFETY: `adapter` is correctly sized and the null device name asks
+        // for adapter enumeration, which is what the loop index is for.
+        let ok = unsafe { EnumDisplayDevicesW(None, index, &mut adapter, 0) };
+        if !ok.as_bool() {
+            break;
+        }
+        if trim_nul(&adapter.DeviceName) == wanted {
+            return String::from_utf16_lossy(trim_nul(&adapter.DeviceString));
+        }
+    }
+    String::new()
+}
+
+/// The monitor's friendly name for a GDI device name, e.g. `LG ULTRAWIDE`
+/// for `\\.\DISPLAY1`.
+///
+/// `EnumDisplayDevices` is the obvious call and the wrong one: it answers
+/// `Generic PnP Monitor` for everything with a standard driver, which is
+/// every monitor worth telling apart. The name a user sees comes from the
+/// display topology, which has to be walked from source to target.
+fn monitor_name(device_name: &[u16; 32]) -> String {
+    let wanted = trim_nul(device_name);
+    // SAFETY: sizes come from the same call that fills the buffers, every
+    // request packet is zeroed and carries its own size, and nothing escapes.
+    unsafe {
+        let mut paths = 0u32;
+        let mut modes = 0u32;
+        if GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut paths, &mut modes).is_err() {
+            return String::new();
+        }
+        let mut path_buf = vec![DISPLAYCONFIG_PATH_INFO::default(); paths as usize];
+        let mut mode_buf = vec![DISPLAYCONFIG_MODE_INFO::default(); modes as usize];
+        if QueryDisplayConfig(
+            QDC_ONLY_ACTIVE_PATHS,
+            &mut paths,
+            path_buf.as_mut_ptr(),
+            &mut modes,
+            mode_buf.as_mut_ptr(),
+            None,
+        )
+        .is_err()
+        {
+            return String::new();
+        }
+
+        for path in &path_buf[..paths as usize] {
+            let mut source = DISPLAYCONFIG_SOURCE_DEVICE_NAME {
+                header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+                    r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+                    size: core::mem::size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32,
+                    adapterId: path.sourceInfo.adapterId,
+                    id: path.sourceInfo.id,
+                },
+                ..Default::default()
+            };
+            if DisplayConfigGetDeviceInfo(&mut source.header) != 0
+                || trim_nul(&source.viewGdiDeviceName) != wanted
+            {
+                continue;
+            }
+            let mut target = DISPLAYCONFIG_TARGET_DEVICE_NAME {
+                header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+                    r#type: DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+                    size: core::mem::size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>() as u32,
+                    adapterId: path.targetInfo.adapterId,
+                    id: path.targetInfo.id,
+                },
+                ..Default::default()
+            };
+            if DisplayConfigGetDeviceInfo(&mut target.header) == 0 {
+                return String::from_utf16_lossy(trim_nul(&target.monitorFriendlyDeviceName));
+            }
+        }
+        String::new()
     }
 }
 
