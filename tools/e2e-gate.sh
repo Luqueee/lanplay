@@ -112,6 +112,25 @@ CLIENT_LOG="$(mktemp -t e2e-gate-client)"
 CLIENT_PID=$!
 trap 'kill "$CLIENT_PID" 2>/dev/null || true; restore_clocks' EXIT
 
+# The renderer refuses to measure an occluded window, and it does not
+# preflight until the host has answered - which is fifteen seconds after the
+# client starts negotiating. A raise loop that stops at the negotiation
+# marker leaves that whole gap unguarded, and anything that comes forward in
+# it fails the run for a reason that has nothing to do with the link. This
+# has cost five runs of a nine-run sweep, so the raiser now runs for as long
+# as the client does.
+raise_window() {
+    while kill -0 "$CLIENT_PID" 2>/dev/null; do
+        osascript \
+            -e 'tell application "System Events" to tell process "lanplay-client" to set frontmost to true' \
+            -e 'tell application "System Events" to tell process "lanplay-client" to perform action "AXRaise" of window 1' \
+            >/dev/null 2>&1 || true
+        sleep 0.5
+    done
+}
+raise_window &
+RAISER_PID=$!
+trap 'kill "$CLIENT_PID" "$RAISER_PID" 2>/dev/null || true; restore_clocks' EXIT
 
 # The receiver blocks on the host's VideoConfig before it can build a
 # decoder, so the marker to wait for is the moment it starts negotiating,
@@ -123,10 +142,6 @@ for _ in $(seq 1 100); do
     if grep -qE "$READY" "$CLIENT_LOG" 2>/dev/null; then
         break
     fi
-    osascript \
-        -e 'tell application "System Events" to tell process "lanplay-client" to set frontmost to true' \
-        -e 'tell application "System Events" to tell process "lanplay-client" to perform action "AXRaise" of window 1' \
-        >/dev/null 2>&1 || true
     sleep 0.2
 done
 grep -qE "$READY" "$CLIENT_LOG" || {
@@ -159,7 +174,7 @@ Get-Process lanplay-nvenc-probe -ErrorAction SilentlyContinue | Stop-Process -Fo
 # a capture p50 of exactly one frame period and a throughput near 110, with
 # nothing downstream at fault. Uncapped follows the source, which is what the
 # product does anyway.
-& \$probe --mode uncapped --input nv12 --source dda --output 1 --send-to $LOCAL_IP:$PORT --control-port $CONTROL_PORT --service-class ${SERVICE_CLASS:-best-effort} --mtu 1200 --seconds $SECONDS_TO_RUN --warmup 0 --fps 120 --width 1920 --height 1080 --bitrate-mbps $BITRATE --preset p1 --tuning ll --idr-interval 120 --window-seconds 10
+& \$probe --mode uncapped --input nv12 --source dda --output 1 --send-to $LOCAL_IP:$PORT --control-port $CONTROL_PORT --service-class ${SERVICE_CLASS:-best-effort} --mtu ${MTU:-1200} --seconds $SECONDS_TO_RUN --warmup 0 --fps 120 --width 1920 --height 1080 --bitrate-mbps $BITRATE --preset p1 --tuning ll --idr-interval 120 --window-seconds 10
 exit \$LASTEXITCODE
 PS1
 scp -q "$LOCAL_RUNNER" "windows:$(printf '%s' "$RUNNER" | tr '\\' '/')"

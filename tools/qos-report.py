@@ -40,7 +40,7 @@ def load(path):
         "arrival_max": net["arrival_max_ms"],
         "src_p99": median([w["source_interval_p99_ms"] for w in steady]),
         "render_hz": display["rendered"] / seconds,
-        "empty_pct": median([w["empty_pct"] for w in steady]),
+        "fresh_pct": median([w["fresh_pct"] for w in steady]),
         "age_p99": display["frame_age_p99_ms"],
         "superseded_pct": 100.0 * display["superseded"] / offered if offered else 0.0,
         "au_loss": stream["au_loss"],
@@ -60,7 +60,7 @@ def main(directory):
     print("per run")
     print(
         f"{'arm':<12} {'dscp':>5} {'share':>6} {'srcp99':>7} {'arrp99':>7} {'arrmax':>7} "
-        f"{'rndHz':>6} {'empty%':>7} {'agep99':>7} {'sup%':>6} {'auloss':>7} {'err':>4}"
+        f"{'rndHz':>6} {'fresh%':>7} {'agep99':>7} {'sup%':>6} {'auloss':>7} {'err':>4}"
     )
     for arm in arms:
         for row in arms[arm]:
@@ -68,7 +68,7 @@ def main(directory):
             print(
                 f"{arm:<12} {dscp:>5} {row['dscp_share']:>5.0f}% {row['src_p99']:>7.2f} "
                 f"{row['arrival_p99']:>7.2f} {row['arrival_max']:>7.1f} {row['render_hz']:>6.1f} "
-                f"{row['empty_pct']:>7.1f} {row['age_p99']:>7.2f} {row['superseded_pct']:>6.1f} "
+                f"{row['fresh_pct']:>7.1f} {row['age_p99']:>7.2f} {row['superseded_pct']:>6.1f} "
                 f"{row['au_loss']:>7} {row['errors']:>4}"
             )
 
@@ -76,7 +76,7 @@ def main(directory):
     print("medians")
     print(
         f"{'arm':<12} {'runs':>5} {'dscp':>5} {'srcp99':>7} {'arrp99':>7} {'rndHz':>6} "
-        f"{'empty%':>7} {'agep99':>7} {'auloss':>7}"
+        f"{'fresh%':>7} {'agep99':>7} {'auloss':>7}"
     )
     baseline = None
     for arm, rows in arms.items():
@@ -94,7 +94,7 @@ def main(directory):
             f"{summary['src_p99']:>7.2f} "
             f"{median([r['arrival_p99'] for r in rows]):>7.2f} "
             f"{summary['render_hz']:>6.1f} "
-            f"{median([r['empty_pct'] for r in rows]):>7.1f} "
+            f"{median([r['fresh_pct'] for r in rows]):>7.1f} "
             f"{summary['age_p99']:>7.2f} "
             f"{median([r['au_loss'] for r in rows]):>7.0f}"
         )

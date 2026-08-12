@@ -73,13 +73,14 @@ pub fn sample(
             } else {
                 superseded as f64 * 100.0 / offered as f64
             },
-            // A refresh with nothing new to show. High is not automatically
-            // wrong - a 60 fps source on a 120 Hz panel empties half of them
-            // by arithmetic - but a jump between windows is a stall.
-            empty_pct: if ticks == 0 {
+            // Ticks that carried something new. Stated this way round because
+            // it is the number a link configuration is ranked by: 100% means
+            // every refresh opportunity was used, and bunching shows up here
+            // before it shows up anywhere else.
+            fresh_pct: if ticks == 0 {
                 0.0
             } else {
-                (ticks - drawn) as f64 * 100.0 / ticks as f64
+                drawn as f64 * 100.0 / ticks as f64
             },
             source_interval_p99_ms: taken.source_interval.p99.as_millis_f64(),
             frame_age_p99_ms: taken.local_age.p99.as_millis_f64(),
@@ -140,7 +141,7 @@ mod tests {
             decode_hz: callback_hz,
             render_hz: callback_hz,
             superseded_pct: 0.0,
-            empty_pct: 0.0,
+            fresh_pct: 100.0,
             source_interval_p99_ms: 8.3,
             frame_age_p99_ms: 9.0,
         }

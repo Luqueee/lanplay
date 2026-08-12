@@ -82,6 +82,15 @@ pub struct Display {
     pub empty_refreshes: u64,
     pub callback_interval_p50_ms: f64,
     pub callback_interval_p95_ms: f64,
+    /// Share of display ticks that had a frame newer than the one shown at
+    /// the previous tick.
+    ///
+    /// The experience metric. Rendered frames per second says how many
+    /// pictures were drawn; this says how many of the viewer's refresh
+    /// opportunities carried something new, which is what bunching actually
+    /// costs: three ticks with nothing followed by one tick where three
+    /// frames arrive and two are discarded.
+    pub fresh_tick_ratio: f64,
     pub callback_interval_p99_ms: f64,
     pub callback_interval_max_ms: f64,
     /// The client's `local_age`: first local mark to present. Not the sender's
@@ -115,8 +124,10 @@ pub struct Window {
     pub decode_hz: f64,
     pub render_hz: f64,
     pub superseded_pct: f64,
-    /// Refreshes that found nothing new, as a share of the window's ticks.
-    pub empty_pct: f64,
+    /// Ticks that had something new to show, as a share of the window's
+    /// ticks. The per-window form of `fresh_tick_ratio`, and the column to
+    /// rank a link configuration by.
+    pub fresh_pct: f64,
     /// Cadence of arrivals inside the window. The cumulative figure cannot
     /// be differenced, so this is the only place a link stall is visible.
     pub source_interval_p99_ms: f64,

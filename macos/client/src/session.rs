@@ -574,7 +574,7 @@ fn print_windows(windows: &[crate::report::Window]) {
     println!("Windows");
     println!(
         "  {:>12}  {:>7} {:>7} {:>7} {:>7}  {:>8} {:>8}  {:>7} {:>7}",
-        "window", "src/s", "dec/s", "rnd/s", "tick/s", "srcp99", "agep99", "super%", "empty%"
+        "window", "src/s", "dec/s", "rnd/s", "tick/s", "srcp99", "agep99", "super%", "fresh%"
     );
     for window in windows {
         println!(
@@ -588,7 +588,7 @@ fn print_windows(windows: &[crate::report::Window]) {
             window.source_interval_p99_ms,
             window.frame_age_p99_ms,
             window.superseded_pct,
-            window.empty_pct
+            window.fresh_pct
         );
     }
 }
@@ -708,6 +708,20 @@ fn report(
     println!("  rendered         {}", render.rendered);
     println!("  superseded       {}", render.superseded);
     println!("  empty ticks      {}", render.empty_ticks);
+    // The experience number: how many of the viewer's refresh opportunities
+    // carried something new. Rendered frames per second counts pictures
+    // drawn; this counts opportunities used, which is what bunching costs.
+    let ticks = render.rendered + render.empty_ticks;
+    println!(
+        "  fresh ticks      {:.1}% ({} of {} refreshes had a newer frame)",
+        if ticks == 0 {
+            0.0
+        } else {
+            render.rendered as f64 * 100.0 / ticks as f64
+        },
+        render.rendered,
+        ticks
+    );
     println!("  drawable wait    {}", render.drawable_wait);
     println!("  encode cpu       {}", render.encode_cpu);
 
@@ -926,6 +940,14 @@ fn build_report(
             rendered: render.rendered,
             superseded: render.superseded,
             empty_refreshes: span_end.empty_ticks(render.empty_ticks),
+            fresh_tick_ratio: {
+                let ticks = span_end.callbacks(render.callbacks);
+                if ticks == 0 {
+                    0.0
+                } else {
+                    render.rendered as f64 * 100.0 / ticks as f64
+                }
+            },
             callback_interval_p50_ms: render.callback_interval.p50.as_millis_f64(),
             callback_interval_p95_ms: render.callback_interval.p95.as_millis_f64(),
             callback_interval_p99_ms: render.callback_interval.p99.as_millis_f64(),
