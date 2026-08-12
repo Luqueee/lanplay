@@ -9,6 +9,7 @@ members = [
     "macos/decoder-videotoolbox",
     "macos/renderer-metal",
     "tools/benchmark",
+    "tools/radio-sample",
     "tools/capture-bench",
     "tools/net-bench",
     "tools/present-source",

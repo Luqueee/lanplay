@@ -41,15 +41,20 @@ def radio(directory, name):
 
     rssi = numbers("rssi_dbm")
     rate = numbers("tx_rate_mbps")
-    mcs = numbers("mcs")
+    noise = numbers("noise_dbm")
+    # Channel and width together: an access point that moves between
+    # sessions changes both, and comparing positions across a move of either
+    # would be comparing two different links.
+    channels = sorted(
+        {f"{r['channel']}/{r.get('width_mhz', '?')}" for r in rows if r.get("channel")}
+    )
     return {
         "n": len(rows),
         "rssi": statistics.median(rssi) if rssi else None,
         "rssi_min": min(rssi) if rssi else None,
-        "noise": statistics.median(numbers("noise_dbm")) if numbers("noise_dbm") else None,
+        "noise": statistics.median(noise) if noise else None,
         "rate": statistics.median(rate) if rate else None,
-        "mcs": statistics.median(mcs) if mcs else None,
-        "channel": "/".join(sorted({r["channel"] for r in rows if r.get("channel")})),
+        "channel": "/".join(channels),
     }
 
 
@@ -77,7 +82,7 @@ def link(report):
 
 
 HEAD = (
-    f"{'run':<14} {'rssi':>5} {'mcs':>4} {'phy':>6} {'chan':>18} "
+    f"{'run':<16} {'rssi':>5} {'noise':>6} {'phy':>6} {'ch/MHz':>9} "
     f"{'aup50':>6} {'aup95':>6} {'aup99':>6} {'aumax':>7} "
     f"{'spn99':>6} {'spnmx':>6} {'reord':>6} {'dpth':>5} "
     f"{'fil99':>6} {'filmx':>6} {'ploss':>6} {'auloss':>6}"
@@ -88,11 +93,11 @@ def row(name, measured, air):
     air = air or {}
     fill99 = measured["fill_p99"]
     return (
-        f"{name:<14} "
+        f"{name:<16} "
         f"{air.get('rssi') or float('nan'):>5.0f} "
-        f"{air.get('mcs') or float('nan'):>4.0f} "
+        f"{air.get('noise') or float('nan'):>6.0f} "
         f"{air.get('rate') or float('nan'):>6.0f} "
-        f"{air.get('channel', '?'):>18} "
+        f"{air.get('channel') or '?':>9} "
         f"{measured['au_p50']:>6.2f} {measured['au_p95']:>6.2f} "
         f"{measured['au_p99']:>6.2f} {measured['au_max']:>7.2f} "
         f"{measured['span_p99']:>6.2f} {measured['span_max']:>6.2f} "
@@ -135,7 +140,7 @@ def main(directories):
             }
             air = {
                 key: median_of([a.get(key) for _, a in items])
-                for key in ("rssi", "mcs", "rate")
+                for key in ("rssi", "noise", "rate")
             }
             air["channel"] = "/".join(
                 sorted({a.get("channel", "") for _, a in items if a.get("channel")})

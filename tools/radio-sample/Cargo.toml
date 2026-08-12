@@ -1,0 +1,13 @@
+[package]
+name = "lanplay-radio-sample"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "radio-sample"
+path = "src/main.rs"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true }

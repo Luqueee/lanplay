@@ -44,9 +44,8 @@ echo "output    $OUT"
 settle() {
     local previous="" current="" stable=0 attempt
     for attempt in $(seq 1 30); do
-        current="$(system_profiler SPAirPortDataType 2>/dev/null |
-            sed -n '/Current Network Information/,/Other Local/p' |
-            awk -F': *' '/Channel|PHY Mode/{print $2}' | tr '\n' ' ')"
+        current="$("$REPO/target/release/radio-sample" 1 100 2>/dev/null |
+            tail -1 | cut -d, -f6,7,8)"
         if [ -n "$current" ] && [ "$current" = "$previous" ]; then
             stable=$((stable + 1))
             [ "$stable" -ge 2 ] && {
@@ -66,8 +65,12 @@ settle
 
 for rep in $(seq 1 "$REPEATS"); do
     printf '\n[%d/%d] %s\n' "$rep" "$REPEATS" "$LABEL"
-    "$REPO/tools/wifi-sample.sh" "$OUT/$LABEL-r$rep.wifi.csv" $((SECONDS_TO_RUN + 30)) \
-        >/dev/null 2>&1 &
+    # Never system_profiler: its report lists other networks, which it can
+    # only fill by scanning, and a scan takes the radio off channel. Doing
+    # that once a second turned an 11 ms p99 into a 133 ms one - the
+    # instrument manufactured the bunching this experiment looks for.
+    "$REPO/target/release/radio-sample" $((SECONDS_TO_RUN + 30)) 1000 \
+        >"$OUT/$LABEL-r$rep.wifi.csv" 2>/dev/null &
     sampler=$!
     IFACE="$IFACE" BITRATE="$BITRATE" MTU="$MTU" LINK_ONLY=1 QUIET=1 \
         REPORT="$OUT/$LABEL-r$rep.json" \

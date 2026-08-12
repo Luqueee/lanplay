@@ -376,6 +376,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lanplay-radio-sample"
+version = "0.1.0"
+dependencies = [
+ "objc2",
+]
+
+[[package]]
 name = "lanplay-renderer-metal"
 version = "0.1.0"
 dependencies = [

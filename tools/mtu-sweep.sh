@@ -12,7 +12,12 @@
 # It may equally do nothing, which is a cheap answer to have.
 #
 # The radio is sampled alongside every run, so a collapsed window can be
-# checked against RSSI and PHY rate instead of guessed at.
+# checked against RSSI and PHY rate instead of guessed at. Read from
+# CoreWLAN, never system_profiler: that tool scans, and scanning is what a
+# link measurement must not do to itself.
+#
+# Results from before that was understood are not comparable with these: the
+# old sampler drove p99 access unit arrival from 11 ms to 133 ms on its own.
 #
 # usage:
 #   tools/mtu-sweep.sh [seconds]
@@ -45,8 +50,8 @@ index=0
 while read -r size rep; do
     index=$((index + 1))
     printf '\n[%d/%d] mtu %s run %s\n' "$index" "$total" "$size" "$rep"
-    "$REPO/tools/wifi-sample.sh" "$OUT/$size-r$rep.wifi.csv" $((SECONDS_TO_RUN + 30)) \
-        >/dev/null 2>&1 &
+    "$REPO/target/release/radio-sample" $((SECONDS_TO_RUN + 30)) 1000 \
+        >"$OUT/$size-r$rep.wifi.csv" 2>/dev/null &
     sampler=$!
     IFACE="$IFACE" BITRATE="$BITRATE" MTU="$size" QUIET=1 \
         REPORT="$OUT/$size-r$rep.json" \
@@ -70,7 +75,7 @@ for path in sorted(glob.glob(f"{sys.argv[1]}/*.wifi.csv")):
         continue
     rssi = [float(r["rssi_dbm"]) for r in rows]
     rate = [float(r["tx_rate_mbps"]) for r in rows if r["tx_rate_mbps"]]
-    channels = {r["channel"] for r in rows}
+    channels = {f"{r['channel']}/{r.get('width_mhz', '?')}MHz" for r in rows}
     name = path.split("/")[-1].replace(".wifi.csv", "")
     print(f"  {name:<12} n={len(rows):>3} rssi {min(rssi):.0f}..{max(rssi):.0f} dBm  "
           f"tx {min(rate):.0f}..{max(rate):.0f} Mbps  channel {'/'.join(sorted(channels))}")
