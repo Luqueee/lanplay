@@ -85,6 +85,37 @@ pub struct Delivery {
     pub au_interval_p95_ms: f64,
     pub au_interval_p99_ms: f64,
     pub au_interval_max_ms: f64,
+    /// Interval between the *first* datagram of consecutive access units.
+    ///
+    /// Compared against the complete-interval above, this says whether late
+    /// units started late or merely finished late, which are faults of
+    /// different parts of the link.
+    pub first_interval_p50_ms: f64,
+    pub first_interval_p95_ms: f64,
+    pub first_interval_p99_ms: f64,
+    pub first_interval_max_ms: f64,
+    /// Wall time the delivery series covered, which turns counts into rates.
+    pub span_s: f64,
+    /// Access units per minute arriving at or beyond each multiple of the
+    /// source period. Counted, never inferred from a percentile: a p99 of
+    /// 15.92 ms against a 16.67 ms threshold says nothing about how many
+    /// units crossed it.
+    pub over_1_25t_per_min: f64,
+    pub over_1_5t_per_min: f64,
+    pub over_2t_per_min: f64,
+    pub over_3t_per_min: f64,
+    pub over_4t_per_min: f64,
+    pub over_6t_per_min: f64,
+    /// Stalls beyond two periods that were followed by units arriving inside
+    /// one. This is bunching itself, rather than a percentile that bunching
+    /// happens to move.
+    pub stall_clusters_per_min: f64,
+    pub mean_catch_up_units: f64,
+    pub max_catch_up_units: u64,
+    /// Interval between the starts of consecutive stalls. A tight
+    /// distribution indicts a timer; a broad one indicts contention.
+    pub stall_gap_p50_ms: f64,
+    pub stall_gap_p95_ms: f64,
 }
 
 #[derive(Serialize)]

@@ -688,6 +688,7 @@ mod tests {
                 p95_ms: 8.4,
                 p99_ms: 8.5,
                 max_ms: 9.0,
+                ..Default::default()
             },
             transport: None,
             memory: flat_trend(200e6, 60),
@@ -942,6 +943,7 @@ mod tests {
             p95_ms: 4.3,
             p99_ms: 4.5,
             max_ms: 5.0,
+            ..Default::default()
         };
         inputs.snapshot = snapshot_of(Run {
             supersede_every: Some(2),

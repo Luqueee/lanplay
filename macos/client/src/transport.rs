@@ -319,6 +319,11 @@ pub fn receive_loop(
         {
             if marked.arrived(frame) {
                 recorder.mark(frame, Stage::NetworkReceiveFirst);
+                // The other half of the delivery split: when the unit
+                // started arriving, as against when it finished. A link that
+                // starts every unit on time and finishes some of them late
+                // has a different fault from one that starts them late.
+                delivery.first_seen(arrival);
             }
             if packet.header.marker && marked.ended(frame) {
                 recorder.mark(frame, Stage::NetworkReceiveLast);

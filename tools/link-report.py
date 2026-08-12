@@ -74,6 +74,15 @@ def link(report):
         "au_p95": delivery["au_interval_p95_ms"],
         "au_p99": delivery["au_interval_p99_ms"],
         "au_max": delivery["au_interval_max_ms"],
+        # Counted crossings per minute. Absent from reports written before
+        # the tail was counted rather than inferred from a percentile.
+        "o2t": delivery.get("over_2t_per_min"),
+        "o3t": delivery.get("over_3t_per_min"),
+        "o4t": delivery.get("over_4t_per_min"),
+        "clus": delivery.get("stall_clusters_per_min"),
+        "cmean": delivery.get("mean_catch_up_units"),
+        "sgap": delivery.get("stall_gap_p50_ms"),
+        "first_p99": delivery.get("first_interval_p99_ms"),
         "span_p99": network["arrival_p99_ms"],
         "span_max": network["arrival_max_ms"],
         "reordered": stream["reordered"],
@@ -89,9 +98,15 @@ def link(report):
 HEAD = (
     f"{'run':<16} {'rssi':>5} {'noise':>6} {'phy':>6} {'ch/MHz':>9} "
     f"{'aup50':>6} {'aup95':>6} {'aup99':>6} {'aumax':>7} "
+    f"{'1st99':>6} {'>2T/m':>6} {'>3T/m':>6} {'>4T/m':>6} {'clu/m':>6} {'cmean':>6} {'sgap':>6} "
     f"{'spn99':>6} {'spnmx':>6} {'reord':>6} {'dpth':>5} "
     f"{'fil99':>6} {'filmx':>6} {'ploss':>6} {'auloss':>6}"
 )
+
+
+def nan(value):
+    """Older reports have no counted tail; say so rather than print a zero."""
+    return float("nan") if value is None else value
 
 
 def row(name, measured, air):
@@ -105,6 +120,10 @@ def row(name, measured, air):
         f"{air.get('channel') or '?':>9} "
         f"{measured['au_p50']:>6.2f} {measured['au_p95']:>6.2f} "
         f"{measured['au_p99']:>6.2f} {measured['au_max']:>7.2f} "
+        f"{nan(measured['first_p99']):>6.2f} {nan(measured['o2t']):>6.1f} "
+        f"{nan(measured['o3t']):>6.1f} {nan(measured['o4t']):>6.1f} "
+        f"{nan(measured['clus']):>6.1f} {nan(measured['cmean']):>6.1f} "
+        f"{nan(measured['sgap']):>6.0f} "
         f"{measured['span_p99']:>6.2f} {measured['span_max']:>6.2f} "
         f"{measured['reordered']:>6} {measured['depth']:>5} "
         f"{fill99 if fill99 is not None else float('nan'):>6.2f} "

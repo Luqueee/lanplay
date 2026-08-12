@@ -262,7 +262,11 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     // Delivery cadence lives here, beside the arrival counter, because both
     // describe what the network did and neither may be inferred from what
     // the display later managed to show.
-    let delivery = Arc::new(crate::delivery::Delivery::new());
+    // The thresholds are multiples of the source period, so delivery has to
+    // be told what the host was asked to produce.
+    let delivery = Arc::new(crate::delivery::Delivery::new(Nanos::from_millis_f64(
+        1000.0 / feed_fps.max(1.0),
+    )));
     // Cloned before the decoder is moved into whichever thread submits to it.
     let decoder_counters = decoder.counters();
     let decoder_status = decoder_counters.clone();
@@ -815,6 +819,36 @@ fn report(
         // series a radio experiment is ranked by, and the only one that stays
         // a measurement when the display link does not.
         println!("  au delivery      {}", link);
+        println!(
+            "  au start         n={} p50 {:.2} ms p95 {:.2} ms p99 {:.2} ms max {:.2} ms",
+            link.delivered,
+            link.first_p50_ms,
+            link.first_p95_ms,
+            link.first_p99_ms,
+            link.first_max_ms
+        );
+        // Counted crossings, because a percentile below a threshold says
+        // nothing about how many units crossed it.
+        println!(
+            "  au late/min      >1.25T {:.1}  >1.5T {:.1}  >2T {:.1}  >3T {:.1}  \
+             >4T {:.1}  >6T {:.1}",
+            link.tail.per_minute(0, link.span_s),
+            link.tail.per_minute(1, link.span_s),
+            link.tail.per_minute(2, link.span_s),
+            link.tail.per_minute(3, link.span_s),
+            link.tail.per_minute(4, link.span_s),
+            link.tail.per_minute(5, link.span_s)
+        );
+        // Bunching itself: a stall the link then makes up for.
+        println!(
+            "  au bunching      {:.1} clusters/min, catch-up {:.1} mean / {} max units, \
+             stall gap p50 {:.0} ms p95 {:.0} ms",
+            link.tail.clusters_per_minute(link.span_s),
+            link.tail.mean_catch_up(),
+            link.tail.catch_up_max,
+            link.tail.stall_gap_p50_ms,
+            link.tail.stall_gap_p95_ms
+        );
         // What the sender asked for is on the host's side of the run; this is
         // what survived the path, and it is the only half that can decide a
         // QoS experiment.
@@ -1004,6 +1038,22 @@ fn build_report(
             au_interval_p95_ms: link.p95_ms,
             au_interval_p99_ms: link.p99_ms,
             au_interval_max_ms: link.max_ms,
+            first_interval_p50_ms: link.first_p50_ms,
+            first_interval_p95_ms: link.first_p95_ms,
+            first_interval_p99_ms: link.first_p99_ms,
+            first_interval_max_ms: link.first_max_ms,
+            span_s: link.span_s,
+            over_1_25t_per_min: link.tail.per_minute(0, link.span_s),
+            over_1_5t_per_min: link.tail.per_minute(1, link.span_s),
+            over_2t_per_min: link.tail.per_minute(2, link.span_s),
+            over_3t_per_min: link.tail.per_minute(3, link.span_s),
+            over_4t_per_min: link.tail.per_minute(4, link.span_s),
+            over_6t_per_min: link.tail.per_minute(5, link.span_s),
+            stall_clusters_per_min: link.tail.clusters_per_minute(link.span_s),
+            mean_catch_up_units: link.tail.mean_catch_up(),
+            max_catch_up_units: link.tail.catch_up_max,
+            stall_gap_p50_ms: link.tail.stall_gap_p50_ms,
+            stall_gap_p95_ms: link.tail.stall_gap_p95_ms,
         },
         decode: crate::report::Decode {
             decoded: outcome.decoded,
