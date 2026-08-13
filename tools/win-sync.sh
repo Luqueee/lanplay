@@ -49,6 +49,11 @@ done
 # bsdtar ships with Windows as tar.exe and reads the stream on stdin, so the
 # whole tree crosses in one direction with no per-file round trip. Extracting
 # creates the directories, which is why none are made in advance.
+# Recovered first, because a wedged local agent makes this look like the host
+# refusing the connection and the message below would send a reader the wrong
+# way entirely.
+"$REPO/tools/win-ssh.sh" --check >/dev/null
+
 tar -cz -C "$REPO" "${paths[@]}" |
     ssh -o BatchMode=yes "$HOST" "tar -xzf - -C $REMOTE" ||
     {

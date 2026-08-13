@@ -449,7 +449,17 @@ fn report(
     println!("host to client   {:>10}", counts.ignored);
     println!("acks sent        {:>10}", counts.acks);
     println!("ack failures     {:>10}", counts.ack_failures);
+    let by_kind = backend.calls_by_kind();
     println!("sendinput calls  {:>10}", backend.calls());
+    // Attributed, because an excess of calls over applied messages is only
+    // innocent when it can be accounted for. One ReleaseAll emits an action
+    // per held thing; a duplicate wheel emitting a second notch would be the
+    // failure the whole design exists to prevent, and the totals alone cannot
+    // tell those apart.
+    println!(
+        "  by kind        motion {}, key {}, button {}, wheel {}",
+        by_kind[0], by_kind[1], by_kind[2], by_kind[3]
+    );
     println!("refused          {:>10}", backend.refused());
     println!("injected dx      {:>10}", counts.dx);
     println!("injected dy      {:>10}", counts.dy);

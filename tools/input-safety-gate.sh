@@ -43,6 +43,11 @@ REORDER="${REORDER:-3}"
 STALL_MS="${STALL_MS:-50}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${OUT:-/tmp/input-safety}"
+# Not loopback by default. A socket bound to 127.0.0.1 cannot send to a LAN
+# address, so a relay bound there forwards into nothing when the host is the
+# Windows machine - which it did, silently, until the gate refused to call it a
+# pass. Binding the wildcard lets the same relay serve both arms.
+RELAY_BIND="${RELAY_BIND:-0.0.0.0:5106}"
 RELAY="${RELAY:-127.0.0.1:5106}"
 
 mkdir -p "$OUT"
@@ -78,7 +83,7 @@ else
 fi
 
 echo "link      loss ${LOSS}%, duplicate ${DUPLICATE}%, reorder ${REORDER}%, stalls ${STALL_MS} ms"
-"$REPO/target/release/udp-fault" --forward "$HOST_ADDR" --listen "$RELAY" \
+"$REPO/target/release/udp-fault" --forward "$HOST_ADDR" --listen "$RELAY_BIND" \
     --loss "$LOSS" --duplicate "$DUPLICATE" --reorder "$REORDER" \
     --stall-ms "$STALL_MS" --stall-every-ms 1500 --seed 7 >"$OUT/link.out" 2>&1 &
 relay=$!
@@ -167,6 +172,14 @@ else:
     print(f"  outstanding at exit     {outstanding}")
     if outstanding:
         failures.append(f"{outstanding} events were never acknowledged")
+    abandoned = number(client, r"abandoned\s+(\d+)")
+    acknowledged = number(client, r"acknowledged\s+(\d+)")
+    print(f"  acknowledged           {acknowledged}, abandoned {abandoned}")
+    if abandoned:
+        # Accounting closes just as neatly when every event is abandoned as
+        # when every one is acknowledged, so closing it proves nothing on its
+        # own. This is the check that noticed a relay forwarding into nothing.
+        failures.append(f"{abandoned} events were abandoned, so the link did not carry them")
     accounted = re.search(r"events accounted (\d+) of (\d+)", client)
     if not accounted:
         failures.append("the client did not state whether its events add up")
@@ -184,8 +197,24 @@ if "nothing is injected" in host:
     print("  injections              not this arm, the host was counting only")
 else:
     print(f"  injections              {calls} SendInput calls")
+    kinds = re.search(
+        r"by kind\s+motion (\d+), key (\d+), button (\d+), wheel (\d+)", host
+    )
     if not calls:
         failures.append("the host injected nothing at all")
+    elif kinds:
+        motion, key, button, wheel = (int(g) for g in kinds.groups())
+        print(f"    motion {motion}, key {key}, button {button}, wheel {wheel}")
+        # The wheel is the one kind with no release to account for an extra
+        # call, so a wheel count above the notches the client sent is a
+        # duplicate injection and nothing else. Keys and buttons legitimately
+        # exceed their messages, because one ReleaseAll emits an action per
+        # held thing.
+        sent_notches = number(client, r"notches sent dx -?\d+\s+dy (-?\d+)")
+        if sent_notches is not None and wheel > sent_notches:
+            failures.append(
+                f"{wheel} wheel injections against {sent_notches} notches sent: duplicated"
+            )
 
 for line in (client, host):
     if "never exercised" in line:

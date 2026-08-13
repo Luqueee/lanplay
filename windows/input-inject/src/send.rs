@@ -28,6 +28,14 @@ use lanplay_input_protocol::Button;
 /// The Windows input system, as much of it as an injected event needs.
 pub struct Injector {
     calls: u64,
+    /// Calls by the kind of action that caused them. An excess of calls over
+    /// applied messages is only innocent when it can be attributed: one
+    /// `ReleaseAll` legitimately emits an action per held thing, while a
+    /// duplicate wheel emitting a second notch would be the failure this whole
+    /// design exists to prevent. Without the breakdown the two are
+    /// indistinguishable, which left seven unexplained calls in a run that
+    /// otherwise passed.
+    by_kind: [u64; 4],
     refused: u64,
 }
 
@@ -41,6 +49,7 @@ impl Injector {
     pub fn new() -> Self {
         Injector {
             calls: 0,
+            by_kind: [0; 4],
             refused: 0,
         }
     }
@@ -59,6 +68,12 @@ impl Injector {
     pub fn deliver(&mut self, action: Action) {
         let input = encode(action);
         self.calls += 1;
+        self.by_kind[match action {
+            Action::Motion { .. } => 0,
+            Action::Key { .. } => 1,
+            Action::Button { .. } => 2,
+            Action::Wheel { .. } => 3,
+        }] += 1;
         // SAFETY: `SendInput` reads one `INPUT` from the slice, and the size it
         // is told to expect is that type's own size, so it cannot read past
         // the value; the slice outlives the call and the call keeps nothing.
@@ -71,6 +86,11 @@ impl Injector {
     /// How many events were handed to `SendInput`.
     pub fn calls(&self) -> u64 {
         self.calls
+    }
+
+    /// Motion, key, button and wheel calls, in that order.
+    pub fn calls_by_kind(&self) -> [u64; 4] {
+        self.by_kind
     }
 
     /// How many of those it declined to insert. See [`Injector::deliver`].
