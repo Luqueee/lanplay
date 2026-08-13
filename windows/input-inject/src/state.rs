@@ -21,7 +21,7 @@
 //! keys, so reconciling against a snapshot is a comparison rather than a
 //! translation.
 
-use lanplay_input_protocol::{Button, EventId, KeyBitset, Message};
+use lanplay_input_protocol::{Button, Datagram, EventId, KeyBitset, Message, SessionId};
 
 /// Every button the protocol defines, in index order.
 pub const BUTTONS: [Button; 5] = [
@@ -88,6 +88,30 @@ pub enum Outcome {
     Stale,
     /// Host-to-client traffic that arrived at the host. Nothing to inject.
     Ignored,
+    /// A datagram belonging to some other session. Nothing was injected and
+    /// nothing is owed: that session is over, and an acknowledgement would
+    /// tell a departed client that its event landed on this host.
+    WrongSession,
+}
+
+/// Release sweeps, by what caused them.
+///
+/// Split apart because they say different things about the client and an
+/// operator needs to tell them apart. A requested release is the client
+/// saying goodbye: it lost focus, released capture or exited. An expired one
+/// is the client saying nothing at all, which is a network or a crash. Both
+/// end in the same empty state, and only one of them means something is
+/// wrong.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub struct Releases {
+    /// `ReleaseAll` messages applied. A retransmission of one already applied
+    /// is not counted again, because it swept nothing.
+    pub requested: u64,
+    /// Sweeps caused by the client falling silent for longer than the host
+    /// waits.
+    pub expired: u64,
+    /// Sweeps caused by a new session displacing an old one.
+    pub session_change: u64,
 }
 
 impl Outcome {
@@ -149,6 +173,11 @@ pub fn slot_key(slot: u8) -> (u8, bool) {
 /// whether the OS accepted the injection: see [`Action`] and the crate docs
 /// for why a refused call is counted rather than rolled back.
 pub struct HostState {
+    /// The one session whose datagrams may reach the OS. Not an `Option`,
+    /// because a state machine that does not yet know which session it serves
+    /// would have to accept the first datagram that arrives to find out, and
+    /// a stale one arriving first would then own the host.
+    session: SessionId,
     keys: KeyBitset,
     /// Bit per [`Button::index`], matching the snapshot's button field so the
     /// two can be compared directly.
@@ -159,23 +188,83 @@ pub struct HostState {
     /// it.
     generation: Option<u32>,
     stale_snapshots: u64,
-}
-
-impl Default for HostState {
-    fn default() -> Self {
-        HostState::new()
-    }
+    releases: Releases,
 }
 
 impl HostState {
-    pub fn new() -> Self {
+    /// Starts empty, for one session. There is no `Default`: a session id is
+    /// minted by the control plane and inventing one here would give every
+    /// host the same one.
+    pub fn new(session: SessionId) -> Self {
         HostState {
+            session,
             keys: KeyBitset::EMPTY,
             buttons: 0,
             reliable: Dedup::new(),
             generation: None,
             stale_snapshots: 0,
+            releases: Releases::default(),
         }
+    }
+
+    /// Which session this state machine will accept datagrams for.
+    pub fn session(&self) -> SessionId {
+        self.session
+    }
+
+    /// Applies a decoded datagram, refusing whatever belongs to another
+    /// session.
+    ///
+    /// The check lives here rather than in the caller because inertness is
+    /// part of what this type guarantees. A stale `ReleaseAll` from a session
+    /// that has ended would otherwise let go of keys the current user is
+    /// holding, and a stale key-down would press a key nobody is touching:
+    /// both are indistinguishable from a working host until somebody plays a
+    /// game on it.
+    pub fn apply_datagram(&mut self, datagram: &Datagram, emit: impl FnMut(Action)) -> Outcome {
+        if datagram.session != self.session {
+            return Outcome::WrongSession;
+        }
+        self.apply(&datagram.message, emit)
+    }
+
+    /// Hands the host to a new session, releasing whatever the old one held.
+    ///
+    /// Starting empty is the only safe reading of a new session: the keys the
+    /// old client held are not the new client's business, and inheriting them
+    /// would leave a key down that nobody ever pressed and that no snapshot
+    /// from the new client will ever mention. The sweep goes to the OS,
+    /// because the OS still believes those keys are down.
+    pub fn begin_session(&mut self, session: SessionId, mut emit: impl FnMut(Action)) {
+        if session == self.session {
+            return;
+        }
+        self.releases.session_change += 1;
+        self.release_all(&mut emit);
+        self.session = session;
+        // Event ids and snapshot generations are the client's own counters,
+        // and a new client starts them wherever it likes. Carrying either
+        // across would deduplicate a fresh press against a stranger's id, or
+        // discard the first snapshot for being older than one the previous
+        // client sent.
+        self.reliable = Dedup::new();
+        self.generation = None;
+    }
+
+    /// Releases everything because the client has gone quiet for too long.
+    ///
+    /// The same sweep a `ReleaseAll` performs, counted apart from it. Which
+    /// of the two ended a run is the difference between a client that said
+    /// goodbye and one that vanished, and the state it leaves behind is
+    /// identical, so the counters are the only place that difference survives.
+    pub fn expire(&mut self, mut emit: impl FnMut(Action)) {
+        self.releases.expired += 1;
+        self.release_all(&mut emit);
+    }
+
+    /// Release sweeps so far, by cause.
+    pub fn releases(&self) -> Releases {
+        self.releases
     }
 
     /// Decides what the OS must be told, records that it was told, and
@@ -250,7 +339,10 @@ impl HostState {
                 self.generation = Some(generation);
                 self.reconcile(keys, buttons, &mut emit);
             }
-            Message::ReleaseAll { .. } => self.release_all(&mut emit),
+            Message::ReleaseAll { .. } => {
+                self.releases.requested += 1;
+                self.release_all(&mut emit);
+            }
             Message::Heartbeat => {}
             Message::Ack { .. } => return Outcome::Ignored,
         }
@@ -527,17 +619,48 @@ impl Dedup {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lanplay_input_protocol::Sequence;
 
     /// Scan codes of a few real keys, so a failure reads as a key rather than
-    /// as a number. 0x11 is W, 0x1D is left control, and 0x1D extended is
-    /// right control.
+    /// as a number. 0x11 is W, 0x1D is left control, 0x1D extended is right
+    /// control and 0x2A is left shift.
     const W: u16 = 0x11;
     const LEFT_CONTROL: u16 = 0x1D;
+    const LEFT_SHIFT: u16 = 0x2A;
+
+    /// The session every test's host serves, and one that has ended.
+    const SESSION: SessionId = SessionId(7);
+    const OLD_SESSION: SessionId = SessionId(6);
 
     fn apply(state: &mut HostState, message: &Message) -> (Outcome, Vec<Action>) {
         let mut actions = Vec::new();
         let outcome = state.apply(message, |action| actions.push(action));
         (outcome, actions)
+    }
+
+    /// Applies a message as it would arrive on the wire, carrying a session.
+    fn deliver(
+        state: &mut HostState,
+        session: SessionId,
+        message: Message,
+    ) -> (Outcome, Vec<Action>) {
+        let mut actions = Vec::new();
+        let outcome = state.apply_datagram(
+            &Datagram {
+                session,
+                sequence: Sequence(0),
+                sent_at_ns: 0,
+                message,
+            },
+            |action| actions.push(action),
+        );
+        (outcome, actions)
+    }
+
+    fn expire(state: &mut HostState) -> Vec<Action> {
+        let mut actions = Vec::new();
+        state.expire(|action| actions.push(action));
+        actions
     }
 
     fn key(id: u64, scancode: u16, down: bool, extended: bool) -> Message {
@@ -549,6 +672,23 @@ mod tests {
         }
     }
 
+    fn button(id: u64, button: Button, down: bool) -> Message {
+        Message::Button {
+            id: EventId(id),
+            button,
+            down,
+        }
+    }
+
+    /// Holds W, left shift and the left button, which is what a player walking
+    /// and shooting is holding.
+    fn hold_three(state: &mut HostState) {
+        apply(state, &key(1, W, true, false));
+        apply(state, &key(2, LEFT_SHIFT, true, false));
+        apply(state, &button(3, Button::Left, true));
+        assert!(!state.nothing_held());
+    }
+
     fn ack(state: &HostState) -> Acknowledgement {
         state
             .acknowledgement()
@@ -557,7 +697,7 @@ mod tests {
 
     #[test]
     fn a_contiguous_run_is_acknowledged_by_its_top() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         for id in 1..=5 {
             assert!(
                 apply(&mut state, &key(id, W, id % 2 == 1, false))
@@ -576,7 +716,7 @@ mod tests {
 
     #[test]
     fn a_hole_shows_up_below_the_top_and_clears_when_it_is_filled() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         apply(&mut state, &key(1, W, true, false));
         apply(&mut state, &key(2, W, false, false));
         // Four is applied, so it is the top, and the hole at three is the id
@@ -611,7 +751,7 @@ mod tests {
     /// thirty-five up.
     #[test]
     fn one_permanently_lost_event_does_not_stall_the_acknowledgement() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         for id in (1..=200).filter(|id| *id != 3) {
             assert!(
                 apply(&mut state, &key(id, W, id % 2 == 1, false))
@@ -634,7 +774,7 @@ mod tests {
 
     #[test]
     fn a_duplicate_is_still_acknowledged_and_moves_nothing() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         apply(&mut state, &key(1, W, true, false));
         let before = ack(&state);
 
@@ -650,7 +790,7 @@ mod tests {
 
     #[test]
     fn an_id_far_beyond_the_window_does_not_corrupt_the_view() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         for id in 1..=5 {
             apply(&mut state, &key(id, W, id % 2 == 1, false));
         }
@@ -675,7 +815,7 @@ mod tests {
 
     #[test]
     fn nothing_reliable_means_nothing_to_acknowledge() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         apply(&mut state, &Message::Motion { dx: 3, dy: 4 });
         apply(&mut state, &Message::Heartbeat);
         assert_eq!(state.acknowledgement(), None);
@@ -683,7 +823,7 @@ mod tests {
 
     #[test]
     fn retransmitted_event_injects_once_and_is_acknowledged_twice() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         let press = key(7, W, true, false);
 
         let (first, actions) = apply(&mut state, &press);
@@ -709,7 +849,7 @@ mod tests {
 
     #[test]
     fn distinct_event_ids_both_apply() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         assert!(apply(&mut state, &key(7, W, true, false)).0.is_applied());
         assert!(apply(&mut state, &key(8, W, false, false)).0.is_applied());
         assert!(!state.holds_key(W, false));
@@ -717,7 +857,7 @@ mod tests {
 
     #[test]
     fn out_of_order_ids_apply_and_still_deduplicate() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         assert!(apply(&mut state, &key(10, W, true, false)).0.is_applied());
         // Arrives late but was never applied, so it must not be mistaken for
         // a retransmission of anything.
@@ -738,7 +878,7 @@ mod tests {
 
     #[test]
     fn deduplication_survives_a_long_contiguous_stream() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         for id in 0..(WINDOW * 4) {
             assert!(
                 apply(&mut state, &key(id, W, id % 2 == 0, false))
@@ -759,7 +899,7 @@ mod tests {
 
     #[test]
     fn release_all_converges_to_nothing_held() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         apply(&mut state, &key(1, W, true, false));
         apply(&mut state, &key(2, LEFT_CONTROL, true, true));
         apply(
@@ -802,7 +942,7 @@ mod tests {
     fn release_all_releases_a_key_the_client_never_released() {
         // The case that motivates host-side tracking: the client's key-up was
         // lost, so only the host knows the key is still down.
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         apply(&mut state, &key(1, W, true, false));
         let (_, actions) = apply(&mut state, &Message::ReleaseAll { id: EventId(2) });
         assert_eq!(
@@ -817,7 +957,7 @@ mod tests {
 
     #[test]
     fn stale_snapshot_generation_is_discarded() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         let mut keys = KeyBitset::EMPTY;
         keys.set(key_slot(W, false), true);
 
@@ -868,7 +1008,7 @@ mod tests {
 
     #[test]
     fn snapshot_reconciles_both_directions() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         // The host believes W and the left button are held.
         apply(&mut state, &key(1, W, true, false));
         apply(
@@ -920,7 +1060,7 @@ mod tests {
 
     #[test]
     fn agreeing_snapshot_injects_nothing() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         apply(&mut state, &key(1, W, true, false));
         let mut keys = KeyBitset::EMPTY;
         keys.set(key_slot(W, false), true);
@@ -938,7 +1078,7 @@ mod tests {
 
     #[test]
     fn snapshot_button_bits_beyond_the_protocol_do_not_stick() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         let (_, actions) = apply(
             &mut state,
             &Message::Snapshot {
@@ -962,7 +1102,7 @@ mod tests {
 
     #[test]
     fn extended_and_plain_keys_are_different_keys() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         apply(&mut state, &key(1, LEFT_CONTROL, true, false));
         apply(&mut state, &key(2, LEFT_CONTROL, true, true));
         assert!(state.holds_key(LEFT_CONTROL, false));
@@ -980,7 +1120,7 @@ mod tests {
         // A client that sends the full 0xE01D code and one that sends 0x1D
         // with the extended flag mean the same physical key, and the host must
         // not end up believing two keys are held.
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         apply(&mut state, &key(1, 0xE01D, true, true));
         assert!(state.holds_key(LEFT_CONTROL, true));
         let (_, actions) = apply(&mut state, &Message::ReleaseAll { id: EventId(2) });
@@ -996,7 +1136,7 @@ mod tests {
 
     #[test]
     fn wheel_carries_one_action_per_moving_axis() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         let (outcome, actions) = apply(
             &mut state,
             &Message::Wheel {
@@ -1033,7 +1173,7 @@ mod tests {
 
     #[test]
     fn motion_passes_through_unchanged_and_holds_nothing() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         let (outcome, actions) = apply(&mut state, &Message::Motion { dx: 4, dy: -3 });
         assert_eq!(outcome, Outcome::Applied);
         assert_eq!(actions, vec![Action::Motion { dx: 4, dy: -3 }]);
@@ -1048,7 +1188,7 @@ mod tests {
 
     #[test]
     fn heartbeat_applies_and_an_ack_is_ignored() {
-        let mut state = HostState::new();
+        let mut state = HostState::new(SESSION);
         let (outcome, actions) = apply(&mut state, &Message::Heartbeat);
         assert_eq!(outcome, Outcome::Applied);
         assert!(actions.is_empty());
@@ -1063,5 +1203,210 @@ mod tests {
         assert_eq!(outcome, Outcome::Ignored);
         assert!(actions.is_empty());
         assert!(!outcome.owes_ack(), "acknowledging an acknowledgement");
+    }
+
+    #[test]
+    fn ten_release_alls_end_empty_and_only_the_first_says_anything() {
+        let mut state = HostState::new(SESSION);
+        hold_three(&mut state);
+
+        for (attempt, id) in (100..110).enumerate() {
+            let (outcome, actions) = apply(&mut state, &Message::ReleaseAll { id: EventId(id) });
+            assert_eq!(outcome, Outcome::Applied, "attempt {attempt}");
+            assert!(
+                state.nothing_held(),
+                "attempt {attempt} left something held"
+            );
+            let expected = if attempt == 0 { 3 } else { 0 };
+            assert_eq!(
+                actions.len(),
+                expected,
+                "attempt {attempt} emitted {actions:?}"
+            );
+        }
+        assert_eq!(state.releases().requested, 10);
+        assert_eq!(state.releases().expired, 0);
+    }
+
+    #[test]
+    fn release_all_releases_each_held_thing_once_and_nothing_else() {
+        let mut state = HostState::new(SESSION);
+        hold_three(&mut state);
+
+        let (_, actions) = apply(&mut state, &Message::ReleaseAll { id: EventId(4) });
+        assert_eq!(
+            actions,
+            vec![
+                Action::Key {
+                    make: 0x11,
+                    extended: false,
+                    down: false
+                },
+                Action::Key {
+                    make: 0x2A,
+                    extended: false,
+                    down: false
+                },
+                Action::Button {
+                    button: Button::Left,
+                    down: false
+                },
+            ]
+        );
+        assert!(state.nothing_held());
+    }
+
+    /// The wheel is reliable and deduplicated like a button, but it holds
+    /// nothing, so the only evidence that a retransmission was discarded is
+    /// the absence of a second notch.
+    #[test]
+    fn a_retransmitted_wheel_moves_by_one_notch() {
+        let mut state = HostState::new(SESSION);
+        let notch = Message::Wheel {
+            id: EventId(1),
+            dx: 0,
+            dy: 1,
+        };
+
+        let (_, actions) = apply(&mut state, &notch);
+        assert_eq!(
+            actions,
+            vec![Action::Wheel {
+                axis: WheelAxis::Vertical,
+                detents: 1
+            }]
+        );
+
+        for _ in 0..2 {
+            let (outcome, actions) = apply(&mut state, &notch);
+            assert_eq!(outcome, Outcome::Duplicate);
+            assert!(actions.is_empty(), "a third of a notch each: {actions:?}");
+        }
+        assert!(state.nothing_held(), "a wheel is never held");
+    }
+
+    #[test]
+    fn a_datagram_from_an_old_session_is_inert() {
+        let mut state = HostState::new(SESSION);
+        hold_three(&mut state);
+        let held_keys = state.held_keys();
+        let held_buttons = state.held_buttons();
+
+        // The stale client says goodbye. Its goodbye is not about this user's
+        // hands.
+        let (outcome, actions) = deliver(
+            &mut state,
+            OLD_SESSION,
+            Message::ReleaseAll { id: EventId(50) },
+        );
+        assert_eq!(outcome, Outcome::WrongSession);
+        assert!(actions.is_empty(), "{actions:?}");
+        assert!(!outcome.owes_ack(), "answering a session that has ended");
+        assert_eq!(state.held_keys(), held_keys);
+        assert_eq!(state.held_buttons(), held_buttons);
+        assert_eq!(state.releases(), Releases::default());
+
+        // And it cannot press anything either.
+        let (outcome, actions) = deliver(
+            &mut state,
+            OLD_SESSION,
+            key(51, LEFT_CONTROL, true, false),
+        );
+        assert_eq!(outcome, Outcome::WrongSession);
+        assert!(actions.is_empty(), "{actions:?}");
+        assert!(!state.holds_key(LEFT_CONTROL, false));
+
+        // The current session is unaffected by any of it, including the
+        // deduplication window: id 51 was never applied.
+        let (outcome, _) = deliver(&mut state, SESSION, key(51, LEFT_CONTROL, true, false));
+        assert_eq!(outcome, Outcome::Applied);
+        assert!(state.holds_key(LEFT_CONTROL, false));
+    }
+
+    #[test]
+    fn a_new_session_starts_empty() {
+        let mut state = HostState::new(OLD_SESSION);
+        hold_three(&mut state);
+        // A snapshot under the old session, so the generation counter has a
+        // value to be dragged across.
+        let agreeing = Message::Snapshot {
+            generation: 9,
+            keys: state.held_keys(),
+            buttons: state.held_buttons(),
+        };
+        apply(&mut state, &agreeing);
+
+        let mut actions = Vec::new();
+        state.begin_session(SESSION, |action| actions.push(action));
+        assert_eq!(state.session(), SESSION);
+        assert!(state.nothing_held(), "the new client pressed nothing");
+        assert_eq!(
+            actions.len(),
+            3,
+            "the OS still believed the old keys were down: {actions:?}"
+        );
+        assert_eq!(state.releases().session_change, 1);
+
+        // The new client's counters are its own: an id and a generation the
+        // old session already used must not be mistaken for stale.
+        let (outcome, _) = deliver(&mut state, SESSION, key(1, W, true, false));
+        assert_eq!(outcome, Outcome::Applied);
+        let (outcome, _) = deliver(
+            &mut state,
+            SESSION,
+            Message::Snapshot {
+                generation: 1,
+                keys: KeyBitset::EMPTY,
+                buttons: 0,
+            },
+        );
+        assert_eq!(outcome, Outcome::Applied);
+        assert!(state.nothing_held());
+
+        // Beginning the session already in progress is not a session change,
+        // so it releases nothing.
+        hold_three(&mut state);
+        let mut actions = Vec::new();
+        state.begin_session(SESSION, |action| actions.push(action));
+        assert!(actions.is_empty(), "{actions:?}");
+        assert!(!state.nothing_held());
+        assert_eq!(state.releases().session_change, 1);
+    }
+
+    #[test]
+    fn expiry_releases_everything_held() {
+        let mut state = HostState::new(SESSION);
+        hold_three(&mut state);
+
+        let actions = expire(&mut state);
+        assert_eq!(actions.len(), 3, "{actions:?}");
+        assert!(
+            actions.iter().all(|action| matches!(
+                action,
+                Action::Key { down: false, .. } | Action::Button { down: false, .. }
+            )),
+            "a vanished client may only cause releases: {actions:?}"
+        );
+        assert!(state.nothing_held());
+        assert_eq!(
+            state.releases(),
+            Releases {
+                requested: 0,
+                expired: 1,
+                session_change: 0
+            },
+            "a client that vanished must not read as one that said goodbye"
+        );
+    }
+
+    #[test]
+    fn expiry_with_nothing_held_emits_nothing() {
+        let mut state = HostState::new(SESSION);
+        assert!(expire(&mut state).is_empty());
+        assert!(expire(&mut state).is_empty());
+        assert!(state.nothing_held());
+        // Still counted: the host decided twice that the client was gone, and
+        // that is what the count is about, not how much it had to let go of.
+        assert_eq!(state.releases().expired, 2);
     }
 }

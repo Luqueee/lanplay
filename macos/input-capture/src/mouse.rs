@@ -1,4 +1,5 @@
-//! Reading relative mouse motion out of AppKit and handing it to a caller.
+//! Reading relative mouse motion, buttons and the wheel out of AppKit and
+//! handing them to a caller.
 //!
 //! `deltaX` and `deltaY` on an `NSEvent` are the movement the mouse reported,
 //! not the movement the cursor was allowed to make, which is the only reason
@@ -7,6 +8,18 @@
 //! right or any other button held, which AppKit calls a drag and reports
 //! separately. Leaving the drags out would freeze the remote pointer for as
 //! long as the user held a button, which is most of a game.
+//!
+//! Buttons arrive as their own down and up events, three pairs of them: left,
+//! right, and one pair for everything else with `buttonNumber` saying which.
+//! That number is already the order the wire format's `Button` uses, so a
+//! button is a lookup rather than a translation. They are state, so what is
+//! sent has to be a transition and never a level: a down with no up is a
+//! button held on the host after the player has let go.
+//!
+//! The wheel is neither. It is reliable like a button, because a lost detent
+//! changes a weapon, and stateless like nothing else here, because there is no
+//! such thing as a wheel being held down. See [`crate::wheel`] for the
+//! conversion its two reporting forms need.
 //!
 //! Two monitors, not one. A global monitor never fires for events delivered to
 //! this process, and a local monitor only ever sees this process's events, so
@@ -25,19 +38,53 @@ use core::ptr::NonNull;
 use std::rc::Rc;
 
 use block2::RcBlock;
+use lanplay_input_protocol::Button;
 use lanplay_telemetry::Timestamp;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2_app_kit::{NSEvent, NSEventMask};
+use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
 
 use crate::cursor::{AssociateFailed, CursorLink};
 use crate::residue::Residue;
+use crate::wheel::{Notches, Scrolling};
 
 /// Every event type that carries a relative mouse delta.
 pub const MOTION_MASK: NSEventMask = NSEventMask::MouseMoved
     .union(NSEventMask::LeftMouseDragged)
     .union(NSEventMask::RightMouseDragged)
     .union(NSEventMask::OtherMouseDragged);
+
+/// Every event type that is a button changing state. Three pairs rather than
+/// five, because AppKit gives the left and right buttons their own events and
+/// reports every other one through the same pair.
+pub const BUTTON_MASK: NSEventMask = NSEventMask::LeftMouseDown
+    .union(NSEventMask::LeftMouseUp)
+    .union(NSEventMask::RightMouseDown)
+    .union(NSEventMask::RightMouseUp)
+    .union(NSEventMask::OtherMouseDown)
+    .union(NSEventMask::OtherMouseUp);
+
+/// The wheel and the trackpad, which share one event type and are told apart
+/// by whether their deltas are precise.
+pub const WHEEL_MASK: NSEventMask = NSEventMask::ScrollWheel;
+
+/// Everything the monitors watch for.
+pub const CAPTURE_MASK: NSEventMask = MOTION_MASK.union(BUTTON_MASK).union(WHEEL_MASK);
+
+/// One thing the mouse did, in the shape the wire wants it.
+///
+/// One callback and one enum rather than three callbacks, because the three
+/// share a monitor, a borrow and an ordering: a button down that overtook the
+/// motion it was aimed with would be a shot fired at the wrong place.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MouseEvent {
+    /// Whole pixels of relative movement, which may be zero.
+    Motion { dx: i32, dy: i32 },
+    /// A button changing state, never a button's level.
+    Button { button: Button, down: bool },
+    /// Whole notches, never zero of them.
+    Wheel { dx: i16, dy: i16 },
+}
 
 /// Why capture could not start.
 #[derive(Debug)]
@@ -71,10 +118,11 @@ impl From<AssociateFailed> for CaptureError {
     }
 }
 
-/// What the two blocks share: the caller's callback and the fraction of a pixel
-/// rounding has not yet spent.
+/// What the two blocks share: the caller's callback, the fraction of a pixel
+/// rounding has not yet spent, and the fraction of a notch beside it.
 struct Shared<F> {
     residue: Residue,
+    notches: Notches,
     callback: F,
 }
 
@@ -89,8 +137,7 @@ pub struct Capture {
 
 impl Capture {
     /// Starts capturing, detaches the cursor, and calls `callback` once per
-    /// mouse event with the whole-pixel delta and the moment the event was
-    /// seen.
+    /// mouse event with what the mouse did and the moment the event was seen.
     ///
     /// The timestamp is read on this machine's monotonic clock. It is never
     /// comparable with anything the host produces, and exists so the sender can
@@ -100,10 +147,11 @@ impl Capture {
     /// caller is responsible for running one.
     pub fn start<F>(callback: F) -> Result<Capture, CaptureError>
     where
-        F: FnMut(i32, i32, Timestamp) + 'static,
+        F: FnMut(MouseEvent, Timestamp) + 'static,
     {
         let shared = Rc::new(RefCell::new(Shared {
             residue: Residue::new(),
+            notches: Notches::new(),
             callback,
         }));
 
@@ -114,7 +162,7 @@ impl Capture {
             deliver(&watched, unsafe { event.as_ref() });
         });
         let global =
-            NSEvent::addGlobalMonitorForEventsMatchingMask_handler(MOTION_MASK, &global_block)
+            NSEvent::addGlobalMonitorForEventsMatchingMask_handler(CAPTURE_MASK, &global_block)
                 .ok_or(CaptureError::MonitorRefused)?;
 
         let watched = Rc::clone(&shared);
@@ -129,7 +177,7 @@ impl Capture {
         // SAFETY: the block returns exactly the event pointer it was given,
         // which is the valid non-null return the method documents.
         let local = unsafe {
-            NSEvent::addLocalMonitorForEventsMatchingMask_handler(MOTION_MASK, &local_block)
+            NSEvent::addLocalMonitorForEventsMatchingMask_handler(CAPTURE_MASK, &local_block)
         };
 
         // Built before the cursor is touched so that a refused detach unwinds
@@ -159,6 +207,24 @@ impl Capture {
         self.link.attach()
     }
 
+    /// Lets the cursor follow the mouse again while the monitors stay
+    /// installed, for a session that has lost control without ending.
+    ///
+    /// A cursor left detached is the worst state to hand back to a user: the
+    /// mouse is plainly moving and nothing on the screen is, with no visible
+    /// cause. So the association is given up the moment this process stops
+    /// being the one the input is for, and taken again by [`Capture::detach`]
+    /// if it becomes so once more.
+    pub fn release_cursor(&mut self) -> Result<(), AssociateFailed> {
+        self.link.attach()
+    }
+
+    /// Takes the cursor away from the mouse again. Idempotent, so a caller
+    /// that cannot tell whether it already has may simply call it.
+    pub fn detach_cursor(&mut self) -> Result<(), AssociateFailed> {
+        self.link.detach()
+    }
+
     /// Whether the cursor is currently held away from the mouse.
     pub const fn cursor_detached(&self) -> bool {
         self.link.is_detached()
@@ -179,14 +245,25 @@ impl Drop for Capture {
 /// The event path. Reads the clock first, because every cost the caller wants
 /// to measure comes after it.
 ///
-/// A delta that rounds to nothing still reaches the callback. Filtering it here
-/// would be a small piece of coalescing, and the whole point of this path is to
-/// be the unfiltered baseline a coalescing one is later measured against.
+/// A motion delta that rounds to nothing still reaches the callback. Filtering
+/// it here would be a small piece of coalescing, and the whole point of this
+/// path is to be the unfiltered baseline a coalescing one is later measured
+/// against. A scroll that has not yet earned a notch is the opposite case and
+/// is dropped: a wheel message is reliable, so an empty one would sit on the
+/// retransmission ladder describing nothing.
 #[inline]
-fn deliver<F: FnMut(i32, i32, Timestamp)>(shared: &Rc<RefCell<Shared<F>>>, event: &NSEvent) {
+fn deliver<F: FnMut(MouseEvent, Timestamp)>(shared: &Rc<RefCell<Shared<F>>>, event: &NSEvent) {
     let at = Timestamp::now();
-    let dx = event.deltaX();
-    let dy = event.deltaY();
+    let kind = event.r#type();
+
+    // Read before the borrow, so nothing that can re-enter happens while it is
+    // held.
+    let scrolling = if event_is(kind, WHEEL_MASK) && event.hasPreciseScrollingDeltas() {
+        Scrolling::Precise
+    } else {
+        Scrolling::Discrete
+    };
+
     // A callback that itself causes a mouse event would re-enter here. Dropping
     // that event is the only safe answer, and it is preferable to the panic a
     // blind borrow would produce inside an AppKit callback.
@@ -194,8 +271,46 @@ fn deliver<F: FnMut(i32, i32, Timestamp)>(shared: &Rc<RefCell<Shared<F>>>, event
         return;
     };
     let shared = &mut *shared;
-    let (dx, dy) = shared.residue.spend(dx, dy);
-    (shared.callback)(dx, dy, at);
+
+    if event_is(kind, WHEEL_MASK) {
+        let (dx, dy) = shared
+            .notches
+            .spend(event.scrollingDeltaX(), event.scrollingDeltaY(), scrolling);
+        if (dx, dy) != (0, 0) {
+            (shared.callback)(MouseEvent::Wheel { dx, dy }, at);
+        }
+        return;
+    }
+
+    if event_is(kind, BUTTON_MASK) {
+        // A mouse with more buttons than the wire format names is not an error
+        // and not forwarded either: folding a sixth button onto a fifth would
+        // press one the player never touched.
+        let index = event.buttonNumber();
+        let Ok(index) = u8::try_from(index) else {
+            return;
+        };
+        let Some(button) = Button::from_index(index) else {
+            return;
+        };
+        let down = matches!(
+            kind,
+            NSEventType::LeftMouseDown | NSEventType::RightMouseDown | NSEventType::OtherMouseDown
+        );
+        (shared.callback)(MouseEvent::Button { button, down }, at);
+        return;
+    }
+
+    let (dx, dy) = shared.residue.spend(event.deltaX(), event.deltaY());
+    (shared.callback)(MouseEvent::Motion { dx, dy }, at);
+}
+
+/// Whether an event type is one of the types a mask covers. AppKit numbers the
+/// types and bits the masks, so the two are related by a shift rather than by
+/// equality.
+#[inline]
+fn event_is(kind: NSEventType, mask: NSEventMask) -> bool {
+    mask.contains(NSEventMask(1 << kind.0))
 }
 
 #[cfg(test)]

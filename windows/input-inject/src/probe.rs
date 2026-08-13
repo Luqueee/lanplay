@@ -57,6 +57,19 @@ use crate::state::{Action, HostState, Outcome};
 /// immediately.
 const POLL: Duration = Duration::from_millis(100);
 
+/// How long the host goes without hearing from the client before it decides
+/// the client is gone and releases everything.
+///
+/// A starting figure, not a production one: it has never been tuned against a
+/// congested link. Two seconds because the stalls already measured on this
+/// Wi-Fi reach fifty milliseconds, and a timeout close to that would read an
+/// ordinary stall as a departure and rip the keys out from under a player who
+/// is still holding them. Two seconds is forty times the worst stall seen,
+/// which is the wrong end to be wrong on: a stuck key after a real
+/// disconnection lasts at most this long, while a false expiry during a stall
+/// happens while the user is playing.
+const CLIENT_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// Widest interval the histogram holds, matching the rest of the project. A
 /// receive-to-injected interval longer than this is a stall, not a latency.
 const MAX_NANOS: u64 = 10_000_000_000;
@@ -79,6 +92,40 @@ struct Cli {
     /// Decode and count, inject nothing.
     #[arg(long)]
     dry_run: bool,
+    /// Subsystems this run was meant to exercise. Any of them still at zero
+    /// when the run ends is named and the process exits 4.
+    ///
+    /// Not observed must never equal pass: two gate arms have already gone
+    /// green having exercised nothing at all, because a probe that receives no
+    /// input still prints a clean report.
+    #[arg(long, value_delimiter = ',', value_enum)]
+    expect: Vec<Subsystem>,
+}
+
+/// A part of the input path a run can be asked to prove it exercised.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, clap::ValueEnum)]
+enum Subsystem {
+    Motion,
+    Keys,
+    Buttons,
+    Wheel,
+    Acks,
+    Snapshots,
+    Heartbeats,
+}
+
+impl Subsystem {
+    fn label(self) -> &'static str {
+        match self {
+            Subsystem::Motion => "motion",
+            Subsystem::Keys => "keys",
+            Subsystem::Buttons => "buttons",
+            Subsystem::Wheel => "wheel",
+            Subsystem::Acks => "acks",
+            Subsystem::Snapshots => "snapshots",
+            Subsystem::Heartbeats => "heartbeats",
+        }
+    }
 }
 
 /// Where an action goes.
@@ -149,6 +196,44 @@ struct Counts {
     /// describes what the client asked for.
     dx: i64,
     dy: i64,
+    /// Datagrams accepted for this session, by what they carried. Counted per
+    /// datagram rather than per action, and duplicates included, because these
+    /// answer whether the subsystem was exercised on the wire at all rather
+    /// than how far the pointer moved.
+    motion: u64,
+    keys: u64,
+    buttons: u64,
+    wheel: u64,
+    snapshots: u64,
+    heartbeats: u64,
+}
+
+impl Counts {
+    fn observed(&self, subsystem: Subsystem) -> u64 {
+        match subsystem {
+            Subsystem::Motion => self.motion,
+            Subsystem::Keys => self.keys,
+            Subsystem::Buttons => self.buttons,
+            Subsystem::Wheel => self.wheel,
+            Subsystem::Acks => self.acks,
+            Subsystem::Snapshots => self.snapshots,
+            Subsystem::Heartbeats => self.heartbeats,
+        }
+    }
+
+    fn record(&mut self, message: &Message) {
+        match message {
+            Message::Motion { .. } => self.motion += 1,
+            Message::Key { .. } => self.keys += 1,
+            Message::Button { .. } => self.buttons += 1,
+            Message::Wheel { .. } => self.wheel += 1,
+            Message::Snapshot { .. } => self.snapshots += 1,
+            Message::Heartbeat => self.heartbeats += 1,
+            // Counted as host-to-client traffic instead; there is no
+            // subsystem here for a message the host only ever sends.
+            Message::Ack { .. } => {}
+        }
+    }
 }
 
 pub fn main() -> ExitCode {
@@ -191,7 +276,7 @@ pub fn main() -> ExitCode {
         backend.label()
     );
 
-    let mut state = HostState::new();
+    let mut state = HostState::new(session);
     let mut counts = Counts::default();
     let mut histogram =
         Histogram::<u64>::new_with_bounds(1, MAX_NANOS, 3).expect("valid histogram bounds");
@@ -205,8 +290,22 @@ pub fn main() -> ExitCode {
     // reorder and loss on the way back.
     let mut ack_sequence: u32 = 0;
     let mut ack_buffer = [0u8; MAX_DATAGRAM];
+    // When the last datagram this session arrived, or `None` while the client
+    // is not considered live: before the first one, and after an expiry has
+    // already swept. Disarming it that way is what keeps a silent run from
+    // sweeping once per poll for the rest of its length.
+    let mut last_datagram: Option<Timestamp> = None;
 
     while Timestamp::now() < deadline {
+        // Liveness first, because a run that goes quiet reaches this point
+        // through the read timeout and never through a datagram.
+        if let Some(last) = last_datagram
+            && Timestamp::now().saturating_since(last).get() >= CLIENT_TIMEOUT.as_nanos() as u64
+        {
+            state.expire(|action| backend.deliver(action));
+            last_datagram = None;
+        }
+
         let (len, from) = match socket.recv_from(&mut buffer) {
             Ok(received) => received,
             // A timeout is the idle case, not a failure; anything else is
@@ -238,23 +337,29 @@ pub fn main() -> ExitCode {
                 continue;
             }
         };
-        if datagram.session != session {
-            counts.wrong_session += 1;
-            continue;
-        }
-
-        let outcome = state.apply(&datagram.message, |action| {
+        let outcome = state.apply_datagram(&datagram, |action| {
             if let Action::Motion { dx, dy } = action {
                 counts.dx += dx as i64;
                 counts.dy += dy as i64;
             }
             backend.deliver(action);
         });
+        if outcome == Outcome::WrongSession {
+            counts.wrong_session += 1;
+            // Deliberately not evidence of liveness. A datagram the host
+            // cannot attribute to this session says nothing about whether the
+            // client this session belongs to is still there, and letting one
+            // refresh the clock would let a departed peer's retransmissions
+            // hold the release off indefinitely.
+            continue;
+        }
+        last_datagram = Some(received);
+        counts.record(&datagram.message);
         match outcome {
             Outcome::Applied => counts.applied += 1,
             Outcome::Duplicate => counts.duplicates += 1,
             Outcome::Ignored => counts.ignored += 1,
-            Outcome::Stale => {}
+            Outcome::Stale | Outcome::WrongSession => {}
         }
 
         // Only datagrams that reached the injector are timed. A rejected
@@ -294,7 +399,30 @@ pub fn main() -> ExitCode {
     }
 
     report(&counts, &state, &backend, &histogram, peer, first_error);
+    if unmet(&cli.expect, &counts) {
+        return ExitCode::from(4);
+    }
     ExitCode::SUCCESS
+}
+
+/// Names every declared subsystem that stayed at zero, reporting whether any
+/// did.
+///
+/// Checked against the counters rather than taken on trust, because a run that
+/// received nothing still prints a clean report and two gate arms have already
+/// passed that way. Not observed must never equal pass.
+fn unmet(expected: &[Subsystem], counts: &Counts) -> bool {
+    let mut missing = false;
+    for subsystem in expected {
+        if counts.observed(*subsystem) == 0 {
+            eprintln!(
+                "input-inject-probe: --expect {} was declared and nothing was observed",
+                subsystem.label()
+            );
+            missing = true;
+        }
+    }
+    missing
 }
 
 fn report(

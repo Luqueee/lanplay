@@ -116,6 +116,9 @@ pub struct Check {
 
 pub struct Verdict {
     pub checks: Vec<Check>,
+    /// Figures worth reporting that are nobody's pass or fail. Kept apart from
+    /// the checks so that every entry in that list can genuinely fail.
+    pub notes: Vec<String>,
     /// True when the run was long enough for its tail numbers to be quoted.
     pub soaked: bool,
 }
@@ -159,6 +162,9 @@ impl fmt::Display for Verdict {
                 check.detail
             )?;
         }
+        for note in &self.notes {
+            writeln!(f, "  [note] {note}")?;
+        }
         if !self.soaked {
             writeln!(
                 f,
@@ -182,7 +188,52 @@ impl fmt::Display for Verdict {
 
 pub fn evaluate(inputs: &GateInputs) -> Verdict {
     let mut checks = Vec::new();
+    let mut notes: Vec<String> = Vec::new();
     let snapshot = &inputs.snapshot;
+
+    // Declared before anything is judged. Most of the checks below pass
+    // vacuously on an empty run - nought decoded of nought submitted is
+    // lossless, nought frames are all accounted for - so a run that exercised
+    // nothing would report a clean sweep. Two gate arms did exactly that
+    // earlier today, which is why this is a check and not a comment.
+    //
+    // Each entry names a population this run should have produced, given what
+    // it was asked to do. A zero fails, and says which.
+    let mut populations: Vec<(&'static str, u64)> = vec![
+        ("access units submitted", inputs.submitted),
+        ("frames decoded", inputs.decoded),
+        (
+            "decode timings",
+            inputs.snapshot.segment(Segment::Decode).count,
+        ),
+    ];
+    if inputs.presents {
+        populations.push(("display callbacks", inputs.span_callbacks));
+        populations.push(("frames rendered", inputs.rendered));
+    }
+    if let Some(transport) = &inputs.transport {
+        populations.push(("datagrams received", transport.rx.packets));
+        populations.push(("access unit intervals", inputs.link.delivered));
+    }
+    let unexercised: Vec<&str> = populations
+        .iter()
+        .filter(|(_, count)| *count == 0)
+        .map(|(name, _)| *name)
+        .collect();
+    checks.push(Check {
+        name: "run exercised",
+        owner: Owner::Pipeline,
+        passed: unexercised.is_empty(),
+        detail: if unexercised.is_empty() {
+            populations
+                .iter()
+                .map(|(name, count)| format!("{count} {name}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        } else {
+            format!("nothing measured for: {}", unexercised.join(", "))
+        },
+    });
 
     // Whether the frames came from another machine decides who is to blame
     // when they do not turn up.
@@ -557,25 +608,25 @@ pub fn evaluate(inputs: &GateInputs) -> Verdict {
             ),
         });
 
-        // Not pass or fail: the number this phase exists to produce.
-        checks.push(Check {
-            name: "transport cost",
-            owner: Owner::Pipeline,
-            passed: true,
-            detail: format!(
-                "{} packets ({} single NAL, {} FU-A), {:.1} bytes on the wire per byte of \
-             access unit, RFC 3550 jitter {}",
-                transport.tx.packets,
-                transport.tx.single_nal,
-                transport.tx.fu_a,
-                transport.overhead_ratio,
-                transport.jitter,
-            ),
-        });
+        // Deliberately not a check. It was one, with `passed: true`, which is
+        // the same smell as a gate that reads absence of evidence as evidence:
+        // an entry in a pass-or-fail list that can only ever pass teaches a
+        // reader to skim the list. The figure is worth having and is reported
+        // beside the others rather than voting.
+        notes.push(format!(
+            "transport cost   {} packets ({} single NAL, {} FU-A), {:.1} bytes on the wire \
+             per byte of access unit, RFC 3550 jitter {}",
+            transport.tx.packets,
+            transport.tx.single_nal,
+            transport.tx.fu_a,
+            transport.overhead_ratio,
+            transport.jitter,
+        ));
     }
 
     Verdict {
         checks,
+        notes,
         soaked: snapshot.p99_is_soaked(),
     }
 }
@@ -1007,6 +1058,35 @@ mod tests {
         assert!(!verdict.link_passed());
         assert!(verdict.pipeline_passed(), "{verdict}");
         assert_eq!(named(&inputs, "link holds cadence").owner, Owner::Link);
+    }
+
+    #[test]
+    fn a_run_that_measured_nothing_fails_instead_of_sweeping() {
+        // The failure mode this exists for: most checks below pass vacuously
+        // on empty inputs, so without this a run that exercised nothing
+        // reports a clean sweep. Two gate arms did exactly that.
+        let mut inputs = healthy(4_000);
+        inputs.submitted = 0;
+        inputs.decoded = 0;
+        inputs.rendered = 0;
+        inputs.span_callbacks = 0;
+        inputs.snapshot = snapshot_of(Run::of(0));
+        let verdict = evaluate(&inputs);
+        let check = named(&inputs, "run exercised");
+        assert!(!check.passed, "{}", check.detail);
+        assert!(
+            check.detail.contains("frames decoded"),
+            "the failure must name what was not measured: {}",
+            check.detail
+        );
+        assert!(!verdict.passed(), "an empty run must not pass overall");
+    }
+
+    #[test]
+    fn a_healthy_run_says_what_it_exercised() {
+        let check = named(&healthy(4_000), "run exercised");
+        assert!(check.passed, "{}", check.detail);
+        assert!(check.detail.contains("4000"), "{}", check.detail);
     }
 
     #[test]
