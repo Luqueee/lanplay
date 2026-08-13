@@ -1,0 +1,6 @@
+udp-fault: 0.0.0.0:5106 -> 192.168.1.70:5006, loss 3.0%, duplicate 4.0%, reorder 3.0% held 8 ms, stall 50 ms every 1500 ms, seed 7
+    5s  seen     355  dropped     11 (3.10%)  duplicated     16 (4.51%)  reordered     12 (3.38%)  stalls    3  holding 0
+   10s  seen     788  dropped     22 (2.79%)  duplicated     24 (3.05%)  reordered     23 (2.92%)  stalls    6  holding 0
+   15s  seen    1227  dropped     34 (2.77%)  duplicated     38 (3.10%)  reordered     29 (2.36%)  stalls    9  holding 0
+   20s  seen    1321  dropped     36 (2.73%)  duplicated     41 (3.10%)  reordered     32 (2.42%)  stalls   13  holding 0
+   25s  seen    1321  dropped     36 (2.73%)  duplicated     41 (3.10%)  reordered     32 (2.42%)  stalls   16  holding 0

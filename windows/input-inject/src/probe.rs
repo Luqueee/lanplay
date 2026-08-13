@@ -157,6 +157,18 @@ impl Backend {
         }
     }
 
+    /// Motion, key, button and wheel calls. Attributed because a total cannot
+    /// tell an innocent excess from a guilty one: one `ReleaseAll` emits an
+    /// action per held thing, while a duplicate wheel emitting a second notch
+    /// is the failure the design exists to prevent.
+    fn calls_by_kind(&self) -> [u64; 4] {
+        match self {
+            Backend::Counting => [0; 4],
+            #[cfg(windows)]
+            Backend::Injecting(injector) => injector.calls_by_kind(),
+        }
+    }
+
     fn refused(&self) -> u64 {
         match self {
             Backend::Counting => 0,

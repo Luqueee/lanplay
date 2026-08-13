@@ -1,0 +1,13 @@
+sending a W, A, S, D cycle and all five buttons and wheel notches to 127.0.0.1:5106 as session 1 for 15 s at 30 events/s
+failed sends 0
+key datagrams 182  presses 91  releases 91
+button presses 90  releases 90
+wheel events 90  notches sent dx 0  dy 90
+keys still held 0  buttons still held 0  every press matched by a release: yes
+releases sent 1  by cause: focus lost 0  capture released 0  exit 1
+heartbeats sent 37 at one every 400 ms
+reliable events sent 453  acknowledged 453  abandoned 0  still outstanding at exit 0
+events accounted 453 of 453
+retransmissions 52 over a ladder of 5  acknowledgement datagrams received 509  snapshots sent 270
+clock read to send_to returning:  p50 33.57µs  p95 69.25µs  p99 99.20µs  max 121.47µs
+declared and exercised: keys, buttons, wheel, acks, snapshots, heartbeats
