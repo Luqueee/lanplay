@@ -194,6 +194,21 @@ def totals(path, label):
 
 import os
 
+
+def line(path, pattern, label):
+    """One `events N dx N dy N` row, or None when the run did not print it."""
+    try:
+        text = open(path).read()
+    except OSError:
+        return None
+    got = re.search(pattern + r"\s+events\s+(\d+)\s+dx\s+(-?\d+)\s+dy\s+(-?\d+)", text)
+    if not got:
+        return None
+    events, dx, dy = (int(g) for g in got.groups())
+    print(f"  {label:<28} events {events:>8}  dx {dx:>8}  dy {dy:>8}")
+    return events, dx, dy
+
+
 if os.path.exists("/tmp/input-mover.out"):
     print("\nmotion, which is additive and therefore comparable")
     posted = totals("/tmp/input-mover.out", "posted")
@@ -202,12 +217,31 @@ if os.path.exists("/tmp/input-mover.out"):
 else:
     print("\nmotion: not this arm")
     posted = sent = applied = None
-if posted and sent:
-    # The window server coalesces mouse-moved events, summing their deltas, so
-    # the counts legitimately differ while the totals must not. That is the
-    # whole reason motion is additive rather than latest-wins.
-    print("  posted vs sent   "
-          + ("totals agree" if posted == sent else f"DISAGREE {posted} against {sent}"))
+
+# Two checks, each comparing like with like, because one run already produced a
+# discrepancy no loss could have caused: a total that includes a hand on the
+# trackpad cannot be compared against a generator that never posted it, and the
+# host is sent everything regardless of where it came from.
+attributed = line("/tmp/input-capture.out", "motion posted by a program", "attributed to a program")
+intruded = line("/tmp/input-capture.out", "motion from a device", "and to a device")
+if posted and attributed:
+    if intruded and intruded[0] > 0:
+        # Refused rather than failed. The window server coalesces mouse-moved
+        # events by summing their deltas, and a merged event carries one origin
+        # for both contributions, so once a device has moved the attribution is
+        # approximate by construction. Printing DISAGREE here would manufacture
+        # evidence of a fault out of a limit of the instrument, which is the same
+        # mistake as reading absence of evidence as evidence and no better for
+        # being in the other direction.
+        print(f"  the generator against what the capture attributed to it: not available, "
+              f"a device moved {intruded[0]} times during the run")
+    else:
+        # The window server coalesces mouse-moved events, summing their deltas,
+        # so the counts legitimately differ while the totals must not. That is
+        # the whole reason motion is additive rather than latest-wins.
+        agree = posted == attributed[1:]
+        print("  the generator against what the capture attributed to it: "
+              + ("totals agree" if agree else f"DISAGREE {posted} against {attributed[1:]}"))
 # The one that decides a keyboard run. A host holding a key nobody is pressing
 # is the failure the whole reliability design exists to prevent, so it is
 # checked whether or not keys were asked for.
@@ -218,6 +252,7 @@ if held:
           f"{'' if empty else '   NOT EMPTY, a key is stuck'}")
 
 if sent and applied:
+    print("  the wire: everything the capture sent against what the host injected")
     for axis, a, b in (("dx", sent[0], applied[0]), ("dy", sent[1], applied[1])):
         if a == 0:
             continue

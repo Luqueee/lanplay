@@ -45,6 +45,7 @@ use objc2::runtime::AnyObject;
 use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
 
 use crate::cursor::{AssociateFailed, CursorLink};
+use crate::origin::Origin;
 use crate::residue::Residue;
 use crate::wheel::{Notches, Scrolling};
 
@@ -79,7 +80,17 @@ pub const CAPTURE_MASK: NSEventMask = MOTION_MASK.union(BUTTON_MASK).union(WHEEL
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MouseEvent {
     /// Whole pixels of relative movement, which may be zero.
-    Motion { dx: i32, dy: i32 },
+    Motion {
+        dx: i32,
+        dy: i32,
+        /// Whether a button was held while the mouse moved. AppKit reports that
+        /// as a drag and not a move, and the wire format has no room for the
+        /// distinction because a host that is already holding the button will
+        /// produce a drag of its own. It is kept here because losing it is what
+        /// makes unexplained movement indistinguishable from a button nobody
+        /// released.
+        dragged: bool,
+    },
     /// A button changing state, never a button's level.
     Button { button: Button, down: bool },
     /// Whole notches, never zero of them.
@@ -143,11 +154,15 @@ impl Capture {
     /// comparable with anything the host produces, and exists so the sender can
     /// measure its own cost.
     ///
+    /// The [`Origin`] says whether a device or a program produced the event. A
+    /// session forwards both alike; only a measurement comparing a generator's
+    /// output against the host's input needs to tell them apart.
+    ///
     /// AppKit only delivers these events while a run loop is turning, so the
     /// caller is responsible for running one.
     pub fn start<F>(callback: F) -> Result<Capture, CaptureError>
     where
-        F: FnMut(MouseEvent, Timestamp) + 'static,
+        F: FnMut(MouseEvent, Timestamp, Origin) + 'static,
     {
         let mut capture = Capture::start_attached(callback)?;
         capture.link.detach()?;
@@ -165,7 +180,7 @@ impl Capture {
     /// was a request rather than input.
     pub fn start_attached<F>(callback: F) -> Result<Capture, CaptureError>
     where
-        F: FnMut(MouseEvent, Timestamp) + 'static,
+        F: FnMut(MouseEvent, Timestamp, Origin) + 'static,
     {
         let shared = Rc::new(RefCell::new(Shared {
             residue: Residue::new(),
@@ -268,7 +283,10 @@ impl Drop for Capture {
 /// is dropped: a wheel message is reliable, so an empty one would sit on the
 /// retransmission ladder describing nothing.
 #[inline]
-fn deliver<F: FnMut(MouseEvent, Timestamp)>(shared: &Rc<RefCell<Shared<F>>>, event: &NSEvent) {
+fn deliver<F: FnMut(MouseEvent, Timestamp, Origin)>(
+    shared: &Rc<RefCell<Shared<F>>>,
+    event: &NSEvent,
+) {
     let at = Timestamp::now();
     let kind = event.r#type();
 
@@ -279,6 +297,11 @@ fn deliver<F: FnMut(MouseEvent, Timestamp)>(shared: &Rc<RefCell<Shared<F>>>, eve
     } else {
         Scrolling::Discrete
     };
+
+    // Also before the borrow, and for the same reason: reading the field goes
+    // through Core Graphics, which the callback below has no business being
+    // inside of.
+    let origin = Origin::of(event);
 
     // A callback that itself causes a mouse event would re-enter here. Dropping
     // that event is the only safe answer, and it is preferable to the panic a
@@ -294,7 +317,7 @@ fn deliver<F: FnMut(MouseEvent, Timestamp)>(shared: &Rc<RefCell<Shared<F>>>, eve
                 .notches
                 .spend(event.scrollingDeltaX(), event.scrollingDeltaY(), scrolling);
         if (dx, dy) != (0, 0) {
-            (shared.callback)(MouseEvent::Wheel { dx, dy }, at);
+            (shared.callback)(MouseEvent::Wheel { dx, dy }, at, origin);
         }
         return;
     }
@@ -314,12 +337,16 @@ fn deliver<F: FnMut(MouseEvent, Timestamp)>(shared: &Rc<RefCell<Shared<F>>>, eve
             kind,
             NSEventType::LeftMouseDown | NSEventType::RightMouseDown | NSEventType::OtherMouseDown
         );
-        (shared.callback)(MouseEvent::Button { button, down }, at);
+        (shared.callback)(MouseEvent::Button { button, down }, at, origin);
         return;
     }
 
+    // A drag is a move with a button held. Reported so that unexplained movement
+    // can be told from a button nobody released, which look the same in a total
+    // and need opposite fixes.
+    let dragged = kind != NSEventType::MouseMoved;
     let (dx, dy) = shared.residue.spend(event.deltaX(), event.deltaY());
-    (shared.callback)(MouseEvent::Motion { dx, dy }, at);
+    (shared.callback)(MouseEvent::Motion { dx, dy, dragged }, at, origin);
 }
 
 /// Whether an event type is one of the types a mask covers. AppKit numbers the
@@ -341,7 +368,7 @@ mod tests {
     /// it attaches again.
     #[test]
     fn a_released_capture_reattaches_the_cursor() {
-        let mut capture = match Capture::start(|_, _| {}) {
+        let mut capture = match Capture::start(|_, _, _| {}) {
             Ok(capture) => capture,
             // A machine that refuses input monitoring cannot exercise this, and
             // saying so is better than passing on a capture that never started.
@@ -366,7 +393,7 @@ mod tests {
     /// running must not leave a user with a mouse that appears broken.
     #[test]
     fn the_cursor_can_be_handed_back_and_taken_again_while_capture_continues() {
-        let mut capture = match Capture::start(|_, _| {}) {
+        let mut capture = match Capture::start(|_, _, _| {}) {
             Ok(capture) => capture,
             Err(CaptureError::MonitorRefused) => {
                 panic!("AppKit installed no mouse monitor; grant input monitoring to run this")

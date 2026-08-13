@@ -536,6 +536,21 @@ fn report(
         micros(histogram.value_at_quantile(0.99)),
         micros(histogram.max()),
     );
+
+    // A maximum is one event and says nothing about how often it happens, which
+    // is the whole question when the number is twelve times the p99. Counting
+    // the crossings turns an anecdote into a rate, and a rate is what decides
+    // whether the outlier is worth building a virtual HID device to avoid.
+    for threshold in [500_000u64, 1_000_000, 2_000_000, 5_000_000] {
+        let over = histogram.len() - histogram.count_between(0, threshold - 1);
+        println!(
+            "  over {:>4.1} ms {:>8}   {:>6.3} % of {}",
+            threshold as f64 / 1_000_000.0,
+            over,
+            100.0 * over as f64 / histogram.len() as f64,
+            histogram.len(),
+        );
+    }
 }
 
 fn micros(nanos: u64) -> f64 {

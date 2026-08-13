@@ -71,8 +71,8 @@ use std::time::Duration;
 use clap::Parser;
 use hdrhistogram::Histogram;
 use lanplay_input_capture::{
-    Capture, ExitCause, FocusWatcher, Heartbeat, INPUT_PORT, Keyboard, Machine, MouseEvent,
-    Reliable, ScanCode,
+    Capture, ExitCause, FocusWatcher, Heartbeat, INPUT_PORT, Keyboard, Machine, MouseEvent, Origin,
+    Origins, Reliable, ScanCode,
     capture::{
         Action, CAPTURE_BUTTON, LEFT_COMMAND, LEFT_CONTROL, LEFT_OPTION, Outcome, State, TAB,
     },
@@ -402,6 +402,10 @@ struct Sink {
     clipped: u64,
     total_dx: i64,
     total_dy: i64,
+    /// Motion split by whether a program or a device produced it. The totals
+    /// above cannot answer that, and a cross-check against a generator needs an
+    /// answer rather than the assumption that nobody touched the machine.
+    origins: Origins,
     cost: Histogram<u64>,
     key_datagrams: u64,
     presses: u64,
@@ -570,10 +574,15 @@ impl Sink {
     /// checkable: nothing here can admit an event the machine refused, and
     /// nothing the machine refused ever reaches the reliability layer, so a
     /// refused event cannot be holding an id.
-    fn offer_mouse(&mut self, event: MouseEvent, at: Timestamp) {
+    fn offer_mouse(&mut self, event: MouseEvent, at: Timestamp, origin: Origin) {
         match event {
-            MouseEvent::Motion { dx, dy } => {
+            MouseEvent::Motion { dx, dy, dragged } => {
                 if self.machine.admit() {
+                    // Recorded against its origin before it is sent, and only
+                    // when it is sent, so the total here is exactly the total
+                    // that left this machine and can be compared with what the
+                    // host injected.
+                    self.origins.record(origin, dx, dy, dragged);
                     self.send_motion(dx, dy, at);
                 }
             }
@@ -745,6 +754,7 @@ fn new_sink(socket: UdpSocket, target: SocketAddr, session_id: u32) -> Sink {
         failed: 0,
         clipped: 0,
         total_dx: 0,
+        origins: Origins::default(),
         total_dy: 0,
         cost: Histogram::new_with_bounds(1, MAX_NANOS, SIGNIFICANT_FIGURES)
             .expect("valid histogram bounds"),
@@ -1203,7 +1213,7 @@ fn press_local(sink: &mut Sink, scan: ScanCode) {
 
 fn click(sink: &mut Sink, pace: &mut Pace, button: Button, down: bool) {
     let at = pace.beat(sink);
-    sink.offer_mouse(MouseEvent::Button { button, down }, at);
+    sink.offer_mouse(MouseEvent::Button { button, down }, at, Origin::Device);
 }
 
 /// Performs whatever the machine asked for, with a counter where a real run has
@@ -1526,15 +1536,15 @@ fn run_capture(args: &Args, socket: UdpSocket, target: SocketAddr) -> ExitCode {
     let sink = Rc::new(RefCell::new(new_sink(socket, target, args.session_id)));
 
     let sending = Rc::clone(&sink);
-    let mut capture =
-        match Capture::start_attached(move |event, at| sending.borrow_mut().offer_mouse(event, at))
-        {
-            Ok(capture) => capture,
-            Err(why) => {
-                eprintln!("cannot capture the mouse: {why}");
-                return ExitCode::FAILURE;
-            }
-        };
+    let mut capture = match Capture::start_attached(move |event, at, origin| {
+        sending.borrow_mut().offer_mouse(event, at, origin)
+    }) {
+        Ok(capture) => capture,
+        Err(why) => {
+            eprintln!("cannot capture the mouse: {why}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     let keyboard = if args.keys {
         let sending = Rc::clone(&sink);
@@ -1627,6 +1637,37 @@ fn run_capture(args: &Args, socket: UdpSocket, target: SocketAddr) -> ExitCode {
         sink.motion_events, sink.datagrams, sink.failed
     );
     println!("total dx {}  total dy {}", sink.total_dx, sink.total_dy);
+    // Split by origin, because a synthetic run's cross-check against the host is
+    // only sound if both sides describe the same events. A hand on the trackpad
+    // for a moment adds movement no generator posted, and without this the
+    // comparison reports a discrepancy in a pipeline that carried everything it
+    // was given.
+    println!(
+        "motion posted by a program   events {}  dragged {}  dx {}  dy {}",
+        sink.origins.posted.events,
+        sink.origins.posted.dragged,
+        sink.origins.posted.dx,
+        sink.origins.posted.dy
+    );
+    println!(
+        "motion from a device         events {}  dragged {}  dx {}  dy {}",
+        sink.origins.device.events,
+        sink.origins.device.dragged,
+        sink.origins.device.dx,
+        sink.origins.device.dy
+    );
+    if sink.origins.device_intruded() {
+        // The split is exact per event and approximate in total once both
+        // origins are active, because the window server coalesces mouse-moved
+        // events by summing their deltas and a merged event carries a single
+        // origin for both contributions. So this says what happened rather than
+        // offering a total to compare: a comparison against a generator is not
+        // available for a run a hand joined in on.
+        println!(
+            "a device contributed movement, so neither line above can be compared \
+             against a generator: coalescing merges events across origins"
+        );
+    }
     println!("focus lost {} times during the run", focus.losses());
 
     if let Some(keyboard) = &keyboard {

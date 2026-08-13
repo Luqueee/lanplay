@@ -1,0 +1,19 @@
+[package]
+name = "lanplay-input-latency-target"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+clap = { workspace = true }
+hdrhistogram = { workspace = true }
+lanplay-telemetry = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+lanplay-capture = { workspace = true }
+windows = { workspace = true }
+
+[[bin]]
+name = "input-latency-target"
+path = "src/bin/input-latency-target.rs"

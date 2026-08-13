@@ -23,6 +23,7 @@ members = [
     "windows/capture",
     "windows/encoder-nvenc",
     "windows/input-inject",
+    "windows/input-latency-target",
     "xtask",
 ]
 

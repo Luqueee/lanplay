@@ -360,6 +360,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lanplay-input-latency-target"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "hdrhistogram",
+ "lanplay-capture",
+ "lanplay-telemetry",
+ "windows",
+]
+
+[[package]]
 name = "lanplay-input-protocol"
 version = "0.1.0"
 

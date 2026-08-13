@@ -67,8 +67,8 @@
 //! ```no_run
 //! use lanplay_input_capture::{Capture, Keyboard, MouseEvent};
 //!
-//! let mut capture = Capture::start(|event, _at| match event {
-//!     MouseEvent::Motion { dx, dy } => println!("{dx} {dy}"),
+//! let mut capture = Capture::start(|event, _at, _origin| match event {
+//!     MouseEvent::Motion { dx, dy, .. } => println!("{dx} {dy}"),
 //!     MouseEvent::Button { button, down } => println!("{button:?} {down}"),
 //!     MouseEvent::Wheel { dx, dy } => println!("wheel {dx} {dy}"),
 //! })
@@ -82,6 +82,7 @@
 pub mod capture;
 pub mod focus;
 pub mod heartbeat;
+pub mod origin;
 pub mod reliable;
 pub mod residue;
 pub mod scancode;
@@ -97,6 +98,7 @@ pub mod mouse;
 pub use capture::{ExitCause, Machine};
 pub use focus::FocusState;
 pub use heartbeat::Heartbeat;
+pub use origin::{Movement, Origin, Origins};
 pub use reliable::Reliable;
 pub use residue::Residue;
 pub use scancode::ScanCode;
