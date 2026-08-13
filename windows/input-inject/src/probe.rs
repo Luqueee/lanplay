@@ -261,15 +261,15 @@ fn report(
     if let Some(error) = first_error {
         println!("first decode error: {error}");
     }
-    // Held keys should be empty at the end of a run that ended cleanly, and
-    // saying so is cheaper than asking an operator to check the keyboard.
-    if !state.nothing_held() {
-        println!(
-            "still held: keys {:?}, buttons {:#07b}",
-            state.held_keys(),
-            state.held_buttons()
-        );
-    }
+    // Always stated, never only on failure. A gate that greps for a line
+    // printed just when something went wrong cannot tell a clean run from a
+    // probe that died before reaching this point, and a stuck key is the one
+    // failure this whole design exists to prevent.
+    println!(
+        "still held: keys {:?}, buttons {:#07b}",
+        state.held_keys(),
+        state.held_buttons()
+    );
 
     println!();
     if histogram.is_empty() {

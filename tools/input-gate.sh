@@ -38,6 +38,7 @@
 #
 #   DRY_RUN=1   decode and count on the host without moving the pointer
 #   MOVER=0     require a hand on the mouse instead of posting the motion
+#   KEYS=1      also send keys, synthetically, cycling W A S D
 #   SESSION_ID  defaults to 1
 #   MAC_IP      defaults to the address on IFACE
 #   IFACE       defaults to en0
@@ -106,6 +107,11 @@ echo
 if [ "${MOVER:-1}" = 1 ]; then
     cargo build --release -q -p lanplay-mouse-mover
     echo "posting motion for ${SECONDS_TO_RUN}s"
+    if [ "${KEYS:-0}" = 1 ] && [ "${DRY_RUN:-0}" != 1 ]; then
+        # Injected keys land wherever the host has focus, so this says so
+        # rather than letting somebody discover it in a document.
+        echo "warning   keys will be typed into whatever has focus on the host"
+    fi
     # Started after the capture so no posted event lands before there is
     # anything listening, and given a shorter run so it cannot still be moving
     # when the capture stops counting.
@@ -175,6 +181,15 @@ if posted and sent:
     # whole reason motion is additive rather than latest-wins.
     print("  posted vs sent   "
           + ("totals agree" if posted == sent else f"DISAGREE {posted} against {sent}"))
+# The one that decides a keyboard run. A host holding a key nobody is pressing
+# is the failure the whole reliability design exists to prevent, so it is
+# checked whether or not keys were asked for.
+held = re.search(r"still held: keys (\{[^}]*\})", open("/tmp/input-inject.out").read())
+if held:
+    empty = held.group(1) in ("{}", "{ }")
+    print(f"\nkeys held on the host at the end: {held.group(1)}"
+          f"{'' if empty else '   NOT EMPTY, a key is stuck'}")
+
 if sent and applied:
     for axis, a, b in (("dx", sent[0], applied[0]), ("dy", sent[1], applied[1])):
         if a == 0:
