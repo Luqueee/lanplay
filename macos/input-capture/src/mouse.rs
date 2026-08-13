@@ -273,9 +273,10 @@ fn deliver<F: FnMut(MouseEvent, Timestamp)>(shared: &Rc<RefCell<Shared<F>>>, eve
     let shared = &mut *shared;
 
     if event_is(kind, WHEEL_MASK) {
-        let (dx, dy) = shared
-            .notches
-            .spend(event.scrollingDeltaX(), event.scrollingDeltaY(), scrolling);
+        let (dx, dy) =
+            shared
+                .notches
+                .spend(event.scrollingDeltaX(), event.scrollingDeltaY(), scrolling);
         if (dx, dy) != (0, 0) {
             (shared.callback)(MouseEvent::Wheel { dx, dy }, at);
         }
@@ -315,14 +316,16 @@ fn event_is(kind: NSEventType, mask: NSEventMask) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{Capture, CaptureError, MOTION_MASK};
-    use objc2_app_kit::NSEventMask;
+    use super::{
+        BUTTON_MASK, CAPTURE_MASK, Capture, CaptureError, MOTION_MASK, WHEEL_MASK, event_is,
+    };
+    use objc2_app_kit::{NSEventMask, NSEventType};
 
     /// The safety invariant end to end: whatever a capture detached, releasing
     /// it attaches again.
     #[test]
     fn a_released_capture_reattaches_the_cursor() {
-        let mut capture = match Capture::start(|_, _, _| {}) {
+        let mut capture = match Capture::start(|_, _| {}) {
             Ok(capture) => capture,
             // A machine that refuses input monitoring cannot exercise this, and
             // saying so is better than passing on a capture that never started.
@@ -342,6 +345,28 @@ mod tests {
         capture.release().expect("a second release does nothing");
     }
 
+    /// Losing focus gives the cursor back without giving up the monitors, and
+    /// regaining it takes the cursor again, because a session that is still
+    /// running must not leave a user with a mouse that appears broken.
+    #[test]
+    fn the_cursor_can_be_handed_back_and_taken_again_while_capture_continues() {
+        let mut capture = match Capture::start(|_, _| {}) {
+            Ok(capture) => capture,
+            Err(CaptureError::MonitorRefused) => {
+                panic!("AppKit installed no mouse monitor; grant input monitoring to run this")
+            }
+            Err(other) => panic!("{other}"),
+        };
+
+        capture.release_cursor().expect("the cursor goes back");
+        assert!(!capture.cursor_detached());
+        assert!(capture.is_capturing());
+
+        capture.detach_cursor().expect("and can be taken again");
+        assert!(capture.cursor_detached());
+        assert!(capture.is_capturing());
+    }
+
     /// Drags are watched, not just plain moves, because a button held down is
     /// the normal state of a mouse in a game.
     #[test]
@@ -358,5 +383,45 @@ mod tests {
         // motion by a monitor that shares this mask.
         assert!(!MOTION_MASK.contains(NSEventMask::KeyDown));
         assert!(!MOTION_MASK.contains(NSEventMask::ScrollWheel));
+    }
+
+    /// Five buttons on the wire, three pairs of events on the way in: the
+    /// other-mouse pair is what carries the middle button and both side
+    /// buttons, so leaving it out would lose three of the five.
+    #[test]
+    fn the_button_mask_covers_all_three_pairs_and_the_wheel_mask_only_the_wheel() {
+        for wanted in [
+            NSEventMask::LeftMouseDown,
+            NSEventMask::LeftMouseUp,
+            NSEventMask::RightMouseDown,
+            NSEventMask::RightMouseUp,
+            NSEventMask::OtherMouseDown,
+            NSEventMask::OtherMouseUp,
+        ] {
+            assert!(BUTTON_MASK.contains(wanted));
+        }
+        assert!(!BUTTON_MASK.contains(NSEventMask::ScrollWheel));
+        assert!(!BUTTON_MASK.contains(NSEventMask::LeftMouseDragged));
+        assert!(WHEEL_MASK.contains(NSEventMask::ScrollWheel));
+        assert!(!WHEEL_MASK.contains(NSEventMask::LeftMouseDown));
+    }
+
+    /// The event path routes on this, so a type that landed in the wrong arm
+    /// would send a scroll as a movement or a click as nothing at all.
+    #[test]
+    fn an_event_type_is_matched_against_the_mask_it_belongs_to() {
+        assert!(event_is(NSEventType::ScrollWheel, WHEEL_MASK));
+        assert!(!event_is(NSEventType::ScrollWheel, BUTTON_MASK));
+        assert!(!event_is(NSEventType::ScrollWheel, MOTION_MASK));
+
+        assert!(event_is(NSEventType::OtherMouseUp, BUTTON_MASK));
+        assert!(!event_is(NSEventType::OtherMouseUp, MOTION_MASK));
+
+        assert!(event_is(NSEventType::LeftMouseDragged, MOTION_MASK));
+        assert!(!event_is(NSEventType::LeftMouseDragged, BUTTON_MASK));
+
+        // A key is not a mouse event at all, and the monitors must not be
+        // asked for one.
+        assert!(!event_is(NSEventType::KeyDown, CAPTURE_MASK));
     }
 }

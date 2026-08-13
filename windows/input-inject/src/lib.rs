@@ -53,7 +53,9 @@ pub mod state;
 #[cfg(windows)]
 pub mod send;
 
-pub use state::{Acknowledgement, Action, HostState, Outcome, WheelAxis, key_slot, slot_key};
+pub use state::{
+    Acknowledgement, Action, HostState, Outcome, Releases, WheelAxis, key_slot, slot_key,
+};
 
 #[cfg(windows)]
 pub use send::Injector;

@@ -1,5 +1,5 @@
-//! Relative mouse motion and physical key presses on macOS, for a pointer and
-//! a keyboard that live on another machine.
+//! Relative mouse motion, mouse buttons, the wheel and physical key presses on
+//! macOS, for a pointer and a keyboard that live on another machine.
 //!
 //! The one thing this crate exists to get right is that movement is reported
 //! as a delta and never as a position. A remote pointer is driven by how far
@@ -8,10 +8,11 @@
 //! absolute positions would therefore report zero for exactly the input a game
 //! cares about most, which is why nothing here reads a cursor location.
 //!
-//! Two pieces, because they fail differently. [`residue`] is arithmetic and is
-//! tested as arithmetic: AppKit reports fractional deltas and a naive cast to
-//! an integer throws away every slow movement. [`cursor`] and [`mouse`] talk
-//! to the window server, and their hazard is a cursor left detached from the
+//! Two pieces, because they fail differently. [`residue`] and [`wheel`] are
+//! arithmetic and are tested as arithmetic: AppKit reports fractional deltas
+//! for both the pointer and a trackpad's scrolling, and a naive cast to an
+//! integer throws away every slow movement. [`cursor`] and [`mouse`] talk to
+//! the window server, and their hazard is a cursor left detached from the
 //! mouse after a crash, which looks to the user like a broken machine rather
 //! than a broken program.
 //!
@@ -33,6 +34,18 @@
 //! retransmission ladder and the snapshot cadence are tested by advancing a
 //! number rather than by sleeping through them.
 //!
+//! The invariant those last pieces exist for is one sentence, and it binds
+//! this end and the host equally: any loss of control of the session converges
+//! the host to nothing held. Losing focus, giving the cursor back, exiting,
+//! disconnecting, letting the heartbeat expire and opening a new session are
+//! all the same event as far as the held state is concerned. [`focus`] is the
+//! one of those that AppKit has to be asked about, and [`heartbeat`] is the
+//! proof of life that lets a host apply the invariant to a client that has
+//! simply vanished. A heartbeat is not a snapshot and does not share its
+//! timer: one says the session is alive, the other says what it believes is
+//! held, and a client with nothing held would otherwise prove itself alive
+//! four times less often than one in a firefight.
+//!
 //! Rejected: `CGEventTap`, which sees more but asks the user for accessibility
 //! permission and can be disabled by the system for being slow, and
 //! `IOHIDManager`, which reports per-device counts in device units and would
@@ -42,18 +55,26 @@
 //! pending motion.
 //!
 //! ```no_run
-//! use lanplay_input_capture::{Capture, Keyboard};
+//! use lanplay_input_capture::{Capture, Keyboard, MouseEvent};
 //!
-//! let mut capture = Capture::start(|dx, dy, _at| println!("{dx} {dy}")).unwrap();
+//! let mut capture = Capture::start(|event, _at| match event {
+//!     MouseEvent::Motion { dx, dy } => println!("{dx} {dy}"),
+//!     MouseEvent::Button { button, down } => println!("{button:?} {down}"),
+//!     MouseEvent::Wheel { dx, dy } => println!("wheel {dx} {dy}"),
+//! })
+//! .unwrap();
 //! let mut keys = Keyboard::start(|key| println!("{:#04X} {}", key.scan.code, key.down)).unwrap();
 //! // ... an AppKit run loop turns ...
 //! keys.release();
 //! capture.release().unwrap();
 //! ```
 
+pub mod focus;
+pub mod heartbeat;
 pub mod reliable;
 pub mod residue;
 pub mod scancode;
+pub mod wheel;
 
 #[cfg(target_os = "macos")]
 pub mod cursor;
@@ -62,16 +83,23 @@ pub mod keyboard;
 #[cfg(target_os = "macos")]
 pub mod mouse;
 
+pub use focus::FocusState;
+pub use heartbeat::Heartbeat;
 pub use reliable::Reliable;
 pub use residue::Residue;
 pub use scancode::ScanCode;
+pub use wheel::{Notches, Scrolling};
 
 #[cfg(target_os = "macos")]
 pub use cursor::{AssociateFailed, CursorLink};
 #[cfg(target_os = "macos")]
+pub use focus::FocusWatcher;
+#[cfg(target_os = "macos")]
 pub use keyboard::{KEY_MASK, KeyEvent, Keyboard, Modifiers, MonitorRefused, Transition};
 #[cfg(target_os = "macos")]
-pub use mouse::{Capture, CaptureError, MOTION_MASK};
+pub use mouse::{
+    BUTTON_MASK, CAPTURE_MASK, Capture, CaptureError, MOTION_MASK, MouseEvent, WHEEL_MASK,
+};
 
 /// The UDP port the whole project reserves for input, as opposed to 5004 for
 /// media and 5005 for control. Here rather than in the probe because the port

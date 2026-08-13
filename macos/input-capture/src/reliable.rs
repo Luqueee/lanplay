@@ -756,6 +756,79 @@ mod tests {
         assert_eq!(reliable.buttons(), 0);
     }
 
+    /// The line between a button and a detent, which is the one thing a
+    /// snapshot cannot be allowed to get wrong. A button is state and belongs
+    /// in the mask a snapshot describes; a wheel is an event and nothing is
+    /// ever a held wheel, so a detent must move neither the mask nor the
+    /// generation that says the mask changed.
+    #[test]
+    fn a_button_moves_the_held_mask_and_a_wheel_notch_moves_nothing() {
+        let mut reliable = Reliable::new(at(0));
+
+        reliable.button(Button::Right, true, at(0));
+        assert_eq!(reliable.buttons(), Button::Right.mask());
+        assert_eq!(reliable.generation(), 1);
+
+        let generation = reliable.generation();
+        let buttons = reliable.buttons();
+        for notch in [1i16, -1, 3] {
+            let message = reliable.wheel(0, notch, at(0));
+            assert!(matches!(message, Message::Wheel { dy, .. } if dy == notch));
+        }
+        assert_eq!(reliable.buttons(), buttons);
+        assert_eq!(reliable.generation(), generation);
+
+        reliable.button(Button::Right, false, at(0));
+        assert_eq!(reliable.buttons(), 0);
+        assert_eq!(reliable.generation(), 2);
+
+        // And what a snapshot says is the mask itself, so a detent can never
+        // reach the host as something it has to hold.
+        reliable.button(Button::X2, true, at(0));
+        reliable.wheel(0, 1, at(0));
+        let Some(Message::Snapshot {
+            generation,
+            buttons,
+            ..
+        }) = reliable.snapshot_due(at(50))
+        else {
+            panic!("a snapshot is due with a button held");
+        };
+        assert_eq!(buttons, Button::X2.mask());
+        assert_eq!(generation, 3);
+    }
+
+    /// The safety invariant says a loss of control converges the host to
+    /// nothing held, and converging means the second and the tenth release
+    /// leave the same state as the first. This is that property on the client's
+    /// side: every cause the session has sends its own release, several of them
+    /// can land in the same instant, and none of them may resurrect anything or
+    /// leave the held set describing something other than empty.
+    #[test]
+    fn releasing_everything_ten_times_ends_where_releasing_it_once_does() {
+        let mut reliable = Reliable::new(at(0));
+        reliable.key(W, true, at(0));
+        reliable.button(Button::Middle, true, at(0));
+
+        let mut ids = Vec::new();
+        for _ in 0..10 {
+            let Message::ReleaseAll { id } = reliable.release_all(at(1)) else {
+                panic!("release_all returns a release");
+            };
+            ids.push(id.0);
+            assert!(reliable.keys().is_empty());
+            assert_eq!(reliable.buttons(), 0);
+        }
+
+        // Ten distinct events rather than one repeated: the host deduplicates
+        // on the id, so a release that reused one would be discarded as a
+        // retransmission of a release the link may have swallowed.
+        assert_eq!(ids, (2..12).collect::<Vec<u64>>());
+        // And only the first of them described a change, so a snapshot that
+        // overtook the rest cannot be mistaken for a newer one.
+        assert_eq!(reliable.generation(), 3);
+    }
+
     #[test]
     fn the_extended_flag_is_part_of_the_slot() {
         let mut reliable = Reliable::new(at(0));

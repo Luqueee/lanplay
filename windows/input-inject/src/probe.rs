@@ -229,9 +229,11 @@ impl Counts {
             Message::Wheel { .. } => self.wheel += 1,
             Message::Snapshot { .. } => self.snapshots += 1,
             Message::Heartbeat => self.heartbeats += 1,
-            // Counted as host-to-client traffic instead; there is no
-            // subsystem here for a message the host only ever sends.
-            Message::Ack { .. } => {}
+            // Neither of these is a subsystem here. An acknowledgement is
+            // host-to-client traffic, counted as such where it is decided, and
+            // a release is counted by the state machine, which is the only
+            // place that knows what caused it.
+            Message::Ack { .. } | Message::ReleaseAll { .. } => {}
         }
     }
 }
@@ -451,6 +453,19 @@ fn report(
     println!("refused          {:>10}", backend.refused());
     println!("injected dx      {:>10}", counts.dx);
     println!("injected dy      {:>10}", counts.dy);
+    println!("motion           {:>10}", counts.motion);
+    println!("keys             {:>10}", counts.keys);
+    println!("buttons          {:>10}", counts.buttons);
+    println!("wheel            {:>10}", counts.wheel);
+    println!("snapshots        {:>10}", counts.snapshots);
+    println!("heartbeats       {:>10}", counts.heartbeats);
+    // Both causes, always, and never summed. They end in the same empty state
+    // and mean opposite things about the client: one is a client that said
+    // goodbye, the other one that stopped answering, and an operator reading
+    // a single release count cannot tell which happened.
+    let releases = state.releases();
+    println!("released, asked  {:>10}", releases.requested);
+    println!("released, expired{:>10}", releases.expired);
     if let Some(error) = first_error {
         println!("first decode error: {error}");
     }

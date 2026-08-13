@@ -1307,11 +1307,8 @@ mod tests {
         assert_eq!(state.releases(), Releases::default());
 
         // And it cannot press anything either.
-        let (outcome, actions) = deliver(
-            &mut state,
-            OLD_SESSION,
-            key(51, LEFT_CONTROL, true, false),
-        );
+        let (outcome, actions) =
+            deliver(&mut state, OLD_SESSION, key(51, LEFT_CONTROL, true, false));
         assert_eq!(outcome, Outcome::WrongSession);
         assert!(actions.is_empty(), "{actions:?}");
         assert!(!state.holds_key(LEFT_CONTROL, false));
