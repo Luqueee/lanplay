@@ -1,0 +1,19 @@
+[package]
+name = "lanplay-input-inject"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+clap = { workspace = true }
+hdrhistogram = { workspace = true }
+lanplay-input-protocol = { workspace = true }
+lanplay-telemetry = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+
+[[bin]]
+name = "input-inject-probe"
+path = "src/bin/input-inject-probe.rs"
