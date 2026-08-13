@@ -1,0 +1,86 @@
+host      127.0.0.1:5006, counted locally, nothing is injected
+link      loss 3%, duplicate 4%, reorder 5%
+
+client    25 capture cycles through sequences A to D
+client    done; waiting for the host to settle
+
+driving 25 capture cycles to 127.0.0.1:5106 as session 1 at 20 events/s
+  held: a key and a button held through the release hotkey
+  switched: command-tab, and a return to the application that does not recapture
+  barrier: a stale event refused and a recaptured one outranking the barrier
+  failed: an entry the window server refused and a session that failed
+sequences walked: held 7  switched 6  barrier 6  failed 6
+failed sends 0
+capture cycles 37  capture clicks suppressed 43  hotkey events suppressed 51
+exits 37  by cause: focus lost 6  release hotkey 13  command-tab 6  session failure 12
+releases the machine asked for 37  events refused while uncaptured 32  entries that failed closed 6
+cursor taken 37 times and given back 37  focus losses the machine saw 7
+the machine ended uncaptured
+stale events refused after a barrier 6  recaptured events outranking their barrier 6  misordered 0
+returns to the application that did not recapture 6  that did 0  entries the window server refused 6
+times the machine was left anywhere but uncaptured where it must be uncaptured 0
+key datagrams 49  presses 43  releases 6
+button presses 19  releases 0
+wheel events 0  notches sent dx 0  dy 0
+keys still held 2  buttons still held 1  every press matched by a release: no
+these sequences exit on purpose with keys and buttons held, so the held figures above are what a release swept rather than input that leaked
+releases sent 38  by cause: focus lost 6  release hotkey 13  command-tab 6  session failure 12  capture released 0  exit 1
+heartbeats sent 23 at one every 400 ms
+reliable events sent 106  acknowledged 106  abandoned 0  still outstanding at exit 0
+events accounted 106 of 106
+retransmissions 13 over a ladder of 5  acknowledgement datagrams received 126  snapshots sent 42
+clock read to send_to returning:  p50 49.89µs  p95 122.88µs  p99 172.67µs  max 172.67µs
+declared and exercised: keys, buttons, acks, captures, suppressed
+
+input-inject-probe: bound 127.0.0.1:5006, session 1, dry run, nothing is injected
+first datagram from 127.0.0.1:5106
+
+datagrams               193
+applied                 169
+duplicate                19
+superseded                4
+stale snapshot            1
+wrong session             0
+decode errors             0
+host to client            0
+acks sent               126
+ack failures              0
+sendinput calls           0
+  by kind        motion 0, key 0, button 0, wheel 0
+refused                   0
+injected dx               0
+injected dy               0
+motion                    0
+keys                     59
+buttons                  22
+wheel                     0
+snapshots                43
+heartbeats               24
+released, asked          38
+released, expired         1
+still held: keys {}, buttons 0b00000
+acknowledged: top 105, missing 0b00000000000000000000000000000000
+
+recv to injected   count      193   p50     0.38µ   p95     2.04µ   p99     5.00µ   max     8.63µ
+
+verdict
+  must not be zero
+  capture cycles                         37
+  events refused while uncaptured        32
+  capture clicks suppressed              43
+  hotkey events suppressed               51
+  releases sent                          38
+  releases the host applied              38
+  must be zero
+  events applied from before a barrier   0
+  releases caused by expiry              1   reported, does not vote
+  keys held at the end                   0
+  buttons held at the end                0
+  events abandoned                       0
+  events outstanding at exit             0
+  the barrier, both directions
+  late pre-barrier events refused        4
+  events accepted after recapture        169
+  accounting                             events accounted 106 of 106
+
+  PASS  nothing leaked across a capture boundary and nothing is held

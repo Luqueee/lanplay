@@ -53,6 +53,14 @@
 //! can pass having exercised nothing at all, and a green run that sent no
 //! wheel event is not evidence that the wheel works: not observed must never
 //! equal pass.
+//!
+//! The capture and focus state machine itself is the library's rather than this
+//! file's. What lives here is the loop that drives it, the window server calls
+//! it asks for, and a `--cycles` mode that walks it through whole captures and
+//! every one of its exits with no person, no permission and no display
+//! involved. That mode is how the ordering the release barrier depends on is
+//! demonstrated rather than asserted: the ids themselves say whether anything
+//! was admitted after the release took its own.
 
 use std::cell::RefCell;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
@@ -63,11 +71,16 @@ use std::time::Duration;
 use clap::Parser;
 use hdrhistogram::Histogram;
 use lanplay_input_capture::{
-    Capture, FocusWatcher, Heartbeat, INPUT_PORT, Keyboard, MouseEvent, Reliable, ScanCode,
-    heartbeat::HEARTBEAT_INTERVAL, reliable::MAX_RETRANSMISSIONS,
+    Capture, ExitCause, FocusWatcher, Heartbeat, INPUT_PORT, Keyboard, Machine, MouseEvent,
+    Reliable, ScanCode,
+    capture::{
+        Action, CAPTURE_BUTTON, LEFT_COMMAND, LEFT_CONTROL, LEFT_OPTION, Outcome, State, TAB,
+    },
+    heartbeat::HEARTBEAT_INTERVAL,
+    reliable::MAX_RETRANSMISSIONS,
 };
 use lanplay_input_protocol::{
-    Button, Datagram, MAX_DATAGRAM, Message, Sequence, SessionId, decode, encode,
+    Button, Datagram, EventId, MAX_DATAGRAM, Message, Sequence, SessionId, decode, encode,
 };
 use lanplay_telemetry::{Nanos, Timestamp};
 use objc2::MainThreadMarker;
@@ -114,6 +127,18 @@ const SYNTHETIC_BUTTONS: [Button; 5] = [
 /// rather than in a tidy back-and-forth that would sum to nothing.
 const SYNTHETIC_NOTCH: i16 = 1;
 
+/// The virtual key codes the capture cycles press. Virtual codes rather than
+/// scan codes for the same reason the synthetic key cycle uses them: the press
+/// then goes through the same table a real key would.
+///
+/// The keys of the release combination are deliberately absent from this list.
+/// Those come from the recognizer's own constants, so a cycle cannot fire a
+/// combination the recognizer does not have and a run cannot pass by pressing
+/// keys nothing was listening for.
+const VK_W: u16 = 0x0D;
+const VK_S: u16 = 0x01;
+const VK_LEFT_SHIFT: u16 = 0x38;
+
 /// How long a read waits before the loop moves on. See [`Sink::receive`] for
 /// why the receive has a timeout rather than being polled or blocking.
 const RECV_TIMEOUT: Duration = Duration::from_millis(1);
@@ -139,10 +164,12 @@ enum Subsystem {
     Acks,
     Snapshots,
     Heartbeats,
+    Captures,
+    Suppressed,
 }
 
 impl Subsystem {
-    const ALL: [Subsystem; 7] = [
+    const ALL: [Subsystem; 9] = [
         Subsystem::Motion,
         Subsystem::Keys,
         Subsystem::Buttons,
@@ -150,6 +177,8 @@ impl Subsystem {
         Subsystem::Acks,
         Subsystem::Snapshots,
         Subsystem::Heartbeats,
+        Subsystem::Captures,
+        Subsystem::Suppressed,
     ];
 
     const fn name(self) -> &'static str {
@@ -161,6 +190,8 @@ impl Subsystem {
             Subsystem::Acks => "acks",
             Subsystem::Snapshots => "snapshots",
             Subsystem::Heartbeats => "heartbeats",
+            Subsystem::Captures => "captures",
+            Subsystem::Suppressed => "suppressed",
         }
     }
 
@@ -170,6 +201,7 @@ impl Subsystem {
     /// host that is not there was still exercised.
     fn count(self, sink: &Sink) -> u64 {
         let counts = sink.reliable.counts();
+        let machine = sink.machine.counts();
         match self {
             Subsystem::Motion => sink.motion_events,
             Subsystem::Keys => sink.presses + sink.releases,
@@ -178,6 +210,15 @@ impl Subsystem {
             Subsystem::Acks => counts.acks,
             Subsystem::Snapshots => counts.snapshots,
             Subsystem::Heartbeats => sink.heartbeat.sent(),
+            Subsystem::Captures => machine.captures,
+            // Both halves of the suppression claim in one figure: a click that
+            // asked for capture instead of firing a weapon, and a combination
+            // whose keys never left. A run that captured nothing suppressed
+            // nothing either, which is exactly the silence this flag exists to
+            // turn into an exit status.
+            Subsystem::Suppressed => {
+                machine.capture_clicks_suppressed + machine.hotkey_events_suppressed
+            }
         }
     }
 }
@@ -204,6 +245,12 @@ fn parse_subsystem(text: &str) -> Result<Subsystem, String> {
 enum ReleaseCause {
     /// This process stopped being the one the input is for.
     FocusLost,
+    /// The player typed the combination that asks for their own machine back.
+    ReleaseHotkey,
+    /// The player asked macOS for the application switcher.
+    CommandTab,
+    /// The session stopped working under a running capture.
+    SessionFailure,
     /// The capture was given up deliberately, so the mouse belongs to this
     /// machine again.
     CaptureReleased,
@@ -212,8 +259,11 @@ enum ReleaseCause {
 }
 
 impl ReleaseCause {
-    const ALL: [ReleaseCause; 3] = [
+    const ALL: [ReleaseCause; 6] = [
         ReleaseCause::FocusLost,
+        ReleaseCause::ReleaseHotkey,
+        ReleaseCause::CommandTab,
+        ReleaseCause::SessionFailure,
         ReleaseCause::CaptureReleased,
         ReleaseCause::Exit,
     ];
@@ -221,6 +271,9 @@ impl ReleaseCause {
     const fn name(self) -> &'static str {
         match self {
             ReleaseCause::FocusLost => "focus lost",
+            ReleaseCause::ReleaseHotkey => "release hotkey",
+            ReleaseCause::CommandTab => "command-tab",
+            ReleaseCause::SessionFailure => "session failure",
             ReleaseCause::CaptureReleased => "capture released",
             ReleaseCause::Exit => "exit",
         }
@@ -229,10 +282,42 @@ impl ReleaseCause {
     const fn index(self) -> usize {
         match self {
             ReleaseCause::FocusLost => 0,
-            ReleaseCause::CaptureReleased => 1,
-            ReleaseCause::Exit => 2,
+            ReleaseCause::ReleaseHotkey => 1,
+            ReleaseCause::CommandTab => 2,
+            ReleaseCause::SessionFailure => 3,
+            ReleaseCause::CaptureReleased => 4,
+            ReleaseCause::Exit => 5,
         }
     }
+}
+
+/// Every exit the state machine takes owes a release, and the cause survives
+/// the crossing so that the machine's count of exits and this file's count of
+/// releases can be read against each other rather than believed separately.
+impl From<ExitCause> for ReleaseCause {
+    fn from(cause: ExitCause) -> ReleaseCause {
+        match cause {
+            ExitCause::FocusLost => ReleaseCause::FocusLost,
+            ExitCause::ReleaseHotkey => ReleaseCause::ReleaseHotkey,
+            ExitCause::CommandTab => ReleaseCause::CommandTab,
+            ExitCause::SessionFailure => ReleaseCause::SessionFailure,
+        }
+    }
+}
+
+/// A window server call the machine asked for and has not had.
+///
+/// Deferred for the reason the focus watcher defers a loss: changing the
+/// cursor's association inside AppKit's dispatch of the event that asked for it
+/// would run a window server call underneath one. Nothing is lost by waiting,
+/// because the machine has already closed admission by the time one of these
+/// is outstanding.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Pending {
+    /// Take the cursor away from the mouse, then say which way it went.
+    Detach,
+    /// Give the cursor back, the last step of an exit whose release has gone.
+    Restore,
 }
 
 #[derive(Parser)]
@@ -292,6 +377,17 @@ struct Args {
         value_parser = parse_subsystem,
     )]
     expect: Vec<Subsystem>,
+
+    /// Drive the capture and focus state machine through this many synthetic
+    /// capture cycles instead of capturing anything, walking every exit the
+    /// machine has. Needs no permission, no display and no hand.
+    #[arg(
+        long,
+        default_value_t = 0,
+        value_name = "N",
+        conflicts_with_all = ["keys", "synthetic_keys", "synthetic_buttons", "synthetic_wheel"],
+    )]
+    cycles: u64,
 }
 
 /// Everything the event callback touches, and everything the report reads.
@@ -340,6 +436,20 @@ struct Sink {
     /// have been wrong in the middle.
     double_presses: u64,
     unmatched_releases: u64,
+    /// The machine that decides whether any of the above is allowed to leave.
+    /// Here rather than beside the sink because the event path has to consult it
+    /// and `--expect` has to be able to count it.
+    machine: Machine,
+    pending: Option<Pending>,
+    cursor_detaches: u64,
+    cursor_restores: u64,
+    /// The id of the last release, which is the barrier the host measures every
+    /// reliable event against, and the id of the last reliable event of any
+    /// kind. Two numbers rather than a claim: they are what says a recaptured
+    /// session's first event outranks the release that ended the capture before
+    /// it, and would say so just as plainly if it did not.
+    last_release: Option<EventId>,
+    last_reliable: Option<EventId>,
 }
 
 impl Sink {
@@ -390,15 +500,6 @@ impl Sink {
         sent
     }
 
-    /// One thing the mouse did, whichever of the three it was.
-    fn send_mouse(&mut self, event: MouseEvent, at: Timestamp) {
-        match event {
-            MouseEvent::Motion { dx, dy } => self.send_motion(dx, dy, at),
-            MouseEvent::Button { button, down } => self.send_button(button, down, at),
-            MouseEvent::Wheel { dx, dy } => self.send_wheel(dx, dy, at),
-        }
-    }
-
     fn send_motion(&mut self, dx: i32, dy: i32, at: Timestamp) {
         self.motion_events += 1;
         if self.emit(Message::Motion { dx, dy }, at) {
@@ -432,6 +533,7 @@ impl Sink {
         // key the socket refused is still a key the player pressed, and hiding
         // it would make a failing network look like a balanced run.
         let message = self.reliable.key(scan, down, at);
+        self.last_reliable = message.event_id();
         if self.emit(message, at) {
             self.key_datagrams += 1;
         }
@@ -446,6 +548,7 @@ impl Sink {
             self.button_releases += 1;
         }
         let message = self.reliable.button(button, down, at);
+        self.last_reliable = message.event_id();
         self.emit(message, at);
     }
 
@@ -457,7 +560,72 @@ impl Sink {
         self.total_notches_x += i64::from(dx);
         self.total_notches_y += i64::from(dy);
         let message = self.reliable.wheel(dx, dy, at);
+        self.last_reliable = message.event_id();
         self.emit(message, at);
+    }
+
+    /// The gate every captured event passes through.
+    ///
+    /// The machine decides and this sends, which is what makes the decision
+    /// checkable: nothing here can admit an event the machine refused, and
+    /// nothing the machine refused ever reaches the reliability layer, so a
+    /// refused event cannot be holding an id.
+    fn offer_mouse(&mut self, event: MouseEvent, at: Timestamp) {
+        match event {
+            MouseEvent::Motion { dx, dy } => {
+                if self.machine.admit() {
+                    self.send_motion(dx, dy, at);
+                }
+            }
+            MouseEvent::Wheel { dx, dy } => {
+                if self.machine.admit() {
+                    self.send_wheel(dx, dy, at);
+                }
+            }
+            MouseEvent::Button { button, down } => {
+                let outcome = self.machine.button(button, down);
+                self.send_flushed(&outcome, at);
+                if outcome.admitted() {
+                    self.send_button(button, down, at);
+                }
+                self.follow(outcome.action(), at);
+            }
+        }
+    }
+
+    fn offer_key(&mut self, scan: ScanCode, down: bool, at: Timestamp) {
+        let outcome = self.machine.key(scan, down);
+        self.send_flushed(&outcome, at);
+        if outcome.admitted() {
+            self.send_key(scan, down, at);
+        }
+        self.follow(outcome.action(), at);
+    }
+
+    /// The presses the recognizer had been holding while it decided, sent ahead
+    /// of the event that ended the hold so the host sees them in the order the
+    /// player made them.
+    fn send_flushed(&mut self, outcome: &Outcome, at: Timestamp) {
+        for scan in outcome.flushed() {
+            self.send_key(*scan, true, at);
+        }
+    }
+
+    /// The work the machine handed back.
+    ///
+    /// The release leaves here and now, on the event path, because the barrier
+    /// means everything the capture sent only if its id is taken with admission
+    /// already closed and nothing in between. The cursor is the only part that
+    /// waits for the loop, and by then nothing more can be admitted anyway.
+    fn follow(&mut self, action: Action, at: Timestamp) {
+        match action {
+            Action::None => {}
+            Action::Enter => self.pending = Some(Pending::Detach),
+            Action::Exit(cause) => {
+                self.release(cause.into(), at);
+                self.pending = Some(Pending::Restore);
+            }
+        }
     }
 
     /// The reliability half of every loop in this file: acknowledgements in,
@@ -527,6 +695,10 @@ impl Sink {
             .max(self.reliable.buttons().count_ones());
         self.releases_by_cause[cause.index()] += 1;
         let message = self.reliable.release_all(at);
+        // Both, because a release is a reliable event like any other and is
+        // also the barrier every event below it is measured against.
+        self.last_reliable = message.event_id();
+        self.last_release = self.last_reliable;
         self.send_now(message, at);
     }
 
@@ -591,6 +763,12 @@ fn new_sink(socket: UdpSocket, target: SocketAddr, session_id: u32) -> Sink {
         buttons_at_stop: 0,
         double_presses: 0,
         unmatched_releases: 0,
+        machine: Machine::new(),
+        pending: None,
+        cursor_detaches: 0,
+        cursor_restores: 0,
+        last_release: None,
+        last_reliable: None,
     }
 }
 
@@ -644,6 +822,42 @@ fn report_releases(sink: &Sink) {
         sink.heartbeat.sent(),
         HEARTBEAT_INTERVAL.get() / 1_000_000
     );
+}
+
+/// The capture path's half of the report.
+///
+/// The suppression figures are the point of it. They are the evidence for two
+/// claims that are otherwise only plausible: that the click asking for capture
+/// did not also fire a weapon, and that nothing reached the host while the
+/// mouse belonged to this machine. Every cause is printed even at zero, because
+/// which of the four a run exercised is what a reader needs to know.
+fn report_machine(sink: &Sink) {
+    let counts = sink.machine.counts();
+    println!(
+        "capture cycles {}  capture clicks suppressed {}  hotkey events suppressed {}",
+        counts.captures, counts.capture_clicks_suppressed, counts.hotkey_events_suppressed
+    );
+    let by_cause: Vec<String> = ExitCause::ALL
+        .iter()
+        .map(|cause| format!("{} {}", cause.name(), counts.exits[cause.index()]))
+        .collect();
+    println!(
+        "exits {}  by cause: {}",
+        counts.exits.iter().sum::<u64>(),
+        by_cause.join("  ")
+    );
+    println!(
+        "releases the machine asked for {}  events refused while uncaptured {}  entries that \
+         failed closed {}",
+        counts.releases, counts.refused, counts.entries_failed
+    );
+    println!(
+        "cursor taken {} times and given back {}  focus losses the machine saw {}",
+        sink.cursor_detaches,
+        sink.cursor_restores,
+        sink.machine.focus().losses()
+    );
+    println!("the machine ended {}", sink.machine.state().name());
 }
 
 /// The reliability half of the report, printed by both modes.
@@ -862,8 +1076,441 @@ fn run_synthetic(args: &Args, socket: UdpSocket, target: SocketAddr) -> ExitCode
     check_expectations(&args.expect, &sink)
 }
 
-/// The capture mode: real mouse motion, buttons and wheel, and real keys when
-/// asked for.
+/// One of the four sequences a cycles run walks, in the order it walks them so
+/// that a run of four or more covers every one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Scenario {
+    /// A key and a button held through the release hotkey, and let go of
+    /// afterwards, when there is nothing left to let go of them on.
+    Held,
+    /// Command-tab out and come back, which is not asking to play.
+    Switched,
+    /// The barrier from both sides: a stale event refused and a fresh one
+    /// outranking it.
+    Barrier,
+    /// A refused cursor and a failed session, both of which must close.
+    Failed,
+}
+
+impl Scenario {
+    const ALL: [Scenario; 4] = [
+        Scenario::Held,
+        Scenario::Switched,
+        Scenario::Barrier,
+        Scenario::Failed,
+    ];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Scenario::Held => "held",
+            Scenario::Switched => "switched",
+            Scenario::Barrier => "barrier",
+            Scenario::Failed => "failed",
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Scenario::Held => "a key and a button held through the release hotkey",
+            Scenario::Switched => {
+                "command-tab, and a return to the application that does not \
+                                  recapture"
+            }
+            Scenario::Barrier => {
+                "a stale event refused and a recaptured one outranking the \
+                                  barrier"
+            }
+            Scenario::Failed => "an entry the window server refused and a session that failed",
+        }
+    }
+}
+
+/// What the sequences found, as counts rather than as assertions, because a run
+/// that stopped at the first surprise would report nothing about the rest of
+/// what it was asked to walk.
+#[derive(Default)]
+struct Findings {
+    /// Events made before a barrier and offered after it. Refused here, so they
+    /// never take an id at all and the host is never asked to decide.
+    stale_refused: u64,
+    /// Recaptured sessions whose first event outranked the release that ended
+    /// the capture before it, and any that did not, which the host would refuse
+    /// as pre-barrier and the player would experience as a dead key.
+    outranking: u64,
+    misordered: u64,
+    /// Returns to the application that left the machine uncaptured, and any
+    /// that recaptured, which would take the cursor from somebody who had come
+    /// back to read rather than to play.
+    returns_without_capture: u64,
+    returns_that_recaptured: u64,
+    /// Entries the window server refused.
+    entries_refused: u64,
+    /// Times the machine was left anywhere but uncaptured where the contract
+    /// says it must be uncaptured: after an entry that failed, and after a
+    /// release that has been applied. Half-captured is the state that must be
+    /// unreachable, and this is the figure that says it was.
+    not_uncaptured: u64,
+}
+
+/// Paces the synthetic events against the start of the run rather than against
+/// the last one, so a slow send does not push the whole run later and the count
+/// after n seconds is a figure an operator can predict.
+struct Pace {
+    start: Timestamp,
+    interval: Nanos,
+    emitted: u64,
+}
+
+impl Pace {
+    /// Waits for this event's slot, pumping rather than sleeping so that a
+    /// retransmission, a snapshot or a heartbeat falling due in between still
+    /// goes out on time, and returns the moment the event happened.
+    fn beat(&mut self, sink: &mut Sink) -> Timestamp {
+        pump_until(
+            sink,
+            self.start.add(Nanos(self.emitted * self.interval.get())),
+        );
+        self.emitted += 1;
+        Timestamp::now()
+    }
+}
+
+/// A synthetic key, taken through the same virtual-key table a real one goes
+/// through, so a cycle exercises the whole send path and not only the socket.
+fn synthetic_key(virtual_key: u16) -> ScanCode {
+    ScanCode::from_virtual_key(virtual_key).expect("the cycles only press keys the table covers")
+}
+
+fn press(sink: &mut Sink, pace: &mut Pace, scan: ScanCode, down: bool) {
+    let at = pace.beat(sink);
+    sink.offer_key(scan, down, at);
+}
+
+/// A key offered at the instant it is made rather than in a paced slot, for the
+/// keys of a local combination and nothing else.
+///
+/// None of them produces a datagram, since the recognizer holds them and the
+/// exit throws them away, so spending paced slots on them buys nothing and
+/// costs something real: it pushes the release several slots past the last
+/// event the capture actually sent, and the case a reordering link is here to
+/// produce is that event arriving *after* the release. A link can only do that
+/// if the two are close enough together for its reordering to span them, which
+/// is also how a hand types three keys at once rather than one every fiftieth
+/// of a second.
+fn press_local(sink: &mut Sink, scan: ScanCode) {
+    sink.offer_key(scan, true, Timestamp::now());
+}
+
+fn click(sink: &mut Sink, pace: &mut Pace, button: Button, down: bool) {
+    let at = pace.beat(sink);
+    sink.offer_mouse(MouseEvent::Button { button, down }, at);
+}
+
+/// Performs whatever the machine asked for, with a counter where a real run has
+/// the window server.
+///
+/// A counter and not `CGAssociateMouseAndMouseCursorPosition`, for the same
+/// reason the synthetic keys are not a hand: this mode exists to be runnable
+/// without a display, without a permission and without a person, and on a
+/// machine with no window server every entry would otherwise fail closed and
+/// the run would report a capture path it never exercised. The real cursor is
+/// driven by the capture mode, which is the one a player uses.
+fn settle_counted(sink: &mut Sink) {
+    match sink.pending.take() {
+        None => {}
+        Some(Pending::Detach) => {
+            sink.cursor_detaches += 1;
+            sink.machine.entered();
+        }
+        Some(Pending::Restore) => {
+            sink.cursor_restores += 1;
+            sink.machine.released();
+        }
+    }
+}
+
+/// The click that asks for capture and the cursor call it asks for. The up is
+/// part of the same click and travels no further than the down did.
+fn enter(sink: &mut Sink, pace: &mut Pace) {
+    click(sink, pace, CAPTURE_BUTTON, true);
+    settle_counted(sink);
+    click(sink, pace, CAPTURE_BUTTON, false);
+}
+
+/// The window server refusing the cursor, which is what failure closed has to
+/// survive.
+fn refuse_entry(sink: &mut Sink) {
+    sink.pending = None;
+    sink.machine.entry_failed();
+}
+
+/// The release combination, typed in the order the recognizer requires.
+fn type_the_way_out(sink: &mut Sink) {
+    for scan in [LEFT_COMMAND, LEFT_CONTROL, LEFT_OPTION] {
+        press_local(sink, scan);
+    }
+}
+
+/// A cause that arrives from outside an event, which is a focus loss or a
+/// session that stopped working. Both take the exit an event-borne cause takes,
+/// and a cause that arrives while the exit is already under way takes nothing.
+fn exit_now(sink: &mut Sink, cause: Option<ExitCause>) {
+    if let Some(cause) = cause {
+        let now = Timestamp::now();
+        sink.follow(Action::Exit(cause), now);
+    }
+}
+
+/// Capture, hold a key and a button, type the way out, then let go of both.
+/// The letting go happens while uncaptured, so the host hears about neither and
+/// the release is what let go of them there.
+fn scenario_held(sink: &mut Sink, pace: &mut Pace) {
+    enter(sink, pace);
+    let w = synthetic_key(VK_W);
+    press(sink, pace, w, true);
+    click(sink, pace, Button::Right, true);
+
+    type_the_way_out(sink);
+    settle_counted(sink);
+
+    press(sink, pace, w, false);
+    click(sink, pace, Button::Right, false);
+}
+
+/// Hold shift, a key and a button; command-tab out; come back. Coming back is
+/// not asking to play, so nothing resumes and an explicit click is what has to
+/// ask again.
+fn scenario_switched(sink: &mut Sink, pace: &mut Pace, findings: &mut Findings) {
+    enter(sink, pace);
+    press(sink, pace, synthetic_key(VK_LEFT_SHIFT), true);
+    press(sink, pace, synthetic_key(VK_W), true);
+    click(sink, pace, Button::Left, true);
+
+    press_local(sink, LEFT_COMMAND);
+    press_local(sink, TAB);
+    // macOS posts the focus loss command-tab causes a moment later, and it finds
+    // the exit already under way. One exit and not one per cause is exactly what
+    // makes that harmless.
+    let cause = sink.machine.focus_lost();
+    exit_now(sink, cause);
+    settle_counted(sink);
+    if sink.machine.state() != State::Uncaptured {
+        findings.not_uncaptured += 1;
+    }
+
+    sink.machine.focus_regained();
+    if sink.machine.state() == State::Uncaptured {
+        findings.returns_without_capture += 1;
+    } else {
+        findings.returns_that_recaptured += 1;
+    }
+    // Input offered on the way back, which has nothing to travel on.
+    press(sink, pace, synthetic_key(VK_W), false);
+
+    // The explicit click that does ask, and a focus loss to end it.
+    enter(sink, pace);
+    press(sink, pace, synthetic_key(VK_S), true);
+    let cause = sink.machine.focus_lost();
+    exit_now(sink, cause);
+    settle_counted(sink);
+}
+
+/// The barrier from both sides at once. An event made before a release and
+/// delivered after it is refused here rather than left for the host to refuse,
+/// and the first event of the session that recaptures must outrank that release
+/// or the host will refuse that too and the key will do nothing.
+fn scenario_barrier(sink: &mut Sink, pace: &mut Pace, findings: &mut Findings) {
+    enter(sink, pace);
+    let w = synthetic_key(VK_W);
+    press(sink, pace, w, true);
+
+    type_the_way_out(sink);
+    let barrier = sink.last_release;
+    settle_counted(sink);
+
+    let refused = sink.machine.counts().refused;
+    press(sink, pace, w, false);
+    if sink.machine.counts().refused > refused {
+        findings.stale_refused += 1;
+    }
+
+    enter(sink, pace);
+    let s = synthetic_key(VK_S);
+    press(sink, pace, s, true);
+    match (barrier, sink.last_reliable) {
+        (Some(barrier), Some(after)) if barrier < after => findings.outranking += 1,
+        _ => findings.misordered += 1,
+    }
+    press(sink, pace, s, false);
+
+    let cause = sink.machine.session_failed();
+    exit_now(sink, cause);
+    settle_counted(sink);
+    if sink.machine.state() != State::Uncaptured {
+        findings.not_uncaptured += 1;
+    }
+}
+
+/// Failure closed, twice over. The window server refuses the cursor and the
+/// machine has to be exactly what the player started with rather than
+/// half-captured; then a session fails under a running capture and takes the
+/// same exit every other cause takes.
+fn scenario_failed(sink: &mut Sink, pace: &mut Pace, findings: &mut Findings) {
+    click(sink, pace, CAPTURE_BUTTON, true);
+    refuse_entry(sink);
+    findings.entries_refused += 1;
+    if sink.machine.state() != State::Uncaptured {
+        findings.not_uncaptured += 1;
+    }
+    // Nothing may travel on the strength of a capture that never happened.
+    let w = synthetic_key(VK_W);
+    press(sink, pace, w, true);
+    click(sink, pace, CAPTURE_BUTTON, false);
+
+    enter(sink, pace);
+    press(sink, pace, w, true);
+    click(sink, pace, Button::Middle, true);
+
+    let cause = sink.machine.session_failed();
+    exit_now(sink, cause);
+    settle_counted(sink);
+    if sink.machine.state() != State::Uncaptured {
+        findings.not_uncaptured += 1;
+    }
+}
+
+fn report_findings(findings: &Findings) {
+    println!(
+        "stale events refused after a barrier {}  recaptured events outranking their barrier {}  \
+         misordered {}",
+        findings.stale_refused, findings.outranking, findings.misordered
+    );
+    println!(
+        "returns to the application that did not recapture {}  that did {}  entries the window \
+         server refused {}",
+        findings.returns_without_capture,
+        findings.returns_that_recaptured,
+        findings.entries_refused
+    );
+    println!(
+        "times the machine was left anywhere but uncaptured where it must be uncaptured {}",
+        findings.not_uncaptured
+    );
+}
+
+/// The synthetic capture cycles. No AppKit, no permission, no hand and no
+/// window server: what is being tested here is the state machine, the ordering
+/// its one exit imposes on the event ids, and whatever is injecting at the far
+/// end of the socket.
+fn run_cycles(args: &Args, socket: UdpSocket, target: SocketAddr) -> ExitCode {
+    if args.key_rate == 0 {
+        eprintln!("--key-rate must be at least one event per second");
+        return ExitCode::FAILURE;
+    }
+
+    let mut sink = new_sink(socket, target, args.session_id);
+    println!(
+        "driving {} capture cycles to {target} as session {} at {} events/s",
+        args.cycles, args.session_id, args.key_rate
+    );
+    for scenario in Scenario::ALL {
+        println!("  {}: {}", scenario.label(), scenario.name());
+    }
+
+    let mut pace = Pace {
+        start: Timestamp::now(),
+        interval: Nanos(1_000_000_000 / u64::from(args.key_rate)),
+        emitted: 0,
+    };
+    let mut findings = Findings::default();
+    let mut walked = [0u64; Scenario::ALL.len()];
+
+    for cycle in 0..args.cycles {
+        let index = (cycle % Scenario::ALL.len() as u64) as usize;
+        walked[index] += 1;
+        match Scenario::ALL[index] {
+            Scenario::Held => scenario_held(&mut sink, &mut pace),
+            Scenario::Switched => scenario_switched(&mut sink, &mut pace, &mut findings),
+            Scenario::Barrier => scenario_barrier(&mut sink, &mut pace, &mut findings),
+            Scenario::Failed => scenario_failed(&mut sink, &mut pace, &mut findings),
+        }
+    }
+
+    finish(&mut sink);
+
+    let coverage: Vec<String> = Scenario::ALL
+        .iter()
+        .zip(walked)
+        .map(|(scenario, count)| format!("{} {count}", scenario.label()))
+        .collect();
+    println!("sequences walked: {}", coverage.join("  "));
+    // Named rather than left to a reader to subtract, because a run that walked
+    // three of the four is not evidence about the fourth.
+    for (scenario, count) in Scenario::ALL.iter().zip(walked) {
+        if count == 0 {
+            println!("sequence {} was never walked by this run", scenario.label());
+        }
+    }
+
+    println!("failed sends {}", sink.failed);
+    report_machine(&sink);
+    report_findings(&findings);
+    report_input(&sink);
+    // Said plainly, because the figures above are the ones a capture run reads
+    // as a fault. Here they are the input a release had to sweep: every one of
+    // these sequences exits with something still held, which is the case the
+    // barrier exists for.
+    println!(
+        "these sequences exit on purpose with keys and buttons held, so the held figures above \
+         are what a release swept rather than input that leaked"
+    );
+    report_releases(&sink);
+    report_reliability(&sink);
+    report_cost(&sink, "clock read to send_to returning");
+    check_expectations(&args.expect, &sink)
+}
+
+/// Performs the window server call the machine asked for, outside AppKit's
+/// dispatch of the event that asked for it.
+fn settle_cursor(sink: &Rc<RefCell<Sink>>, capture: &mut Capture) {
+    let Some(pending) = sink.borrow_mut().pending.take() else {
+        return;
+    };
+    match pending {
+        Pending::Detach => match capture.detach_cursor() {
+            Ok(()) => {
+                let mut sink = sink.borrow_mut();
+                sink.cursor_detaches += 1;
+                sink.machine.entered();
+            }
+            Err(why) => {
+                // Failure closed. The player keeps the machine they already had,
+                // which is the only outcome that cannot be mistaken for a broken
+                // computer.
+                eprintln!("the cursor could not be taken, so no capture started: {why}");
+                sink.borrow_mut().machine.entry_failed();
+            }
+        },
+        Pending::Restore => {
+            if let Err(why) = capture.release_cursor() {
+                eprintln!("the cursor could not be given back: {why}");
+            }
+            let mut sink = sink.borrow_mut();
+            sink.cursor_restores += 1;
+            // Reported whatever the window server said. A cursor left detached
+            // is a bad end to a run; a machine stuck in its exit, refusing every
+            // event for the rest of the session, is a worse one.
+            sink.machine.released();
+        }
+    }
+}
+
+/// The capture mode: real mouse motion, buttons and wheel, real keys when asked
+/// for, and the state machine deciding which of them may leave.
+///
+/// The session starts uncaptured with the monitors already installed, because
+/// the click that asks for capture is itself a mouse event and cannot be acted
+/// on before it has been seen.
 fn run_capture(args: &Args, socket: UdpSocket, target: SocketAddr) -> ExitCode {
     let Some(mtm) = MainThreadMarker::new() else {
         eprintln!("the probe must run on the main thread for AppKit to deliver events");
@@ -880,7 +1527,8 @@ fn run_capture(args: &Args, socket: UdpSocket, target: SocketAddr) -> ExitCode {
 
     let sending = Rc::clone(&sink);
     let mut capture =
-        match Capture::start(move |event, at| sending.borrow_mut().send_mouse(event, at)) {
+        match Capture::start_attached(move |event, at| sending.borrow_mut().offer_mouse(event, at))
+        {
             Ok(capture) => capture,
             Err(why) => {
                 eprintln!("cannot capture the mouse: {why}");
@@ -894,7 +1542,7 @@ fn run_capture(args: &Args, socket: UdpSocket, target: SocketAddr) -> ExitCode {
             // The capture's own event id is ignored: the reliability layer mints
             // the one that goes on the wire, so there is exactly one counter per
             // session however many sources of keys there are.
-            sending.borrow_mut().send_key(key.scan, key.down, key.at);
+            sending.borrow_mut().offer_key(key.scan, key.down, key.at);
         }) {
             Ok(keyboard) => Some(keyboard),
             Err(why) => {
@@ -912,7 +1560,8 @@ fn run_capture(args: &Args, socket: UdpSocket, target: SocketAddr) -> ExitCode {
     let focus = FocusWatcher::start();
 
     println!(
-        "capturing {} for {} s, sending to {target} as session {}",
+        "watching {} for {} s, sending to {target} as session {} from the moment a click asks \
+         for the capture",
         if args.keys {
             "the mouse and the keyboard"
         } else {
@@ -938,23 +1587,22 @@ fn run_capture(args: &Args, socket: UdpSocket, target: SocketAddr) -> ExitCode {
             }
         });
 
+        // Focus is the loss that happens most and the easiest to miss, and it
+        // goes through the machine rather than being undone here. That is what
+        // makes the four causes one exit instead of four handlers each deciding
+        // for themselves what to put back.
         if focus.take_loss() {
-            // The cursor goes back to the mouse at the same moment the host is
-            // told to let go. A player who has switched away is looking at
-            // another application, and a cursor still detached there is a
-            // machine that appears broken with no visible cause.
-            if let Err(why) = capture.release_cursor() {
-                eprintln!("the cursor could not be reattached on losing focus: {why}");
-            }
-            sink.borrow_mut()
-                .release(ReleaseCause::FocusLost, Timestamp::now());
+            let mut sink = sink.borrow_mut();
+            let cause = sink.machine.focus_lost();
+            exit_now(&mut sink, cause);
         }
-        if focus.take_regain()
-            && let Err(why) = capture.detach_cursor()
-        {
-            eprintln!("the cursor could not be detached on regaining focus: {why}");
+        if focus.take_regain() {
+            // Not a recapture. Somebody who switched back to look at the window
+            // has not asked to play, and the click is what asks.
+            sink.borrow_mut().machine.focus_regained();
         }
 
+        settle_cursor(&sink, &mut capture);
         sink.borrow_mut().pump(Timestamp::now());
     }
 
@@ -998,6 +1646,16 @@ fn run_capture(args: &Args, socket: UdpSocket, target: SocketAddr) -> ExitCode {
         }
     }
 
+    report_machine(&sink);
+    // A run in which nobody clicked captured nothing, and a capture path that
+    // was never entered has to say so rather than print a tidy set of zeroes.
+    if sink.machine.counts().captures == 0 {
+        println!(
+            "nothing ever asked for the capture, so nothing was sent: click once with the left \
+             button to take the mouse, and press command, control and option together to give \
+             it back"
+        );
+    }
     report_input(&sink);
     report_releases(&sink);
     report_reliability(&sink);
@@ -1041,7 +1699,9 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    if args.synthetic_keys || args.synthetic_buttons || args.synthetic_wheel {
+    if args.cycles > 0 {
+        run_cycles(&args, socket, target)
+    } else if args.synthetic_keys || args.synthetic_buttons || args.synthetic_wheel {
         run_synthetic(&args, socket, target)
     } else {
         run_capture(&args, socket, target)

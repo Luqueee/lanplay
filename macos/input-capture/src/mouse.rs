@@ -149,6 +149,24 @@ impl Capture {
     where
         F: FnMut(MouseEvent, Timestamp) + 'static,
     {
+        let mut capture = Capture::start_attached(callback)?;
+        capture.link.detach()?;
+        Ok(capture)
+    }
+
+    /// Starts capturing with the cursor left where it is, still following the
+    /// mouse.
+    ///
+    /// This is what a session that begins uncaptured needs. The monitors have to
+    /// be installed before the click that asks for capture can be seen, and that
+    /// click arrives while the cursor still belongs to this machine, so the two
+    /// halves of `start` cannot happen at the same moment. The cursor is then
+    /// taken by [`Capture::detach_cursor`] once something has decided the click
+    /// was a request rather than input.
+    pub fn start_attached<F>(callback: F) -> Result<Capture, CaptureError>
+    where
+        F: FnMut(MouseEvent, Timestamp) + 'static,
+    {
         let shared = Rc::new(RefCell::new(Shared {
             residue: Residue::new(),
             notches: Notches::new(),
@@ -180,15 +198,13 @@ impl Capture {
             NSEvent::addLocalMonitorForEventsMatchingMask_handler(CAPTURE_MASK, &local_block)
         };
 
-        // Built before the cursor is touched so that a refused detach unwinds
-        // through `Drop` and takes the monitors with it.
-        let mut capture = Capture {
+        // Built rather than returned piecemeal so that a caller whose own setup
+        // fails next unwinds through `Drop` and takes the monitors with it.
+        Ok(Capture {
             global: Some(global),
             local,
             link: CursorLink::new(),
-        };
-        capture.link.detach()?;
-        Ok(capture)
+        })
     }
 
     /// Stops capturing and lets the cursor follow the mouse again. Idempotent,

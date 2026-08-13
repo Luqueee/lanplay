@@ -37,8 +37,16 @@
 //! the summary reports what the window server accepted rather than what was
 //! attempted.
 //!
+//! `--capture-click` posts one left click before the motion begins. A client
+//! that starts uncaptured, which is what the capture state machine requires,
+//! sends nothing at all until something asks it to capture, and a motion arm
+//! then measures a clean run of zero. Exercising the real path is better than a
+//! flag that skips it, but it does mean a click lands wherever the cursor is,
+//! so it is not the default.
+//!
 //! usage:
 //!   mouse-mover [--seconds 30] [--hz 250] [--amplitude 6] [--pattern circle]
+//!               [--capture-click]
 
 #![cfg(target_os = "macos")]
 
@@ -69,6 +77,7 @@ fn main() {
     let mut hz = 250.0f64;
     let mut amplitude = 6.0f64;
     let mut pattern = Pattern::Circle;
+    let mut capture_click = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let value =
@@ -77,6 +86,7 @@ fn main() {
             "--seconds" => seconds = value(&mut args).unwrap_or(seconds),
             "--hz" => hz = value(&mut args).unwrap_or(hz),
             "--amplitude" => amplitude = value(&mut args).unwrap_or(amplitude),
+            "--capture-click" => capture_click = true,
             "--pattern" => {
                 pattern = match args.next().as_deref() {
                     Some("drift") => Pattern::Drift,
@@ -112,6 +122,15 @@ fn main() {
     let (low, high) = (200.0f64, 600.0f64);
     let mut at = home;
     CGWarpMouseCursorPosition(home);
+
+    if capture_click {
+        // Before any motion, because a client that is not capturing yet would
+        // refuse the motion and count it refused, which is correct behaviour
+        // and a useless measurement.
+        click(home);
+        std::thread::sleep(Duration::from_millis(120));
+        println!("posted one left click to request capture");
+    }
 
     let start = Instant::now();
     let mut posted = 0u64;
@@ -182,6 +201,15 @@ fn main() {
     }
     let rate = accepted as f64 / start.elapsed().as_secs_f64();
     println!("accepted rate {rate:.1}/s against {hz:.0} Hz asked for");
+}
+
+/// Posts a left button press and release at `at`.
+fn click(at: CGPoint) {
+    for kind in [CGEventType::LeftMouseDown, CGEventType::LeftMouseUp] {
+        if let Some(event) = CGEvent::new_mouse_event(None, kind, at, CGMouseButton::Left) {
+            CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&event));
+        }
+    }
 }
 
 /// Posts one mouse-moved event carrying an explicit delta.

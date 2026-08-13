@@ -133,6 +133,7 @@ if [ "${MOVER:-1}" = 1 ]; then
         "$REPO/target/release/mouse-mover" \
             --seconds "$((SECONDS_TO_RUN - 4))" --hz "${MOVER_HZ:-250}" \
             --amplitude "${MOVER_AMPLITUDE:-6}" --pattern "${MOVER_PATTERN:-drift}" \
+            --capture-click \
             >/tmp/input-mover.out 2>&1
     ) &
     mover=$!

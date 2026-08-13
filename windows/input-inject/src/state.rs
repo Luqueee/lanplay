@@ -304,6 +304,13 @@ impl HostState {
             // on the way, retransmitted, and arriving after the release that
             // was meant to end it. To the window it looks new.
             if self.barrier.is_some_and(|barrier| id < barrier) {
+                // Marked, not merely refused. The acknowledgement is built
+                // from this window, so an id left out of it reads as a hole:
+                // the client retransmits until the id falls out of reach and
+                // then reports it as possibly lost, for an event the host has
+                // definitively decided about. Deciding and saying nothing is
+                // worse than not deciding.
+                self.reliable.mark(id);
                 return Outcome::Superseded;
             }
             if !self.reliable.mark(id) {
@@ -1305,6 +1312,52 @@ mod tests {
         assert!(
             outcome.owes_ack(),
             "it must still be acknowledged or the client retransmits forever"
+        );
+    }
+
+    #[test]
+    fn a_superseded_event_is_not_reported_as_a_hole() {
+        // Found by a gate whose two criteria fought each other: refusing late
+        // pre-barrier events and abandoning none cannot both hold if the
+        // refusal leaves the id out of the acknowledgement. The client is
+        // entitled to conclude from an unmarked id that the host never saw it.
+        let mut state = HostState::new(SESSION);
+        for id in 1..=5u64 {
+            state.apply(
+                &Message::Key {
+                    id: EventId(id),
+                    scancode: 0x11,
+                    down: id % 2 == 1,
+                    extended: false,
+                },
+                |_| {},
+            );
+        }
+        state.apply(&Message::ReleaseAll { id: EventId(9) }, |_| {});
+        // Id 7 precedes the barrier and never arrived until now.
+        let outcome = state.apply(
+            &Message::Key {
+                id: EventId(7),
+                scancode: 0x11,
+                down: true,
+                extended: false,
+            },
+            |_| {},
+        );
+        assert_eq!(outcome, Outcome::Superseded);
+        let ack = state.acknowledgement().expect("something was applied");
+        let below = ack.top.0 - 7;
+        assert!(
+            (1..=32).contains(&below),
+            "id 7 should be inside the window below top {}",
+            ack.top.0
+        );
+        assert_eq!(
+            ack.missing & (1 << (below - 1)),
+            0,
+            "a decided event must not be advertised as missing: top {} missing {:#034b}",
+            ack.top.0,
+            ack.missing
         );
     }
 

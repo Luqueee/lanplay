@@ -54,6 +54,16 @@
 //! on the event path so that a lost datagram cannot turn into a backlog of
 //! pending motion.
 //!
+//! What holds all of that together is [`capture`], the machine that decides
+//! when any of it is allowed to leave. A click asks for the input and one of
+//! four losses of control gives it back, and every one of those four takes the
+//! same exit in the same order, because closing admission after drawing the
+//! release barrier rather than before it is what lets a press made during the
+//! exit land on the host as though it were made after one. That machine is also
+//! the only place that can suppress the click which asked for capture, and the
+//! only place that can decide a key combination is local before its keys have
+//! ids and are beyond recall.
+//!
 //! ```no_run
 //! use lanplay_input_capture::{Capture, Keyboard, MouseEvent};
 //!
@@ -69,6 +79,7 @@
 //! capture.release().unwrap();
 //! ```
 
+pub mod capture;
 pub mod focus;
 pub mod heartbeat;
 pub mod reliable;
@@ -83,6 +94,7 @@ pub mod keyboard;
 #[cfg(target_os = "macos")]
 pub mod mouse;
 
+pub use capture::{ExitCause, Machine};
 pub use focus::FocusState;
 pub use heartbeat::Heartbeat;
 pub use reliable::Reliable;
