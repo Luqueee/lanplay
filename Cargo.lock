@@ -334,6 +334,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lanplay-input-protocol"
+version = "0.1.0"
+
+[[package]]
 name = "lanplay-link-metrics"
 version = "0.1.0"
 dependencies = [
