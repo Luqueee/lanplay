@@ -21,7 +21,11 @@ set -euo pipefail
 HOST="${WIN_HOST:-windows}"
 REPO='C:\Users\luque\lanplay-rs'
 TASK="${WIN_TASK:-lanplay-session}"
-WRAPPER='C:\Users\luque\lanplay-run.cmd'
+# Derived from the task rather than fixed, so that setting `WIN_TASK` is enough
+# to make one invocation independent of another. Two concurrent runs with a
+# shared wrapper overwrite each other's command between the copy and the launch,
+# and the loser reports a timeout while the winner runs twice.
+WRAPPER="C:\\Users\\luque\\${TASK}.cmd"
 
 if [ $# -lt 2 ]; then
     echo "usage: $0 <log-file-on-windows> <command...>" >&2

@@ -219,8 +219,11 @@ impl Recorder {
         })
     }
 
-    /// One present of the current colour returned at `returned`.
-    fn presented(&mut self, returned: Timestamp) {
+    /// One present of the current colour returned at `returned`, and whether it
+    /// closed a timed interval so that a caller can attribute something to the
+    /// event rather than to the present. Every present calls this and only the
+    /// one that first carried the change closes anything.
+    fn presented(&mut self, returned: Timestamp) -> bool {
         if self.flash.presented()
             && let Some((at, source)) = self.pending.take()
         {
@@ -228,7 +231,9 @@ impl Recorder {
             self.tally_mut(source)
                 .latency
                 .saturating_record(interval.get());
+            return true;
         }
+        false
     }
 }
 
@@ -535,7 +540,23 @@ pub fn run(cli: &Cli) -> Result<Observed, String> {
         if result == OCCLUDED {
             recorder.observed.occluded_presents += 1;
         }
-        recorder.presented(returned);
+        if !recorder.presented(returned) {
+            continue;
+        }
+
+        // Sampled here, once per timed event and after the interval has closed,
+        // rather than at the two ends of the run. A console process launched
+        // between them takes the foreground and gives it back when it exits, so
+        // both end samples read true while every injected keystroke landed
+        // somewhere else. That is not a property of Windows and it is the
+        // difference between "SendInput does not reach the window message queue"
+        // and "this window was not the one being typed into" - which is the
+        // question the two paths exist to answer.
+        //
+        // SAFETY: no arguments.
+        if unsafe { GetForegroundWindow() } != hwnd {
+            recorder.observed.timed_while_background += 1;
+        }
     }
 
     // SAFETY: no arguments.

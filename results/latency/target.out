@@ -1,0 +1,20 @@
+input-latency-target: input message handled -> the present that first showed the change
+clock: QueryPerformanceCounter on this host; a host-local interval, never to be differenced against a client timestamp
+
+display   index 1 \\.\DISPLAY10 1920x1080 at (-1920,0) monitor "" adapter "LanPlay IDD-LAB 1080p120"
+window    borderless popup, topmost, covering the whole output, foreground yes
+present   sync interval 0, tearing yes, white held for 8 presents; not waiting for vertical blank makes this a lower bound on a vsynced game
+run       55.00 s, 550378 presents, 0 failed, 0 occluded
+
+path                  seen   timed in-flash
+raw input              243     243       0
+window messages        242       0     242
+  window messages by kind: keys 242, mouse 0
+  timed while another window held the foreground: 0
+
+handled to present   count        p50        p95        p99        max
+raw input              243      53.8µ      83.0µ     401.9µ    1272.8µ
+window messages          0   nothing timed
+
+FINDING: raw input delivered 243 events and the window message queue delivered 242. These are different queues and the difference is the point; they are not summed anywhere in this report.
+         Known innocent causes: a held key auto-repeats into the message queue and not into raw input; pointer motion is coalesced per frame for the message queue and delivered per HID report to raw input; and a window without the foreground receives raw input and no keystrokes at all.

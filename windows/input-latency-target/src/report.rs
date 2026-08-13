@@ -75,6 +75,13 @@ pub struct Observed {
     pub foreground: bool,
     pub elapsed: Nanos,
     pub presents: u64,
+    /// Timed events that landed while some other window held the foreground.
+    ///
+    /// Keyboard messages reach the window with focus and raw input reaches a
+    /// registered sink whatever has it, so a run where this is not zero cannot
+    /// be read as evidence about what `SendInput` does or does not reach. It is
+    /// the difference between a finding and a misconfigured harness.
+    pub timed_while_background: u64,
     pub present_failures: u64,
     /// The first failing `Present` result, so a failure count has something
     /// to be diagnosed from.
@@ -101,6 +108,7 @@ impl Observed {
             foreground: false,
             elapsed: Nanos::ZERO,
             presents: 0,
+            timed_while_background: 0,
             present_failures: 0,
             first_present_failure: None,
             occluded_presents: 0,
@@ -245,6 +253,11 @@ pub fn render(observed: &Observed) -> String {
         "  window messages by kind: keys {}, mouse {}",
         observed.key_messages, observed.mouse_messages
     );
+    let _ = writeln!(
+        text,
+        "  timed while another window held the foreground: {}",
+        observed.timed_while_background
+    );
     let _ = writeln!(text);
 
     // Microseconds, not the project's usual milliseconds. This segment is the
@@ -320,9 +333,24 @@ fn write_findings(text: &mut String, observed: &Observed) {
             text,
             "         Known innocent causes: a held key auto-repeats into the message queue and \
              not into raw input; pointer motion is coalesced per frame for the message queue and \
-             delivered per HID report to raw input; and with no foreground, only raw input \
-             arrives at all."
+             delivered per HID report to raw input; and a window without the foreground receives \
+             raw input and no keystrokes at all."
         );
+        if observed.timed_while_background > 0 {
+            // The one cause that is not innocent, and the one an end-of-run
+            // foreground sample cannot see: a console process launched during
+            // the run takes the foreground and returns it on exit, so both end
+            // samples read true while the keystrokes went elsewhere. Stated
+            // beside the disagreement, because otherwise the sentence above
+            // reads as an explanation when it is a list of candidates.
+            let _ = writeln!(
+                text,
+                "         That last cause applies here: {} of the timed events landed while \
+                 another window held the foreground, so this disagreement says nothing about \
+                 what `SendInput` reaches.",
+                observed.timed_while_background
+            );
+        }
     }
 
     if !observed.foreground {
@@ -468,6 +496,34 @@ mod tests {
         assert!(text.contains("delivered 242"), "{text}");
         // 482 is the sum, and it must appear nowhere.
         assert!(!text.contains("482"), "{text}");
+    }
+
+    /// The list of innocent causes reads as an explanation when one of them is
+    /// actually known to apply, so the one that is measurable says so and the
+    /// disagreement is disclaimed rather than left to be interpreted.
+    #[test]
+    fn a_disagreement_measured_from_the_background_disclaims_itself() {
+        let mut observed = observed();
+        observed.raw.seen = 243;
+        observed.messages.seen = 0;
+        observed.timed_while_background = 243;
+        let text = super::render(&observed);
+        assert!(text.contains("That last cause applies here: 243"), "{text}");
+        assert!(
+            text.contains("says nothing about what `SendInput` reaches"),
+            "{text}"
+        );
+    }
+
+    /// And stays quiet when it does not apply, so that its presence is a signal.
+    #[test]
+    fn a_disagreement_with_the_foreground_held_throughout_is_left_standing() {
+        let mut observed = observed();
+        observed.raw.seen = 243;
+        observed.messages.seen = 0;
+        let text = super::render(&observed);
+        assert!(text.contains("FINDING: raw input delivered 243"), "{text}");
+        assert!(!text.contains("That last cause applies here"), "{text}");
     }
 
     #[test]

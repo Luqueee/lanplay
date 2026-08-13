@@ -1,0 +1,34 @@
+input-inject-probe: bound 0.0.0.0:5006, session 1, injecting
+first datagram from 192.168.1.108:61212
+
+datagrams               686
+applied                 441
+duplicate                 4
+superseded                0
+stale snapshot          241
+wrong session             0
+decode errors             0
+host to client            0
+acks sent               247
+ack failures              0
+sendinput calls         242
+  by kind        motion 0, key 242, button 0, wheel 0
+refused                   0
+injected dx               0
+injected dy               0
+motion                    0
+keys                    246
+buttons                   0
+wheel                     0
+snapshots               364
+heartbeats               75
+released, asked           1
+released, expired         1
+still held: keys {}, buttons 0b00000
+acknowledged: top 242, missing 0b00000000000000000000000000000000
+
+recv to injected   count      686   p50     1.00µ   p95   117.12µ   p99   132.61µ   max   246.66µ
+  over  0.5 ms        0    0.000 % of 686
+  over  1.0 ms        0    0.000 % of 686
+  over  2.0 ms        0    0.000 % of 686
+  over  5.0 ms        0    0.000 % of 686
