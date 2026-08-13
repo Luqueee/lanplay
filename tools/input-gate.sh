@@ -148,7 +148,10 @@ def totals(path, label):
     # and a single pattern spanning both silently matched nothing.
     dx_match = re.search(r"(?:total|injected)\s+dx\s+(-?\d+)", text)
     dy_match = re.search(r"(?:total|injected)\s+dy\s+(-?\d+)", text)
-    count = re.search(r"datagrams\s+(\d+)|(\d+)\s+datagrams", text)
+    # Anchored, because an unanchored alternation matched the port number in
+    # "first datagram from 192.168.1.108:49901" and reported it as a count.
+    count = re.search(r"^\s*datagrams\s+(\d+)\s*$|^events \d+\s+datagrams (\d+)",
+                      text, re.M)
     failed = re.search(r"failed sends\s+(\d+)", text)
     if not dx_match or not dy_match:
         print(f"  {label:<8} no total in output")
