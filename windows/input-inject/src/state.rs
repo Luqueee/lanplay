@@ -88,6 +88,15 @@ pub enum Outcome {
     Stale,
     /// Host-to-client traffic that arrived at the host. Nothing to inject.
     Ignored,
+    /// A reliable event whose id precedes the last `ReleaseAll`. Acknowledged
+    /// so the client stops retransmitting, and never applied.
+    ///
+    /// Without this a focus loss could paradoxically leave a key down: a press
+    /// that was lost on the way, retransmitted, and delivered after the
+    /// release carries an id the deduplication window has never seen, so it
+    /// looks fresh and would be pressed. Deduplication cannot catch it because
+    /// it never arrived the first time.
+    Superseded,
     /// A datagram belonging to some other session. Nothing was injected and
     /// nothing is owed: that session is over, and an acknowledgement would
     /// tell a departed client that its event landed on this host.
@@ -121,9 +130,17 @@ impl Outcome {
     }
 
     /// Whether the client is owed an acknowledgement, given that this message
-    /// was reliable. True for a duplicate as well as for a fresh event.
+    /// was reliable.
+    ///
+    /// True for a duplicate and for a superseded event as well as for a fresh
+    /// one. The client retransmits until it hears something, so silence about
+    /// an event the host has decided never to apply buys five more copies of
+    /// it and then an abandonment the client reports as possible loss.
     pub fn owes_ack(self) -> bool {
-        matches!(self, Outcome::Applied | Outcome::Duplicate)
+        matches!(
+            self,
+            Outcome::Applied | Outcome::Duplicate | Outcome::Superseded
+        )
     }
 }
 
@@ -179,6 +196,10 @@ pub struct HostState {
     /// a stale one arriving first would then own the host.
     session: SessionId,
     keys: KeyBitset,
+    /// The id of the last applied `ReleaseAll`, which is a barrier and not
+    /// merely a sweep: nothing logically before it may recreate held state,
+    /// however late it arrives.
+    barrier: Option<EventId>,
     /// Bit per [`Button::index`], matching the snapshot's button field so the
     /// two can be compared directly.
     buttons: u8,
@@ -201,6 +222,7 @@ impl HostState {
             keys: KeyBitset::EMPTY,
             buttons: 0,
             reliable: Dedup::new(),
+            barrier: None,
             generation: None,
             stale_snapshots: 0,
             releases: Releases::default(),
@@ -248,6 +270,7 @@ impl HostState {
         // discard the first snapshot for being older than one the previous
         // client sent.
         self.reliable = Dedup::new();
+        self.barrier = None;
         self.generation = None;
     }
 
@@ -275,10 +298,17 @@ impl HostState {
     /// is no queue anywhere on this path: an action is handed to the OS as it
     /// is decided, so one event in is one call out.
     pub fn apply(&mut self, message: &Message, mut emit: impl FnMut(Action)) -> Outcome {
-        if let Some(id) = message.event_id()
-            && !self.reliable.mark(id)
-        {
-            return Outcome::Duplicate;
+        if let Some(id) = message.event_id() {
+            // The barrier is checked before the deduplication window, because
+            // the event this exists to stop has never been seen: a press lost
+            // on the way, retransmitted, and arriving after the release that
+            // was meant to end it. To the window it looks new.
+            if self.barrier.is_some_and(|barrier| id < barrier) {
+                return Outcome::Superseded;
+            }
+            if !self.reliable.mark(id) {
+                return Outcome::Duplicate;
+            }
         }
 
         match *message {
@@ -339,7 +369,12 @@ impl HostState {
                 self.generation = Some(generation);
                 self.reconcile(keys, buttons, &mut emit);
             }
-            Message::ReleaseAll { .. } => {
+            Message::ReleaseAll { id } => {
+                // A barrier and not merely a sweep. Everything the client sent
+                // before this is stale by construction: it described a world
+                // in which something was held, and the client has since said
+                // nothing is.
+                self.barrier = Some(id);
                 self.releases.requested += 1;
                 self.release_all(&mut emit);
             }
@@ -1203,6 +1238,95 @@ mod tests {
         assert_eq!(outcome, Outcome::Ignored);
         assert!(actions.is_empty());
         assert!(!outcome.owes_ack(), "acknowledging an acknowledgement");
+    }
+
+    #[test]
+    fn a_press_lost_before_a_release_cannot_arrive_after_it_and_hold() {
+        // The dangerous ordering, and the one deduplication cannot catch. A
+        // press is lost on the way, so the host has never seen its id. The
+        // client loses focus and its ReleaseAll arrives. Then the press is
+        // retransmitted and lands. To the deduplication window it looks new,
+        // and applying it would leave a key held *after* a release - a focus
+        // loss that paradoxically presses something.
+        let mut state = HostState::new(SESSION);
+        let mut actions = Vec::new();
+
+        // Shift arrives and is held; W is lost in flight and never seen.
+        state.apply(
+            &Message::Key {
+                id: EventId(10),
+                scancode: 0x2A,
+                down: true,
+                extended: false,
+            },
+            |action| actions.push(action),
+        );
+        assert_eq!(
+            actions.len(),
+            1,
+            "the shift press should have been injected"
+        );
+
+        // The client lets go. Its release carries a later id than the press
+        // that went missing, which is what makes the ordering decidable.
+        actions.clear();
+        let outcome = state.apply(&Message::ReleaseAll { id: EventId(12) }, |action| {
+            actions.push(action)
+        });
+        assert_eq!(outcome, Outcome::Applied);
+        assert_eq!(actions.len(), 1, "the held shift should have been released");
+        assert!(state.nothing_held());
+
+        // And now the retransmission of the press that was lost.
+        actions.clear();
+        let outcome = state.apply(
+            &Message::Key {
+                id: EventId(11),
+                scancode: 0x11,
+                down: true,
+                extended: false,
+            },
+            |action| actions.push(action),
+        );
+        assert_eq!(
+            outcome,
+            Outcome::Superseded,
+            "a press from before the release must not be applied"
+        );
+        assert!(
+            actions.is_empty(),
+            "nothing may be injected for it: {actions:?}"
+        );
+        assert!(
+            state.nothing_held(),
+            "the release must hold: {:?}",
+            state.held_keys()
+        );
+        assert!(
+            outcome.owes_ack(),
+            "it must still be acknowledged or the client retransmits forever"
+        );
+    }
+
+    #[test]
+    fn an_event_after_a_release_is_applied_normally() {
+        // The barrier must not become a wall. A press the user makes after
+        // recapturing carries a later id and has to work.
+        let mut state = HostState::new(SESSION);
+        state.apply(&Message::ReleaseAll { id: EventId(12) }, |_| {});
+        let mut actions = Vec::new();
+        let outcome = state.apply(
+            &Message::Key {
+                id: EventId(13),
+                scancode: 0x11,
+                down: true,
+                extended: false,
+            },
+            |action| actions.push(action),
+        );
+        assert_eq!(outcome, Outcome::Applied);
+        assert_eq!(actions.len(), 1);
+        assert!(state.holds_key(0x11, false));
     }
 
     #[test]

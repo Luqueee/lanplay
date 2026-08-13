@@ -191,6 +191,7 @@ struct Counts {
     datagrams: u64,
     applied: u64,
     duplicates: u64,
+    superseded: u64,
     wrong_session: u64,
     decode_errors: u64,
     /// Host-to-client messages that arrived at the host.
@@ -372,6 +373,12 @@ pub fn main() -> ExitCode {
         match outcome {
             Outcome::Applied => counts.applied += 1,
             Outcome::Duplicate => counts.duplicates += 1,
+            // Counted apart from duplicates. A duplicate is a retransmission
+            // of something already applied; a superseded event is one that was
+            // never applied and never will be, because a release has since
+            // declared its world gone. Pooling them would hide a client still
+            // sending presses after it said it had let go.
+            Outcome::Superseded => counts.superseded += 1,
             Outcome::Ignored => counts.ignored += 1,
             Outcome::Stale | Outcome::WrongSession => {}
         }
@@ -455,6 +462,7 @@ fn report(
     println!("datagrams        {:>10}", counts.datagrams);
     println!("applied          {:>10}", counts.applied);
     println!("duplicate        {:>10}", counts.duplicates);
+    println!("superseded       {:>10}", counts.superseded);
     println!("stale snapshot   {:>10}", state.stale_snapshots());
     println!("wrong session    {:>10}", counts.wrong_session);
     println!("decode errors    {:>10}", counts.decode_errors);
