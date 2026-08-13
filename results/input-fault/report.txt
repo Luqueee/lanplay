@@ -1,0 +1,11 @@
+arm              sent     retx    aband     ackd    snaps     outstd  held on host
+clean             403        0        0      403      195          0  {}
+loss-tenth        403        2        0      403      195          0  {}
+loss-one          403        5        0      403      196          0  {}
+loss-five         403       34        0      403      195          0  {}
+reorder           403        0        0      403      195          0  {}
+duplicate         403        0        0      403      196          0  {}
+stall             403       17        0      403      194          0  {}
+everything        403       46        0      403      197          0  {}
+
+detail in /tmp/input-fault

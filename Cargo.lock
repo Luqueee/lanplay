@@ -488,6 +488,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lanplay-udp-fault"
+version = "0.1.0"
+
+[[package]]
 name = "lanplay-video-core"
 version = "0.1.0"
 dependencies = [

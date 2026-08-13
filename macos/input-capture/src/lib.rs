@@ -28,6 +28,11 @@
 //! have produced. That choice belongs here rather than in the wire format
 //! because it is what makes the capture layout-independent.
 //!
+//! A third piece, [`reliable`], is neither of those: it is what makes a lost
+//! key release survive at all. It reads no clock and owns no socket, so the
+//! retransmission ladder and the snapshot cadence are tested by advancing a
+//! number rather than by sleeping through them.
+//!
 //! Rejected: `CGEventTap`, which sees more but asks the user for accessibility
 //! permission and can be disabled by the system for being slow, and
 //! `IOHIDManager`, which reports per-device counts in device units and would
@@ -46,6 +51,7 @@
 //! capture.release().unwrap();
 //! ```
 
+pub mod reliable;
 pub mod residue;
 pub mod scancode;
 
@@ -56,6 +62,7 @@ pub mod keyboard;
 #[cfg(target_os = "macos")]
 pub mod mouse;
 
+pub use reliable::Reliable;
 pub use residue::Residue;
 pub use scancode::ScanCode;
 

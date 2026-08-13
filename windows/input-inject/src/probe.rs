@@ -17,7 +17,25 @@
 //! including, off Windows, a machine that has no `SendInput` at all. A run
 //! without it on such a machine is refused rather than quietly counted,
 //! because a report full of applied events that reached no input system is
-//! worse than no report.
+//! worse than no report. Acknowledgements are still sent in a dry run: not
+//! injecting is not the same as not answering, and a client left unanswered
+//! would retransmit everything five times before giving up.
+//!
+//! Every message the protocol calls reliable is acknowledged, whether it was
+//! newly applied or recognised as a retransmission. A client that hears
+//! nothing about a duplicate sends another one, so silence about a duplicate
+//! guarantees the next copy. Nothing else is acknowledged, and which side of
+//! that line a message falls on is asked of
+//! [`Message::reliability`](lanplay_input_protocol::Message::reliability)
+//! rather than decided here, so a message kind added to the protocol later
+//! cannot quietly land on the wrong side.
+//!
+//! The `sent_at_ns` on an outgoing acknowledgement is this machine's own
+//! monotonic clock, and it is written for the same reason every other
+//! datagram carries one: so the sender can measure its own intervals. The
+//! client must not subtract it from anything of its own. The two machines
+//! share no epoch, and the difference would be a clock offset wearing a
+//! latency's clothes.
 
 use std::net::{SocketAddr, UdpSocket};
 use std::process::ExitCode;
@@ -25,7 +43,9 @@ use std::time::Duration;
 
 use clap::Parser;
 use hdrhistogram::Histogram;
-use lanplay_input_protocol::{DecodeError, MAX_DATAGRAM, SessionId, decode};
+use lanplay_input_protocol::{
+    Datagram, DecodeError, MAX_DATAGRAM, Message, Reliability, Sequence, SessionId, decode, encode,
+};
 use lanplay_telemetry::{Nanos, Timestamp};
 
 use crate::state::{Action, HostState, Outcome};
@@ -116,6 +136,14 @@ struct Counts {
     decode_errors: u64,
     /// Host-to-client messages that arrived at the host.
     ignored: u64,
+    /// Acknowledgements the host put on the wire. The client's unacked count
+    /// is the other half of this figure, and a gap between them is loss on
+    /// the return path rather than on the way in.
+    acks: u64,
+    /// Acknowledgements the socket refused. Counted rather than swallowed:
+    /// a return path that never works looks exactly like a client that never
+    /// sends, unless somebody counts.
+    ack_failures: u64,
     /// Summed from the actions, so the operator has one number to hold against
     /// the total the client says it sent. Counted in a dry run as well: it
     /// describes what the client asked for.
@@ -172,6 +200,11 @@ pub fn main() -> ExitCode {
 
     let mut buffer = [0u8; MAX_DATAGRAM];
     let deadline = Timestamp::now().add(Nanos::from_millis_f64(cli.seconds * 1_000.0));
+    // The host's own datagram counter for the return path, unrelated to the
+    // client's: it says which acknowledgement this is, so the client can see
+    // reorder and loss on the way back.
+    let mut ack_sequence: u32 = 0;
+    let mut ack_buffer = [0u8; MAX_DATAGRAM];
 
     while Timestamp::now() < deadline {
         let (len, from) = match socket.recv_from(&mut buffer) {
@@ -228,6 +261,36 @@ pub fn main() -> ExitCode {
         // session id or a malformed datagram costs a decode and nothing else,
         // and mixing that in would flatter the distribution.
         histogram.saturating_record(Timestamp::now().saturating_since(received).get());
+
+        // Sent after the histogram is recorded, so the cost of the reply is
+        // not folded into the receive-and-inject figure the run exists to
+        // measure.
+        if datagram.message.reliability() == Reliability::Reliable
+            && outcome.owes_ack()
+            && let Some(ack) = state.acknowledgement()
+        {
+            let reply = Datagram {
+                // The client's session, not a number of the host's choosing:
+                // an acknowledgement carrying anything else would be dropped
+                // by the peer it is meant for.
+                session: datagram.session,
+                sequence: Sequence(ack_sequence),
+                sent_at_ns: Timestamp::now().as_nanos(),
+                message: Message::Ack {
+                    top: ack.top,
+                    missing: ack.missing,
+                },
+            };
+            ack_sequence = ack_sequence.wrapping_add(1);
+            let len = encode(&reply, &mut ack_buffer).expect("an ack fits in MAX_DATAGRAM");
+            // Back to the address this datagram came from, on the socket it
+            // arrived on, because that pair is the only return path the
+            // client is listening on.
+            match socket.send_to(&ack_buffer[..len], from) {
+                Ok(_) => counts.acks += 1,
+                Err(_) => counts.ack_failures += 1,
+            }
+        }
     }
 
     report(&counts, &state, &backend, &histogram, peer, first_error);
@@ -254,6 +317,8 @@ fn report(
     println!("wrong session    {:>10}", counts.wrong_session);
     println!("decode errors    {:>10}", counts.decode_errors);
     println!("host to client   {:>10}", counts.ignored);
+    println!("acks sent        {:>10}", counts.acks);
+    println!("ack failures     {:>10}", counts.ack_failures);
     println!("sendinput calls  {:>10}", backend.calls());
     println!("refused          {:>10}", backend.refused());
     println!("injected dx      {:>10}", counts.dx);
@@ -270,6 +335,18 @@ fn report(
         state.held_keys(),
         state.held_buttons()
     );
+    // The pair an operator holds against the client's unacked count. They
+    // describe the same events from opposite ends, so a client still waiting
+    // on an id at or below `top` whose bit reads applied means the
+    // acknowledgement was lost on the way back rather than the event on the
+    // way in.
+    match state.acknowledgement() {
+        Some(ack) => println!(
+            "acknowledged: top {}, missing {:#034b}",
+            ack.top.0, ack.missing
+        ),
+        None => println!("acknowledged: no reliable event arrived"),
+    }
 
     println!();
     if histogram.is_empty() {

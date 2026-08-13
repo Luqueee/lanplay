@@ -14,6 +14,7 @@ members = [
     "tools/benchmark",
     "tools/mouse-mover",
     "tools/pcap-analyse",
+    "tools/udp-fault",
     "tools/radio-sample",
     "tools/capture-bench",
     "tools/net-bench",

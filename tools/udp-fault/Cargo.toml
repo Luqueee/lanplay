@@ -1,0 +1,12 @@
+[package]
+name = "lanplay-udp-fault"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "udp-fault"
+path = "src/main.rs"
+
+[dependencies]

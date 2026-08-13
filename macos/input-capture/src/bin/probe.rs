@@ -37,19 +37,28 @@
 //! `NSApplication` is created and its run loop is turned by hand. Turning it by
 //! hand rather than calling `run` is what lets the probe stop at a deadline
 //! without a timer.
+//!
+//! None of the reliability arithmetic is in this file. The retransmission
+//! ladder, the acknowledgement window and the snapshot cadence live in the
+//! library, where the clock is a variable and every deadline can be tested
+//! without waiting for it. What this file owns is the loop that drives them,
+//! the socket they share with the sends, and the counters an operator reads
+//! afterwards. The one that decides whether a run was clean is the last of
+//! them: how many reliable events were still unacknowledged at exit.
 
 use std::cell::RefCell;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::process::ExitCode;
 use std::rc::Rc;
-use std::thread::sleep;
 use std::time::Duration;
 
 use clap::Parser;
 use hdrhistogram::Histogram;
-use lanplay_input_capture::{Capture, INPUT_PORT, Keyboard, ScanCode};
+use lanplay_input_capture::{
+    Capture, INPUT_PORT, Keyboard, Reliable, ScanCode, reliable::MAX_RETRANSMISSIONS,
+};
 use lanplay_input_protocol::{
-    Datagram, EventId, KeyBitset, MAX_DATAGRAM, Message, Sequence, SessionId, encode,
+    Datagram, MAX_DATAGRAM, Message, Sequence, SessionId, decode, encode,
 };
 use lanplay_telemetry::{Nanos, Timestamp};
 use objc2::MainThreadMarker;
@@ -66,16 +75,33 @@ const MAX_NANOS: u64 = 1_000_000_000;
 /// cells.
 const SIGNIFICANT_FIGURES: u8 = 3;
 
-/// How long one turn of the run loop waits for an event. Long enough that an
-/// idle probe does not spin, short enough that the deadline is honoured
-/// promptly.
-const TURN_SECONDS: f64 = 0.05;
+/// How long one turn of the run loop waits for an event. Short, because the
+/// retransmission deadlines are only looked at between turns and the first of
+/// them falls twenty milliseconds after a send: a turn longer than that would
+/// make every repair late. An idle probe therefore wakes a couple of hundred
+/// times a second to do nothing, which is cheaper than a lost key release.
+const TURN_SECONDS: f64 = 0.005;
 
 /// The macOS virtual key codes for W, A, S and D, in the order the synthetic
 /// cycle walks them. Virtual codes rather than scan codes so the cycle goes
 /// through the same table a real key would, which is what makes it a test of
 /// the whole send path and not just of the socket.
 const SYNTHETIC_KEYS: [u16; 4] = [0x0D, 0x00, 0x01, 0x02];
+
+/// How long a read waits before the loop moves on. See [`Sink::receive`] for
+/// why the receive has a timeout rather than being polled or blocking.
+const RECV_TIMEOUT: Duration = Duration::from_millis(1);
+
+/// How long to keep pumping after the last send.
+///
+/// Without this the unacknowledged figure would always count the `ReleaseAll`
+/// sent a microsecond before it was read, and the one number a fault-injection
+/// run turns on would never be zero. Bounded because a host that has gone away
+/// is exactly the case this exists to survive, and long enough for the whole
+/// retransmission ladder of the last event to run out, so that whatever is
+/// still outstanding at the end really was given up on rather than merely not
+/// waited for.
+const LINGER: Nanos = Nanos::from_millis(500);
 
 #[derive(Parser)]
 #[command(
@@ -128,9 +154,14 @@ struct Sink {
     key_datagrams: u64,
     presses: u64,
     releases: u64,
-    /// What the host is believed to be holding, folded exactly as the host folds
-    /// it, so this count is a count of its keys and not of something adjacent.
-    held: KeyBitset,
+    /// What is believed held, what has not been acknowledged, and when the next
+    /// snapshot is due. The held set lives in there rather than beside it so
+    /// that the count reported here and the set a snapshot describes cannot
+    /// drift apart.
+    reliable: Reliable,
+    /// Keys held when capture stopped, read before the `ReleaseAll` that
+    /// clears them.
+    held_at_stop: usize,
     /// A press for a key already believed held, and a release for one that was
     /// not. Either means the pressed set and the player have diverged, and both
     /// are separate from the held count because a run can end balanced and still
@@ -140,10 +171,14 @@ struct Sink {
 }
 
 impl Sink {
-    /// The send path, shared by every message kind. Called from the AppKit event
-    /// callback, so it allocates nothing: the datagram is built in a stack buffer
-    /// of the largest size the wire format can produce.
-    fn emit(&mut self, message: Message, at: Timestamp) -> bool {
+    /// Builds one datagram and sends it. Shared by the event path, the
+    /// retransmissions and the snapshots, because they are the same socket and
+    /// the same wire format and only what is measured afterwards differs.
+    ///
+    /// Called from the AppKit event callback, so it allocates nothing: the
+    /// datagram is built in a stack buffer of the largest size the wire format
+    /// can produce.
+    fn send_now(&mut self, message: Message, at: Timestamp) -> bool {
         let datagram = Datagram {
             session: self.session,
             sequence: Sequence(self.next_sequence),
@@ -160,7 +195,17 @@ impl Sink {
         if !sent {
             self.failed += 1;
         }
+        sent
+    }
 
+    /// The event path: one send, with the interval from reading the clock to
+    /// the syscall returning recorded.
+    ///
+    /// Retransmissions and snapshots deliberately do not come through here.
+    /// They leave on a deadline rather than on an event, so folding their cost
+    /// into this histogram would describe neither of the two.
+    fn emit(&mut self, message: Message, at: Timestamp) -> bool {
+        let sent = self.send_now(message, at);
         // Measured after the syscall returns whether it succeeded or not: the
         // cost of a refused send is still the cost this path pays.
         let cost = Timestamp::now().saturating_since(at);
@@ -180,22 +225,22 @@ impl Sink {
         }
     }
 
-    /// The id comes from the caller rather than from a counter here, so that
-    /// whichever source of keys is running owns it and the two can never both be
-    /// minting ids into one session.
-    fn send_key(&mut self, id: EventId, scan: ScanCode, down: bool, at: Timestamp) {
-        let slot = key_slot(scan);
+    /// The id comes from the reliability layer, which is the only thing in this
+    /// process minting them: the host deduplicates on that id, so two counters
+    /// would hand it the same id for two different keys and it would inject one
+    /// of them and discard the other as a retransmission.
+    fn send_key(&mut self, scan: ScanCode, down: bool, at: Timestamp) {
+        // Asked before the layer folds the key in, since afterwards the answer
+        // is whatever this event just made it.
+        let held = self.reliable.holds_key(scan);
         if down {
             self.presses += 1;
-            if self.held.contains(slot) {
+            if held {
                 self.double_presses += 1;
             }
-            self.held.set(slot, true);
         } else {
             self.releases += 1;
-            if self.held.contains(slot) {
-                self.held.set(slot, false);
-            } else {
+            if !held {
                 self.unmatched_releases += 1;
             }
         }
@@ -203,35 +248,74 @@ impl Sink {
         // Bookkeeping before the send, and on offer rather than on success: a
         // key the socket refused is still a key the player pressed, and hiding
         // it would make a failing network look like a balanced run.
-        if self.emit(
-            Message::Key {
-                id,
-                scancode: u16::from(scan.code),
-                down,
-                extended: scan.extended,
-            },
-            at,
-        ) {
+        let message = self.reliable.key(scan, down, at);
+        if self.emit(message, at) {
             self.key_datagrams += 1;
         }
+    }
+
+    /// The reliability half of every loop in this file: acknowledgements in,
+    /// then whatever the deadlines say is due out.
+    ///
+    /// Separate from the event path on purpose. An event still leaves the
+    /// moment it arrives, and only the repairs are on a timer, because a
+    /// deadline is the whole point of them.
+    fn pump(&mut self, now: Timestamp) {
+        self.receive();
+        while let Some(message) = self.reliable.next_due(now) {
+            self.send_now(message, Timestamp::now());
+        }
+        if let Some(snapshot) = self.reliable.snapshot_due(now) {
+            self.send_now(snapshot, Timestamp::now());
+        }
+    }
+
+    /// Drains whatever the host has sent, on the socket the sends go out on so
+    /// that no second port has to be agreed on or opened through a firewall.
+    ///
+    /// The read timeout is what keeps this off the send path. A blocking read
+    /// would hold the sends behind a host with nothing to say, and a
+    /// non-blocking one would turn an idle loop into a spin, so a millisecond
+    /// is the most a captured event can be delayed by a read and it is far
+    /// below the shortest retransmission deadline.
+    fn receive(&mut self) {
+        let mut buffer = [0u8; MAX_DATAGRAM];
+        // Only from the address the sends went to, and only for this session.
+        // The session id on its own is a weak filter, since anything that has
+        // seen one datagram can copy it, and an acknowledgement retires events:
+        // a forged one would silence a retransmission that was needed.
+        while let Ok((len, from)) = self.socket.recv_from(&mut buffer) {
+            if from != self.target {
+                continue;
+            }
+            let Ok(datagram) = decode(&buffer[..len]) else {
+                continue;
+            };
+            if datagram.session != self.session {
+                continue;
+            }
+            if let Message::Ack { top, missing } = datagram.message {
+                self.reliable.ack(top, missing);
+            }
+        }
+    }
+
+    /// Reads the held count, then tells the host to let go of everything.
+    ///
+    /// The count is taken before the release rather than after, because it is
+    /// the diagnostic and the release is the repair: read afterwards it would
+    /// be zero for every run, however badly the run had gone.
+    fn stop(&mut self, at: Timestamp) {
+        self.held_at_stop = self.reliable.keys().held().count();
+        let message = self.reliable.release_all(at);
+        self.send_now(message, at);
     }
 
     /// Whether the keys this run sent add up: nothing left down, no press on top
     /// of a press, no release without one.
     fn keys_balanced(&self) -> bool {
-        self.held.is_empty() && self.double_presses == 0 && self.unmatched_releases == 0
+        self.held_at_stop == 0 && self.double_presses == 0 && self.unmatched_releases == 0
     }
-
-    fn still_held(&self) -> usize {
-        self.held.held().count()
-    }
-}
-
-/// Folds a key into the byte the protocol's snapshot bitset addresses, which is
-/// the same fold the host applies. The 0xE0 prefix is a bit of the index rather
-/// than part of the code, so an arrow and a numpad digit do not share a slot.
-fn key_slot(scan: ScanCode) -> u8 {
-    (scan.code & 0x7F) | if scan.extended { 0x80 } else { 0 }
 }
 
 /// Microseconds, because every interval here is far below a millisecond and in
@@ -272,7 +356,8 @@ fn new_sink(socket: UdpSocket, target: SocketAddr, session_id: u32) -> Sink {
         key_datagrams: 0,
         presses: 0,
         releases: 0,
-        held: KeyBitset::EMPTY,
+        reliable: Reliable::new(Timestamp::now()),
+        held_at_stop: 0,
         double_presses: 0,
         unmatched_releases: 0,
     }
@@ -285,9 +370,11 @@ fn report_keys(sink: &Sink) {
         "key datagrams {}  presses {}  releases {}",
         sink.key_datagrams, sink.presses, sink.releases
     );
+    // Held when capture stopped rather than now: a `ReleaseAll` has been sent
+    // since, and reporting after it would be reporting the repair.
     println!(
         "keys still held at the end {}  every press matched by a release: {}",
-        sink.still_held(),
+        sink.held_at_stop,
         if sink.keys_balanced() { "yes" } else { "no" }
     );
     if sink.double_presses > 0 || sink.unmatched_releases > 0 {
@@ -295,6 +382,57 @@ fn report_keys(sink: &Sink) {
             "{} presses landed on a key already held and {} releases had no press",
             sink.double_presses, sink.unmatched_releases
         );
+    }
+}
+
+/// The reliability half of the report, printed by both modes.
+///
+/// Every figure is here even when it is zero, because the interesting runs are
+/// the ones where a number that should be zero is not, and a report that only
+/// prints its faults teaches an operator to read silence as success.
+fn report_reliability(sink: &Sink) {
+    let counts = sink.reliable.counts();
+    let outstanding = sink.reliable.unacked() as u64;
+    println!(
+        "reliable events sent {}  acknowledged {}  abandoned {}  still outstanding at exit {}",
+        counts.reliable_sent, counts.acknowledged, counts.abandoned, outstanding
+    );
+    // Printed whether or not it adds up, because this is what says the three
+    // figures above are the whole story: applied by the host, given up on, or
+    // still in flight are the only places a reliable event can end. A total
+    // short of what was sent is this client losing track of an event rather
+    // than the link losing one, which is a different fault and a worse one.
+    let accounted = counts.acknowledged + counts.abandoned + outstanding;
+    println!(
+        "events accounted {accounted} of {}{}",
+        counts.reliable_sent,
+        if accounted == counts.reliable_sent {
+            ""
+        } else {
+            "  which does not add up"
+        }
+    );
+    println!(
+        "retransmissions {} over a ladder of {MAX_RETRANSMISSIONS}  acknowledgement datagrams \
+         received {}  snapshots sent {}",
+        counts.retransmissions, counts.acks, counts.snapshots
+    );
+    let lost = counts.abandoned + outstanding;
+    if lost > 0 {
+        println!(
+            "{lost} events the host may never have applied, which the snapshots are what repair"
+        );
+    }
+}
+
+/// Sends the `ReleaseAll` and then keeps the loop turning long enough for the
+/// last acknowledgements to arrive. See [`LINGER`] for why the wait is bounded.
+fn finish(sink: &mut Sink) {
+    let now = Timestamp::now();
+    sink.stop(now);
+    let deadline = now.add(LINGER);
+    while sink.reliable.unacked() > 0 && Timestamp::now() < deadline {
+        sink.pump(Timestamp::now());
     }
 }
 
@@ -334,7 +472,6 @@ fn run_synthetic(args: &Args, socket: UdpSocket, target: SocketAddr) -> ExitCode
 
     let start = Timestamp::now();
     let deadline = start.add(Nanos(args.seconds.saturating_mul(1_000_000_000)));
-    let mut next_id = EventId(0);
     let mut step = 0u64;
 
     while Timestamp::now() < deadline {
@@ -347,20 +484,29 @@ fn run_synthetic(args: &Args, socket: UdpSocket, target: SocketAddr) -> ExitCode
             // slow send does not push the whole cycle later and the count after
             // n seconds is the one an operator can predict.
             let due = start.add(Nanos(step.saturating_mul(interval.get())));
-            let now = Timestamp::now();
-            if now < due {
-                sleep(Duration::from_nanos(due.saturating_since(now).get()));
+            // The wait is spent pumping rather than sleeping, so a
+            // retransmission that falls due between two synthetic keys still
+            // goes out on time; the socket's read timeout is what makes this a
+            // wait rather than a spin. At least one turn per key, so that a
+            // rate high enough to leave no gap at all still repairs its losses.
+            loop {
+                sink.pump(Timestamp::now());
+                if due <= Timestamp::now() {
+                    break;
+                }
             }
 
             let at = Timestamp::now();
-            sink.send_key(next_id, scan, down, at);
-            next_id = next_id.next();
+            sink.send_key(scan, down, at);
             step += 1;
         }
     }
 
+    finish(&mut sink);
+
     println!("failed sends {}", sink.failed);
     report_keys(&sink);
+    report_reliability(&sink);
     if sink.cost.is_empty() {
         println!("nothing was sent, so there is no cost to report");
         return ExitCode::SUCCESS;
@@ -397,9 +543,10 @@ fn run_capture(args: &Args, socket: UdpSocket, target: SocketAddr) -> ExitCode {
     let keyboard = if args.keys {
         let sending = Rc::clone(&sink);
         match Keyboard::start(move |key| {
-            sending
-                .borrow_mut()
-                .send_key(key.id, key.scan, key.down, key.at);
+            // The capture's own event id is ignored: the reliability layer mints
+            // the one that goes on the wire, so there is exactly one counter per
+            // session however many sources of keys there are.
+            sending.borrow_mut().send_key(key.scan, key.down, key.at);
         }) {
             Ok(keyboard) => Some(keyboard),
             Err(why) => {
@@ -437,11 +584,17 @@ fn run_capture(args: &Args, socket: UdpSocket, target: SocketAddr) -> ExitCode {
                 app.sendEvent(&event);
             }
         });
+        sink.borrow_mut().pump(Timestamp::now());
     }
 
     if let Err(why) = capture.release() {
         eprintln!("the cursor could not be reattached: {why}");
         return ExitCode::FAILURE;
+    }
+
+    {
+        let mut sink = sink.borrow_mut();
+        finish(&mut sink);
     }
 
     let sink = sink.borrow();
@@ -468,6 +621,8 @@ fn run_capture(args: &Args, socket: UdpSocket, target: SocketAddr) -> ExitCode {
             );
         }
     }
+
+    report_reliability(&sink);
 
     if sink.cost.is_empty() {
         println!("no input was seen, so there is nothing to report");
@@ -500,6 +655,13 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    // A timeout rather than a non-blocking socket, because the receive shares
+    // its loop with the sends: see `Sink::receive` for why that is the shape.
+    if let Err(why) = socket.set_read_timeout(Some(RECV_TIMEOUT)) {
+        eprintln!("cannot set a read timeout on the socket: {why}");
+        return ExitCode::FAILURE;
+    }
 
     if args.synthetic_keys {
         run_synthetic(&args, socket, target)

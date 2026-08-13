@@ -103,6 +103,27 @@ impl Outcome {
     }
 }
 
+/// What the host would tell the client it has, right now.
+///
+/// `top` is the highest event id the host has applied, and bit `i` of
+/// `missing` says that `top - 1 - i` has not been. Anchored at the top so
+/// that a hole delays only itself. A cumulative frontier plus a window of ids
+/// above it stops dead at the first event that is lost for good, and every
+/// later event then goes unacknowledged however many times the client sends
+/// it, which is what fault injection at five per cent loss found.
+///
+/// An id below the oldest bit the window still holds is reported as applied
+/// rather than as missing, because the evidence for it is gone. That is the
+/// honest reading of what happens next: the host will never inject an id that
+/// old, and the client's retransmission ladder has already run out for it, so
+/// what repairs the state is the periodic snapshot rather than another copy of
+/// the event.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Acknowledgement {
+    pub top: EventId,
+    pub missing: u32,
+}
+
 /// Folds a wire key into the single byte that the snapshot bitset and
 /// `SendInput` both address.
 ///
@@ -234,6 +255,17 @@ impl HostState {
             Message::Ack { .. } => return Outcome::Ignored,
         }
         Outcome::Applied
+    }
+
+    /// What the client is owed, or `None` before any reliable event has been
+    /// applied.
+    ///
+    /// Read out of the deduplication window rather than kept alongside it.
+    /// The window already knows which ids have been applied, and a second
+    /// record of the same fact would eventually disagree with the one that
+    /// decides whether a key is injected.
+    pub fn acknowledgement(&self) -> Option<Acknowledgement> {
+        self.reliable.acknowledgement()
     }
 
     /// Which keys the host believes are held, in the same representation a
@@ -398,6 +430,67 @@ impl Dedup {
         fresh
     }
 
+    /// The highest applied id, and which of the thirty-two ids below it are
+    /// still missing, read straight out of the window.
+    ///
+    /// Both come from the bits that decide injection, so the acknowledgement
+    /// cannot drift away from what was actually applied.
+    ///
+    /// An id below the oldest bit the window still holds is reported as
+    /// applied. Its evidence has either been slid away or never existed,
+    /// because the host joins the client's stream part-way through, and asking
+    /// for it back would ask for a retransmission the client stopped making
+    /// long ago.
+    fn acknowledgement(&self) -> Option<Acknowledgement> {
+        let base = self.base?;
+        let top = match self.newest() {
+            Some(offset) => base + offset,
+            // A stream without holes slides every bit out from under itself,
+            // which leaves the newest applied id just below `base`. A `base`
+            // of zero with an empty window would mean no id was ever marked,
+            // and then there is nothing to acknowledge.
+            None => base.checked_sub(1)?,
+        };
+        let oldest = self.oldest().map_or(base, |offset| base + offset);
+        let mut missing = 0u32;
+        for bit in 0..32u32 {
+            let Some(id) = top.checked_sub(bit as u64 + 1) else {
+                break;
+            };
+            // Descending, so the first id past the oldest bit means every
+            // lower one is past it too.
+            if id < oldest {
+                break;
+            }
+            if !self.get(id - base) {
+                missing |= 1 << bit;
+            }
+        }
+        Some(Acknowledgement {
+            top: EventId(top),
+            missing,
+        })
+    }
+
+    /// Offset of the newest applied id the window still holds.
+    fn newest(&self) -> Option<u64> {
+        self.applied
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, word)| **word != 0)
+            .map(|(index, word)| index as u64 * 64 + 63 - word.leading_zeros() as u64)
+    }
+
+    /// Offset of the oldest applied id the window still holds.
+    fn oldest(&self) -> Option<u64> {
+        self.applied
+            .iter()
+            .enumerate()
+            .find(|(_, word)| **word != 0)
+            .map(|(index, word)| index as u64 * 64 + word.trailing_zeros() as u64)
+    }
+
     fn get(&self, offset: u64) -> bool {
         self.applied[(offset / 64) as usize] & (1u64 << (offset % 64)) != 0
     }
@@ -454,6 +547,138 @@ mod tests {
             down,
             extended,
         }
+    }
+
+    fn ack(state: &HostState) -> Acknowledgement {
+        state
+            .acknowledgement()
+            .expect("a reliable event has been applied")
+    }
+
+    #[test]
+    fn a_contiguous_run_is_acknowledged_by_its_top() {
+        let mut state = HostState::new();
+        for id in 1..=5 {
+            assert!(
+                apply(&mut state, &key(id, W, id % 2 == 1, false))
+                    .0
+                    .is_applied()
+            );
+        }
+        assert_eq!(
+            ack(&state),
+            Acknowledgement {
+                top: EventId(5),
+                missing: 0
+            }
+        );
+    }
+
+    #[test]
+    fn a_hole_shows_up_below_the_top_and_clears_when_it_is_filled() {
+        let mut state = HostState::new();
+        apply(&mut state, &key(1, W, true, false));
+        apply(&mut state, &key(2, W, false, false));
+        // Four is applied, so it is the top, and the hole at three is the id
+        // one below it: bit 0.
+        apply(&mut state, &key(4, LEFT_CONTROL, true, false));
+        assert_eq!(
+            ack(&state),
+            Acknowledgement {
+                top: EventId(4),
+                missing: 0b1
+            }
+        );
+
+        // Filling the hole clears its bit and leaves the top where it was:
+        // three is not the newest id, it was only the last one to arrive.
+        apply(&mut state, &key(3, W, true, false));
+        assert_eq!(
+            ack(&state),
+            Acknowledgement {
+                top: EventId(4),
+                missing: 0
+            }
+        );
+    }
+
+    /// The regression this acknowledgement shape exists for.
+    ///
+    /// The cumulative form reported a frontier of two here, one below the
+    /// permanent hole, and a mask reaching only as far as thirty-four. It
+    /// stayed there for the rest of the session however many times the client
+    /// resent, so a client at id two hundred abandoned everything from
+    /// thirty-five up.
+    #[test]
+    fn one_permanently_lost_event_does_not_stall_the_acknowledgement() {
+        let mut state = HostState::new();
+        for id in (1..=200).filter(|id| *id != 3) {
+            assert!(
+                apply(&mut state, &key(id, W, id % 2 == 1, false))
+                    .0
+                    .is_applied()
+            );
+        }
+        assert_eq!(
+            ack(&state),
+            Acknowledgement {
+                top: EventId(200),
+                // Three is far below the thirty-two ids the window reports on,
+                // so it is no longer asked for: a retransmission that late
+                // would arrive long after the client stopped sending it, and
+                // the next snapshot is what repairs it.
+                missing: 0
+            }
+        );
+    }
+
+    #[test]
+    fn a_duplicate_is_still_acknowledged_and_moves_nothing() {
+        let mut state = HostState::new();
+        apply(&mut state, &key(1, W, true, false));
+        let before = ack(&state);
+
+        let (outcome, actions) = apply(&mut state, &key(1, W, true, false));
+        assert_eq!(outcome, Outcome::Duplicate);
+        assert!(actions.is_empty());
+        assert!(
+            outcome.owes_ack(),
+            "an unacknowledged duplicate is retransmitted forever"
+        );
+        assert_eq!(ack(&state), before);
+    }
+
+    #[test]
+    fn an_id_far_beyond_the_window_does_not_corrupt_the_view() {
+        let mut state = HostState::new();
+        for id in 1..=5 {
+            apply(&mut state, &key(id, W, id % 2 == 1, false));
+        }
+        // A peer inventing an id, or a client whose counter jumped, moves the
+        // top with it and reports no holes: the millions of ids in between are
+        // below everything the window holds bits for, and claiming them
+        // missing would ask for retransmissions of events that were never
+        // sent.
+        assert!(
+            apply(&mut state, &key(5_000_000, W, false, false))
+                .0
+                .is_applied()
+        );
+        assert_eq!(
+            ack(&state),
+            Acknowledgement {
+                top: EventId(5_000_000),
+                missing: 0
+            }
+        );
+    }
+
+    #[test]
+    fn nothing_reliable_means_nothing_to_acknowledge() {
+        let mut state = HostState::new();
+        apply(&mut state, &Message::Motion { dx: 3, dy: 4 });
+        apply(&mut state, &Message::Heartbeat);
+        assert_eq!(state.acknowledgement(), None);
     }
 
     #[test]
@@ -831,8 +1056,8 @@ mod tests {
         let (outcome, actions) = apply(
             &mut state,
             &Message::Ack {
-                contiguous: EventId(1),
-                mask: 0,
+                top: EventId(1),
+                missing: 0,
             },
         );
         assert_eq!(outcome, Outcome::Ignored);

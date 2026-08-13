@@ -229,13 +229,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_machine_reports_at_least_one_usable_display() {
+    fn a_reported_display_is_described_plausibly() {
+        // Guarded rather than asserted. `CGGetActiveDisplayList` returns
+        // nothing while the screen is asleep, and a laptop whose lid has been
+        // shut is a legitimate place to run the suite - this failed
+        // intermittently for exactly that reason and told nobody anything
+        // about the code. What is worth testing is that a display the probe
+        // does report is described sanely, which is the part that could be
+        // wrong.
         let displays = displays();
-        assert!(!displays.is_empty(), "no active displays reported");
+        if displays.is_empty() {
+            return;
+        }
         let primary = displays
             .iter()
             .find(|display| display.primary)
-            .expect("a primary display");
+            .expect("a display list without a primary is a bug, not a sleeping screen");
         assert!(primary.current.width >= 640);
         assert!(
             primary.current.refresh_mhz >= 24_000,

@@ -212,10 +212,21 @@ pub enum Message {
     /// Keeps the host's idea of liveness fresh while the user is idle, so a
     /// silent client can be told apart from a departed one.
     Heartbeat,
-    /// Host to client. `contiguous` is the highest event id below which
-    /// nothing is missing; `mask` covers the 32 ids above it, bit 0 being
-    /// `contiguous + 1`. One datagram therefore acknowledges a burst.
-    Ack { contiguous: EventId, mask: u32 },
+    /// Host to client. `top` is the highest event id the host has applied,
+    /// and bit `i` of `missing` says that `top - 1 - i` has not been.
+    ///
+    /// Anchored at the top rather than at the bottom, and fault injection is
+    /// what settled it. A cumulative acknowledgement plus a window of ids
+    /// *above* it collapses the moment one event is lost for good: the
+    /// frontier stops, the window is 32 ids wide, and everything beyond that
+    /// can never be acknowledged however many times it arrives. Five per cent
+    /// loss abandoned 95% of events that way.
+    ///
+    /// Anchored here, a hole delays only itself. An id that falls out of the
+    /// window below `top` has outlived the client's retransmission ladder, so
+    /// it is beyond repair by retransmission and the periodic snapshot is what
+    /// fixes the state.
+    Ack { top: EventId, missing: u32 },
 }
 
 impl Message {
@@ -371,9 +382,9 @@ pub fn encode(datagram: &Datagram, out: &mut [u8]) -> Option<usize> {
         }
         Message::ReleaseAll { id } => body[0..8].copy_from_slice(&id.0.to_be_bytes()),
         Message::Heartbeat => {}
-        Message::Ack { contiguous, mask } => {
-            body[0..8].copy_from_slice(&contiguous.0.to_be_bytes());
-            body[8..12].copy_from_slice(&mask.to_be_bytes());
+        Message::Ack { top, missing } => {
+            body[0..8].copy_from_slice(&top.0.to_be_bytes());
+            body[8..12].copy_from_slice(&missing.to_be_bytes());
         }
     }
     Some(HEADER_LEN + payload_len)
@@ -478,8 +489,8 @@ pub fn decode(bytes: &[u8]) -> Result<Datagram, DecodeError> {
                 return Err(short(12));
             }
             Message::Ack {
-                contiguous: id(body),
-                mask: u32::from_be_bytes([body[8], body[9], body[10], body[11]]),
+                top: id(body),
+                missing: u32::from_be_bytes([body[8], body[9], body[10], body[11]]),
             }
         }
         other => return Err(DecodeError::UnknownKind { kind: other }),
@@ -555,8 +566,8 @@ mod tests {
             Message::ReleaseAll { id: EventId(5) },
             Message::Heartbeat,
             Message::Ack {
-                contiguous: EventId(41),
-                mask: 0b1011,
+                top: EventId(41),
+                missing: 0b1011,
             },
         ] {
             round_trip(message);

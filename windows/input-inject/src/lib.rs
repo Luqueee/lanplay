@@ -40,6 +40,7 @@
 //!                             decode
 //!                             HostState::apply
 //!                             SendInput, once per action
+//!                 ◄────────── Ack, for reliable messages only
 //! ```
 //!
 //! `input-inject-probe` is that path with a histogram around it and nothing
@@ -52,7 +53,7 @@ pub mod state;
 #[cfg(windows)]
 pub mod send;
 
-pub use state::{Action, HostState, Outcome, WheelAxis, key_slot, slot_key};
+pub use state::{Acknowledgement, Action, HostState, Outcome, WheelAxis, key_slot, slot_key};
 
 #[cfg(windows)]
 pub use send::Injector;
