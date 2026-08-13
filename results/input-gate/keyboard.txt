@@ -1,0 +1,44 @@
+=== keyboard arm, live SendInput, 20 s at 20 events/s ===
+gate      input, 12s, session 1
+path      192.168.1.108 -> 192.168.1.70:5006
+inject    live SendInput
+
+
+starting the injector in the interactive session
+injector  listening
+
+move the mouse for the next 12s
+sending a synthetic W, A, S, D cycle to 192.168.1.70:5006 as session 1 for 12 s at 20 events/s
+failed sends 0
+key datagrams 242  presses 121  releases 121
+keys still held at the end 0  every press matched by a release: yes
+reliable events sent 243  acknowledged 243  abandoned 0  still outstanding at exit 0
+events accounted 243 of 243
+retransmissions 6 over a ladder of 5  acknowledgement datagrams received 249  snapshots sent 207
+clock read to send_to returning:  p50 83.97µs  p95 138.75µs  p99 175.62µs  max 247.68µs
+
+host side
+input-inject-probe: bound 0.0.0.0:5006, session 1, injecting
+first datagram from 192.168.1.108:59824
+
+datagrams               456
+applied                 450
+duplicate                 6
+stale snapshot            0
+wrong session             0
+decode errors             0
+host to client            0
+acks sent               249
+ack failures              0
+sendinput calls         242
+refused                   0
+injected dx               0
+injected dy               0
+still held: keys {}, buttons 0b00000
+acknowledged: top 242, missing 0b00000000000000000000000000000000
+
+recv to injected   count      456   p50    30.91µ   p95    94.46µ   p99   116.93µ   max   129.92µ
+
+motion: not this arm
+
+keys held on the host at the end: {}

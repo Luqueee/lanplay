@@ -66,6 +66,11 @@ if [ -z "${WIN_IP:-}" ]; then
     exit 1
 fi
 
+# Cleared before anything runs. A previous arm's output left in place is read
+# by the report as if it belonged to this one, which is how a keyboard run just
+# reported motion totals from the run before it.
+rm -f /tmp/input-mover.out /tmp/input-capture.out /tmp/input-inject.out
+
 echo "gate      input, ${SECONDS_TO_RUN}s, session $SESSION_ID"
 echo "path      $MAC_IP -> $WIN_IP:$PORT"
 echo "inject    $([ "${DRY_RUN:-0}" = 1 ] && echo "dry run, nothing moves" || echo "live SendInput")"
@@ -104,6 +109,14 @@ for _ in $(seq 1 40); do
 done
 
 echo
+# Asking for both is a contradiction the probe would resolve silently by
+# ignoring one of them, which is exactly how the last keyboard run reported a
+# clean pass having sent no keys at all.
+if [ "${KEYS:-0}" = 1 ] && [ "${MOVER:-1}" = 1 ]; then
+    echo "KEYS=1 and MOVER=1 cannot both hold: the probe runs one or the other" >&2
+    exit 2
+fi
+
 if [ "${MOVER:-1}" = 1 ]; then
     cargo build --release -q -p lanplay-mouse-mover
     echo "posting motion for ${SECONDS_TO_RUN}s"
@@ -127,8 +140,15 @@ else
     echo "move the mouse for the next ${SECONDS_TO_RUN}s"
     mover=""
 fi
-"$REPO/target/release/input-capture-probe" \
-    --send-to "$WIN_IP:$PORT" --seconds "$SECONDS_TO_RUN" --session-id "$SESSION_ID" |
+# Synthetic keys and mouse capture are exclusive in the probe, deliberately:
+# one session may hold only one event id counter. So a keyboard arm posts no
+# motion and a motion arm sends no keys, and the two are separate runs rather
+# than one run that quietly did half of what was asked.
+probe_args=(--send-to "$WIN_IP:$PORT" --seconds "$SECONDS_TO_RUN" --session-id "$SESSION_ID")
+if [ "${KEYS:-0}" = 1 ]; then
+    probe_args+=(--synthetic-keys --key-rate "${KEY_RATE:-20}")
+fi
+"$REPO/target/release/input-capture-probe" "${probe_args[@]}" |
     tee /tmp/input-capture.out
 [ -n "$mover" ] && wait "$mover" 2>/dev/null
 [ -f /tmp/input-mover.out ] && cat /tmp/input-mover.out
@@ -171,10 +191,16 @@ def totals(path, label):
     return dx, dy
 
 
-print("\nmotion, which is additive and therefore comparable")
-posted = totals("/tmp/input-mover.out", "posted")
-sent = totals("/tmp/input-capture.out", "sent")
-applied = totals("/tmp/input-inject.out", "injected")
+import os
+
+if os.path.exists("/tmp/input-mover.out"):
+    print("\nmotion, which is additive and therefore comparable")
+    posted = totals("/tmp/input-mover.out", "posted")
+    sent = totals("/tmp/input-capture.out", "sent")
+    applied = totals("/tmp/input-inject.out", "injected")
+else:
+    print("\nmotion: not this arm")
+    posted = sent = applied = None
 if posted and sent:
     # The window server coalesces mouse-moved events, summing their deltas, so
     # the counts legitimately differ while the totals must not. That is the
