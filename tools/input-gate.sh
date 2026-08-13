@@ -19,6 +19,14 @@
 # findings this gate exists to produce, and the reason a virtual HID device
 # will be measured against this backend later.
 #
+# The motion itself is posted rather than performed, unless MOVER=0. A hand on
+# the mouse gives an unrepeatable run and only two totals, so a disagreement
+# between them has nothing to arbitrate it. Posting the events adds a third
+# that is exact by construction, and the run becomes something a script can do
+# at three in the morning. What it gives up is the path from a physical mouse
+# into the window server, which a posted event does not travel; that still
+# needs a hand, and needs it only once.
+#
 # The second is where the injector has to run. An SSH session on Windows is
 # session 0, which has no desktop and no foreground window, so SendInput there
 # has nothing to inject into. The injector must therefore run in the
@@ -29,6 +37,7 @@
 #   tools/input-gate.sh [seconds]
 #
 #   DRY_RUN=1   decode and count on the host without moving the pointer
+#   MOVER=0     require a hand on the mouse instead of posting the motion
 #   SESSION_ID  defaults to 1
 #   MAC_IP      defaults to the address on IFACE
 #   IFACE       defaults to en0
@@ -44,9 +53,12 @@ WIN_REPO='C:\Users\luque\lanplay-rs'
 LOG='C:\Users\luque\input-inject.log'
 
 MAC_IP="${MAC_IP:-$(ipconfig getifaddr "$IFACE" 2>/dev/null || true)}"
-WIN_IP="$(ssh -n -o BatchMode=yes windows \
-    'powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object InterfaceAlias -notlike \"*Loopback*\" | Select-Object -First 1).IPAddress"' \
-    2>/dev/null | tr -d '\r\n ')"
+# Asked of the SSH configuration rather than of the host. Querying Windows
+# for "the first non-loopback IPv4" returned a link-local address from a
+# virtual adapter, and the run then reported a clean capture whose datagrams
+# all failed to send. The address SSH already reaches the machine on is the
+# one that works, by construction.
+WIN_IP="$(ssh -G windows 2>/dev/null | awk '/^hostname /{print $2}')"
 
 if [ -z "${WIN_IP:-}" ]; then
     echo "could not find the host's address" >&2
@@ -91,10 +103,29 @@ for _ in $(seq 1 40); do
 done
 
 echo
-echo "move the mouse for the next ${SECONDS_TO_RUN}s"
+if [ "${MOVER:-1}" = 1 ]; then
+    cargo build --release -q -p lanplay-mouse-mover
+    echo "posting motion for ${SECONDS_TO_RUN}s"
+    # Started after the capture so no posted event lands before there is
+    # anything listening, and given a shorter run so it cannot still be moving
+    # when the capture stops counting.
+    (
+        sleep 2
+        "$REPO/target/release/mouse-mover" \
+            --seconds "$((SECONDS_TO_RUN - 4))" --hz "${MOVER_HZ:-250}" \
+            --amplitude "${MOVER_AMPLITUDE:-6}" --pattern "${MOVER_PATTERN:-drift}" \
+            >/tmp/input-mover.out 2>&1
+    ) &
+    mover=$!
+else
+    echo "move the mouse for the next ${SECONDS_TO_RUN}s"
+    mover=""
+fi
 "$REPO/target/release/input-capture-probe" \
     --send-to "$WIN_IP:$PORT" --seconds "$SECONDS_TO_RUN" --session-id "$SESSION_ID" |
     tee /tmp/input-capture.out
+[ -n "$mover" ] && wait "$mover" 2>/dev/null
+[ -f /tmp/input-mover.out ] && cat /tmp/input-mover.out
 
 wait "$injector" 2>/dev/null || true
 echo
@@ -113,20 +144,34 @@ def totals(path, label):
     except OSError:
         print(f"  {label:<8} no output")
         return None
-    match = re.search(r"total\s+dx\s+(-?\d+)\s+dy\s+(-?\d+)", text)
-    count = re.search(r"(\d+)\s+datagrams", text)
-    if not match:
+    # Each axis separately: the two are printed as "total dx N  total dy N",
+    # and a single pattern spanning both silently matched nothing.
+    dx_match = re.search(r"(?:total|injected)\s+dx\s+(-?\d+)", text)
+    dy_match = re.search(r"(?:total|injected)\s+dy\s+(-?\d+)", text)
+    count = re.search(r"datagrams\s+(\d+)|(\d+)\s+datagrams", text)
+    failed = re.search(r"failed sends\s+(\d+)", text)
+    if not dx_match or not dy_match:
         print(f"  {label:<8} no total in output")
         return None
-    dx, dy = int(match.group(1)), int(match.group(2))
+    dx, dy = int(dx_match.group(1)), int(dy_match.group(1))
+    if failed and int(failed.group(1)) > 0:
+        print(f"  {label:<8} {failed.group(1)} sends FAILED - the totals below are not comparable")
+    datagrams = next((g for g in count.groups() if g), None) if count else None
     print(f"  {label:<8} dx {dx:>8}  dy {dy:>8}"
-          f"{'  datagrams ' + count.group(1) if count else ''}")
+          f"{'  datagrams ' + datagrams if datagrams else ''}")
     return dx, dy
 
 
 print("\nmotion, which is additive and therefore comparable")
+posted = totals("/tmp/input-mover.out", "posted")
 sent = totals("/tmp/input-capture.out", "sent")
 applied = totals("/tmp/input-inject.out", "injected")
+if posted and sent:
+    # The window server coalesces mouse-moved events, summing their deltas, so
+    # the counts legitimately differ while the totals must not. That is the
+    # whole reason motion is additive rather than latest-wins.
+    print("  posted vs sent   "
+          + ("totals agree" if posted == sent else f"DISAGREE {posted} against {sent}"))
 if sent and applied:
     for axis, a, b in (("dx", sent[0], applied[0]), ("dy", sent[1], applied[1])):
         if a == 0:

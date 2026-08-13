@@ -12,6 +12,7 @@ members = [
     "macos/input-capture",
     "macos/renderer-metal",
     "tools/benchmark",
+    "tools/mouse-mover",
     "tools/pcap-analyse",
     "tools/radio-sample",
     "tools/capture-bench",
