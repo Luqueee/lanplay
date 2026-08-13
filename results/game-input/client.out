@@ -1,0 +1,21 @@
+watching the mouse and the keyboard for 60 s, sending to 192.168.1.70:5006 as session 1 from the moment a click asks for the capture
+mouse events 921  motion datagrams 921  failed sends 0
+total dx 138  total dy 367
+focus lost 0 times during the run
+keys captured 134  repeats suppressed 42
+capture cycles 1  capture clicks suppressed 1  hotkey events suppressed 0
+exits 0  by cause: focus lost 0  release hotkey 0  command-tab 0  session failure 0
+releases the machine asked for 0  events refused while uncaptured 0  entries that failed closed 0
+cursor taken 1 times and given back 0  focus losses the machine saw 0
+the machine ended capturing
+key datagrams 134  presses 67  releases 67
+button presses 3  releases 3
+wheel events 95  notches sent dx -15  dy -49
+keys still held 0  buttons still held 0  every press matched by a release: yes
+releases sent 2  by cause: focus lost 0  release hotkey 0  command-tab 0  session failure 0  capture released 1  exit 1
+heartbeats sent 148 at one every 400 ms
+reliable events sent 237  acknowledged 237  abandoned 0  still outstanding at exit 0
+events accounted 237 of 237
+retransmissions 7 over a ladder of 5  acknowledgement datagrams received 243  snapshots sent 498
+callback to send_to returning:  p50 107.01µs  p95 174.85µs  p99 229.38µs  max 603.13µs
+declared and exercised: motion, keys, acks, captures
