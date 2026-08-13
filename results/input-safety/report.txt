@@ -1,0 +1,19 @@
+=== graceful ending ===
+verdict
+  held on the host        keys {}, buttons 0b00000
+  releases               asked 1, expired 1
+  duplicates recognised  21
+  outstanding at exit     0
+  events accounted 363 of 363
+  injections              not this arm, the host was counting only
+
+  PASS  nothing held, liveness fired, every declared subsystem exercised
+=== killed ending ===
+verdict
+  held on the host        keys {}, buttons 0b00000
+  releases               asked 0, expired 1
+  duplicates recognised  28
+  outstanding at exit     not available, the client was killed
+  injections              not this arm, the host was counting only
+
+  PASS  nothing held, liveness fired, every declared subsystem exercised
