@@ -63,9 +63,7 @@ echo "inject    $([ "${DRY_RUN:-0}" = 1 ] && echo "dry run, nothing moves" || ec
 echo
 echo "building"
 cargo build --release -p lanplay-input-capture 2>&1 | tail -1
-scp -q -r "$REPO/windows/input-inject" "windows:$WIN_REPO\\windows\\" 2>/dev/null || true
-scp -q "$REPO/Cargo.toml" "windows:$WIN_REPO\\Cargo.toml"
-scp -q -r "$REPO/crates/input-protocol" "windows:$WIN_REPO\\crates\\" 2>/dev/null || true
+"$REPO/tools/win-sync.sh"
 ssh -n -o BatchMode=yes windows "cd $WIN_REPO && cargo build --release -p lanplay-input-inject" 2>&1 | tail -1
 
 # The injector goes up first and outlives the client, so no motion is sent
