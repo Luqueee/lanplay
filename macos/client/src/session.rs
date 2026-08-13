@@ -1130,6 +1130,7 @@ fn build_report(
         },
         display: crate::report::Display {
             nominal_hz: render.nominal_hz,
+            observed_hz: render.display_hz,
             cadence_valid,
             invalid_reason: (!cadence_valid).then(|| {
                 format!(

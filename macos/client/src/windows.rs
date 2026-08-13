@@ -32,10 +32,11 @@ pub fn sample(
     // than from the presentation clock: a suspended display link must not be
     // able to make a healthy link look like a stalling one.
     delivery: &Arc<lanplay_link_metrics::Delivery>,
-    // Highest frame id the network has shown, which is what the host
-    // actually produced. Access units missing from a window are the
-    // difference between that and what arrived, rather than a shortfall
-    // against a nominal rate the host may never have hit.
+    // Highest frame id whose access unit completed. Access units missing
+    // from a window are the difference between the span of ids that
+    // completed and how many did, rather than a shortfall against a nominal
+    // rate the host may never have hit. Both counters move at the same
+    // instant, so a window boundary cannot invent a loss.
     highest_frame: &Arc<std::sync::atomic::AtomicU64>,
     every: Duration,
     stop: &Arc<AtomicBool>,
@@ -104,7 +105,8 @@ pub fn sample(
             // a bad twenty seconds, and this is the number the channel
             // experiment moved by a factor of twelve.
             over_2t_per_min: link.tail.per_minute(2, link.span_s),
-            // What the host produced in this window minus what arrived.
+            // Ids spanned by the window's completions minus the number of
+            // them, which is exactly the ones that never completed.
             au_loss: highest
                 .saturating_sub(last_highest)
                 .saturating_sub(reassembled - last_arrived),

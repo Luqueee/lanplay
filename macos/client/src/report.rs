@@ -130,7 +130,13 @@ pub struct Decode {
 
 #[derive(Serialize)]
 pub struct Display {
+    /// What the display is capable of, from the link's own reckoning. Not a
+    /// measurement of this run.
     pub nominal_hz: f64,
+    /// Callbacks divided by the span they were counted over. The span ends
+    /// with the stream rather than with the clock, so dividing `callbacks`
+    /// by the run's nominal seconds gives a different and wrong answer.
+    pub observed_hz: f64,
     /// Whether the display link ran at a rate that makes anything below it a
     /// measurement.
     ///
