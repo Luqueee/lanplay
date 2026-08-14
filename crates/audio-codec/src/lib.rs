@@ -23,13 +23,27 @@
 //! that anything depending on this crate needs a C toolchain, and in particular
 //! cannot be cross-checked for Windows from a machine with no MSVC installed.
 //!
-//! What is absent, because each belongs to a later phase: no RTP, no socket, no
-//! jitter buffer, no resampler, no capture. The previous phase established that
-//! the render endpoint mixes at exactly 48000 Hz stereo and hands over packets
-//! of exactly 480 frames, so the path from a captured packet to an Opus frame
-//! needs no conversion at all — a 480 frame packet is two 5 ms frames or one
-//! 10 ms frame, and nothing is ever left over. Writing a resampler here would
-//! be writing code against a problem this machine does not have.
+//! What is absent, because each belongs to a later phase: no resampler, no
+//! capture, no audio device. The previous phase established that the render
+//! endpoint mixes at exactly 48000 Hz stereo and hands over packets of exactly
+//! 480 frames, so the path from a captured packet to an Opus frame needs no
+//! conversion at all — a 480 frame packet is two 5 ms frames or one 10 ms
+//! frame, and nothing is ever left over. Writing a resampler here would be
+//! writing code against a problem this machine does not have.
+//!
+//! RTP is absent from the wrapper for a different reason and present in one
+//! binary. The payload format lives in `lanplay-transport`, where it takes
+//! encoded bytes and a sample count so that crate never needs libopus; but a
+//! program that sends the tone over a socket and decodes what comes back needs
+//! both halves at once, and it has to sit on the side that already vendors the
+//! C. That is [`rtp_probe`], and it is an instrument rather than a component:
+//! nothing in [`encoder`] or [`decoder`] knows a socket exists.
+//!
+//! The receiving path is here for the same reason the RTP probe is: a jitter
+//! buffer that conceals a missing frame needs the decoder's own concealer, so
+//! it has to sit on the side that vendors the C. [`jitter`] is the buffer
+//! itself and holds no socket; [`jitter_probe`] is the run that drives it with
+//! a synthetic sink, and nothing in [`jitter`] knows either exists.
 //!
 //! Discontinuous transmission and in-band forward error correction are both
 //! off, and both are off on purpose. Each spends or withholds bytes according
@@ -56,7 +70,10 @@ pub mod config;
 pub mod decoder;
 pub mod encoder;
 pub mod error;
+pub mod jitter;
+pub mod jitter_probe;
 pub mod probe;
+pub mod rtp_probe;
 
 pub use config::{CodecConfig, FrameDuration, MAX_PACKET_BYTES, SAMPLE_RATES};
 pub use decoder::OpusDecoder;

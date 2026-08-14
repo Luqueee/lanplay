@@ -9,8 +9,26 @@ license.workspace = true
 name = "audio-codec-probe"
 path = "src/bin/audio_codec_probe.rs"
 
+# The RTP probe needs both halves of the codec and a socket at once. It lives
+# here rather than beside the packetiser so that `lanplay-transport` never
+# depends on libopus and can still be cross-checked for Windows.
+[[bin]]
+name = "audio-rtp-probe"
+path = "src/bin/audio_rtp_probe.rs"
+
+# The receiving path, for the same reason: a jitter buffer that conceals a
+# missing frame needs libopus's own concealer, so it cannot live beside the
+# packetiser either.
+[[bin]]
+name = "audio-jitter-probe"
+path = "src/bin/audio_jitter_probe.rs"
+
 [dependencies]
 lanplay-audio-capture = { workspace = true }
+lanplay-telemetry = { workspace = true }
 lanplay-tone-source = { workspace = true }
+lanplay-transport = { workspace = true }
 clap = { workspace = true }
 opus = { workspace = true }
+parking_lot = { workspace = true }
+sha2 = { workspace = true }

@@ -294,8 +294,12 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "lanplay-audio-capture",
+ "lanplay-telemetry",
  "lanplay-tone-source",
+ "lanplay-transport",
  "opus",
+ "parking_lot",
+ "sha2",
 ]
 
 [[package]]

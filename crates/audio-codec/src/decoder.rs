@@ -82,6 +82,36 @@ impl OpusDecoder {
         }
         Ok(&self.pcm[..returned * self.config.channels as usize])
     }
+
+    /// Produces one frame from libopus's own concealer, for a frame that did
+    /// not arrive.
+    ///
+    /// This is `opus_decode` with a null packet, which is precisely what the
+    /// codec provides for a lost frame: it extrapolates from the state the real
+    /// frames left behind, so the waveform continues instead of stopping.
+    /// Zero-filled silence was rejected as the alternative. A step to zero and
+    /// back is a click, and a click is louder and more noticeable than the
+    /// few milliseconds of audio it stands in for.
+    ///
+    /// It runs through the same decoder as every real frame because it has to.
+    /// The concealer reads the decoder state and updates it, so the next real
+    /// packet decodes against a decoder that knows a gap went by; concealing on
+    /// a second decoder would leave this one believing the stream was never
+    /// interrupted, and the frame after the gap would be reconstructed from a
+    /// history that did not happen.
+    pub fn conceal(&mut self) -> Result<&[f32], CodecError> {
+        let expected = self.config.frame_samples();
+        // An empty slice is how the wrapper spells a null packet; the frame
+        // size comes from the buffer's length, which is exactly one frame.
+        let returned = self
+            .decoder
+            .decode_float(&[], &mut self.pcm, false)
+            .map_err(|error| CodecError::Decode(error.code()))?;
+        if returned != expected {
+            return Err(CodecError::DecodedLength { returned, expected });
+        }
+        Ok(&self.pcm[..returned * self.config.channels as usize])
+    }
 }
 
 #[cfg(test)]
@@ -123,5 +153,78 @@ mod tests {
             }
             other => panic!("a 20 ms packet was accepted by a 5 ms decoder: {other:?}"),
         }
+    }
+
+    /// Root mean square of a frame, as a fraction of full scale.
+    fn rms(pcm: &[f32]) -> f64 {
+        let sum: f64 = pcm.iter().map(|sample| f64::from(*sample).powi(2)).sum();
+        (sum / pcm.len() as f64).sqrt()
+    }
+
+    /// Runs the tone through the codec for `frames`, leaving the decoder with
+    /// the state a real stream would have given it.
+    fn warmed(config: CodecConfig, frames: usize) -> (OpusDecoder, f64) {
+        let mut encoder = OpusEncoder::new(config).expect("encoder");
+        let mut decoder = OpusDecoder::new(config).expect("decoder");
+        let mut tone = lanplay_tone_source::tone::Tone::new(lanplay_tone_source::tone::CONTRACT);
+        let mut pcm = vec![0f32; config.frame_interleaved()];
+        let mut last = 0.0;
+        for _ in 0..frames {
+            tone.fill_stereo(&mut pcm);
+            let packet = encoder.encode(&pcm).expect("encode").to_vec();
+            last = rms(decoder.decode(&packet).expect("decode"));
+        }
+        (decoder, last)
+    }
+
+    #[test]
+    fn concealment_returns_one_whole_frame() {
+        let config = contract(FrameDuration::Ms5);
+        let (mut decoder, _) = warmed(config, 8);
+        let concealed = decoder.conceal().expect("conceal");
+        assert_eq!(concealed.len(), config.frame_interleaved());
+    }
+
+    #[test]
+    fn concealment_continues_the_waveform_rather_than_returning_silence() {
+        // The clause the whole receiving path rests on. Zero-filled silence
+        // would pass any frame count and any length check and be a click, so
+        // the thing worth asserting is that there is audio in it and that it is
+        // at roughly the level of the audio it stands in for.
+        let config = contract(FrameDuration::Ms5);
+        let (mut decoder, playing) = warmed(config, 40);
+        let first = rms(decoder.conceal().expect("conceal")).max(f64::MIN_POSITIVE);
+
+        assert!(
+            first > playing / 4.0,
+            "the concealer returned {first:.6} against {playing:.6} of real audio, which is \
+             nearer silence than continuation"
+        );
+    }
+
+    #[test]
+    fn a_concealed_frame_leaves_the_decoder_able_to_decode_the_next_real_one() {
+        // Concealment runs through the same decoder as every real frame, so a
+        // gap must not leave it in a state the frame after the gap cannot be
+        // decoded from.
+        let config = contract(FrameDuration::Ms5);
+        let (mut decoder, playing) = warmed(config, 20);
+        for _ in 0..3 {
+            decoder.conceal().expect("conceal");
+        }
+
+        let mut encoder = OpusEncoder::new(config).expect("encoder");
+        let mut tone = lanplay_tone_source::tone::Tone::new(lanplay_tone_source::tone::CONTRACT);
+        let mut pcm = vec![0f32; config.frame_interleaved()];
+        let mut recovered = 0.0;
+        for _ in 0..8 {
+            tone.fill_stereo(&mut pcm);
+            let packet = encoder.encode(&pcm).expect("encode").to_vec();
+            recovered = rms(decoder.decode(&packet).expect("decode after a gap"));
+        }
+        assert!(
+            recovered > playing / 2.0,
+            "after a three frame gap the stream came back at {recovered:.6} against {playing:.6}"
+        );
     }
 }

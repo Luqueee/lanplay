@@ -43,7 +43,7 @@ use crate::error::CodecError;
 /// and the first few frames where the encoder is still settling. Measuring the
 /// ramp would drag the reported frequency towards whatever the transient
 /// contains and make a correct codec look slightly wrong.
-const ANALYSIS_SKIP_FRAMES: usize = 4_800;
+pub(crate) const ANALYSIS_SKIP_FRAMES: usize = 4_800;
 
 /// Frames the analysis window holds.
 ///
@@ -53,7 +53,7 @@ const ANALYSIS_SKIP_FRAMES: usize = 4_800;
 /// the whole run instead would cost quadratic time for no more certainty: the
 /// detector scans the band at the window's own bin spacing, so doubling the
 /// window doubles both the number of bins and the cost of each.
-const ANALYSIS_FRAMES: usize = 24_000;
+pub(crate) const ANALYSIS_FRAMES: usize = 24_000;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Options {
@@ -184,7 +184,12 @@ pub fn run(options: Options) -> Result<Measurement, CodecError> {
 /// limits, the silence floor and the peak refinement the same judgement the
 /// capture side already makes; the byte buffer is the price of not making that
 /// judgement twice.
-fn decoded_format(config: &CodecConfig) -> MixFormat {
+///
+/// Shared with the RTP probe, which analyses decoded audio that arrived over a
+/// socket rather than straight out of the encoder: two descriptions of the same
+/// decoder output could drift apart, and then the two probes would be quoting
+/// frequencies measured under different rules.
+pub(crate) fn decoded_format(config: &CodecConfig) -> MixFormat {
     let bytes_per_sample = 4u16;
     let block_align = config.channels * bytes_per_sample;
     MixFormat::from_raw(&RawWaveFormat {

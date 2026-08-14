@@ -28,7 +28,10 @@ const ONE_BYTE_PROFILE: u16 = 0xBEDE;
 pub const FRAME_ID_EXTENSION_ID: u8 = 1;
 
 const VERSION: u8 = 2;
-const FIXED_HEADER_LEN: usize = 12;
+/// The fixed header every packet carries, before any extension. Public because
+/// a payload format that writes no extension budgets against this rather than
+/// against [`HEADER_OVERHEAD`], and must not restate the number to do it.
+pub const FIXED_HEADER_LEN: usize = 12;
 /// Profile and length words, then a 9-byte element padded to a word boundary.
 const FRAME_ID_EXTENSION_LEN: usize = 4 + 12;
 
