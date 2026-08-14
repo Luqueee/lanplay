@@ -12,10 +12,11 @@ use lanplay_telemetry::{
     Nanos, Recorder, Segment, Snapshot, Stage, Telemetry, TelemetryConfig, Timestamp, Trend,
     resident_bytes, wait_until,
 };
-use lanplay_transport::TxStats;
+use lanplay_transport::{ControlClient, TxStats};
 use lanplay_video_core::{
     AccessUnitSource, FixtureSource, PixelFormat, VideoDecoder, ensure_fixture,
 };
+use parking_lot::Mutex;
 
 use crate::Cli;
 use crate::gate::{GateInputs, TransportInputs, evaluate};
@@ -268,11 +269,12 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     // Delivery cadence lives here, beside the arrival counter, because both
     // describe what the network did and neither may be inferred from what
     // the display later managed to show.
-    // The thresholds are multiples of the source period, so delivery has to
-    // be told what the host was asked to produce.
-    let delivery = Arc::new(lanplay_link_metrics::Delivery::new(Nanos::from_millis_f64(
-        1000.0 / feed_fps.max(1.0),
-    )));
+    // The thresholds are multiples of the source period, so delivery has to be
+    // told what the host was asked to produce. One expression for that period,
+    // because the phase loop shifts inside it too and two derivations of the
+    // same number would eventually disagree.
+    let source_period = Nanos::from_millis_f64(1000.0 / feed_fps.max(1.0));
+    let delivery = Arc::new(lanplay_link_metrics::Delivery::new(source_period));
     // Cloned before the decoder is moved into whichever thread submits to it.
     let decoder_counters = decoder.counters();
     let decoder_status = decoder_counters.clone();
@@ -438,6 +440,12 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
         println!("control: acknowledged generation {generation}");
     }
 
+    // The handshake was not the last use of the control connection: the phase
+    // loop asks the host over it for the rest of the run. Shared rather than
+    // moved, so the connection lives exactly as long as it did when the
+    // handshake was all it was for.
+    let control = control.map(|(client, _)| Arc::new(Mutex::new(client)));
+
     // The closure below consumes its copy; the original stays for the
     // failure path, where the renderer never calls it.
     let ready_checks = checks.clone();
@@ -454,6 +462,26 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
         Duration::from_secs_f64(cli.window_seconds.max(1.0)),
         sampler_stop,
     );
+
+    // The phase loop, or the reason this run has nothing for it to do. Started
+    // after the acknowledgement because it can only ask a host that is already
+    // sending, and refused rather than faked wherever one of the two halves it
+    // measures between does not exist.
+    let phase_loop = start_phase(cli, &telemetry, control.as_ref(), source_period, &stop);
+    match &phase_loop {
+        PhaseLoop::Running(_) if cli.phase_align == crate::PhaseAlign::Observe => println!(
+            "phase: observing only, sending nothing; measuring against an aim of at \
+             least {}",
+            crate::phase::margin_floor(source_period)
+        ),
+        PhaseLoop::Running(_) => println!(
+            "phase: aligning the host's capture to this display, aiming at least \
+             {} in front of each refresh and widening that to whatever jitter it \
+             measures",
+            crate::phase::margin_floor(source_period)
+        ),
+        PhaseLoop::Idle(summary) => println!("phase: {summary}"),
+    }
 
     // AppKit owns this thread from here until the run stops. The renderer
     // prints its own preflight items and then calls `on_ready`, which is
@@ -507,6 +535,12 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     let outcome = pipeline.join()?;
     let memory = memory_sampler.join().expect("memory sampler");
     let mut slices = sampler.join().expect("window sampler");
+    // Joined before the snapshot below, because the loop holds a telemetry
+    // handle and the snapshot can only be taken once the last one is gone.
+    let phase = match phase_loop {
+        PhaseLoop::Running(estimator) => estimator.join().expect("phase estimator"),
+        PhaseLoop::Idle(summary) => summary,
+    };
     // The renderer draws on into silence for as long as the watchdog takes to
     // notice the sender has stopped. That drain lands somewhere inside the
     // last window the sampler emitted, and there is no way to tell from the
@@ -546,6 +580,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
         &memory,
         &render_stats,
         &snapshot,
+        &phase,
         delivery.cumulative(),
     );
     if !slices.is_empty() {
@@ -565,6 +600,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             &render_stats,
             &spans_end,
             &snapshot,
+            &phase,
             delivery.cumulative(),
             slices,
         );
@@ -730,12 +766,73 @@ fn sample_memory(stop: Arc<AtomicBool>) -> Trend {
     memory
 }
 
+/// Starts the phase loop, or says why this run has nothing for it to do.
+///
+/// Every refusal here is a run where one of the two things the estimate is
+/// measured between does not exist. Reporting those as a loop that decided to
+/// send nothing would make the two indistinguishable, and the whole point of the
+/// switch is that they are not.
+///
+/// The display is checked before the host, because an observing run needs a
+/// refresh to measure against and no host at all: the phase it reports is the
+/// property of this machine that an acting run then tries to move.
+fn start_phase(
+    cli: &Cli,
+    telemetry: &Arc<Telemetry>,
+    control: Option<&Arc<Mutex<ControlClient>>>,
+    source_period: Nanos,
+    stop: &Arc<AtomicBool>,
+) -> PhaseLoop {
+    if cli.phase_align == crate::PhaseAlign::Off {
+        return PhaseLoop::Idle(crate::phase::Summary::off());
+    }
+    if cli.link_only {
+        return PhaseLoop::Idle(crate::phase::Summary::unavailable(
+            "--link-only has no display link to measure a phase against",
+        ));
+    }
+    if cli.mode != crate::Mode::DisplayLink {
+        return PhaseLoop::Idle(crate::phase::Summary::unavailable(
+            "a refresh phase exists only under --mode display-link",
+        ));
+    }
+    let control = match (cli.phase_align, control) {
+        (crate::PhaseAlign::Observe, _) => None,
+        (_, Some(control)) => Some(Arc::clone(control)),
+        (_, None) => {
+            return PhaseLoop::Idle(crate::phase::Summary::unavailable(
+                "the host can only be asked over the control plane, which needs \
+                 --transport lan; --phase-align observe measures without one",
+            ));
+        }
+    };
+    PhaseLoop::Running(crate::phase::spawn(
+        Arc::clone(telemetry),
+        control,
+        source_period,
+        Arc::clone(stop),
+    ))
+}
+
+/// Whether the phase loop is running, and its summary when it is not.
+///
+/// Two outcomes rather than a success and a failure. A run with the switch off,
+/// or one whose mode has no refresh to align to, is not a broken run: it is a
+/// run that has a summary already and no thread to wait for. `Result` would say
+/// otherwise to every reader.
+enum PhaseLoop {
+    Running(thread::JoinHandle<crate::phase::Summary>),
+    Idle(crate::phase::Summary),
+}
+
 fn report(
     cli: &Cli,
     outcome: &RunOutcome,
     memory: &Trend,
     render: &RenderStats,
     snapshot: &Snapshot,
+    // What the phase loop did, which the wait it was shrinking cannot say.
+    phase: &crate::phase::Summary,
     // Delivery cadence, measured at the depacketiser rather than inferred
     // from presentation.
     link: lanplay_link_metrics::Window,
@@ -904,6 +1001,9 @@ fn report(
         "  presentation wait p50 {} p95 {} p99 {}",
         wait.p50, wait.p95, wait.p99
     );
+    // Beside the wait rather than anywhere else, because this is the loop that
+    // exists to shrink that line and the two are only readable together.
+    println!("  phase alignment   {phase}");
     println!(
         "  render            p50 {} p95 {} p99 {}",
         render_segment.p50, render_segment.p95, render_segment.p99
@@ -999,6 +1099,7 @@ fn build_report(
     render: &RenderStats,
     span_end: &SpanEnd,
     snapshot: &Snapshot,
+    phase: &crate::phase::Summary,
     // Delivery cadence, already summarised: measured at the depacketiser, so
     // it stays valid whatever the display was doing.
     link: lanplay_link_metrics::Window,
@@ -1158,6 +1259,7 @@ fn build_report(
             frame_age_p95_ms: snapshot.local_age.p95.as_millis_f64(),
             frame_age_p99_ms: snapshot.local_age.p99.as_millis_f64(),
         },
+        phase: phase.into(),
         environment: crate::report::Environment {
             occlusion_changes: render.occlusion_changes,
             space_changes: render.space_changes,

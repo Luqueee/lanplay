@@ -127,6 +127,15 @@ struct Args {
     /// receiver to acknowledge it before sending any media.
     #[arg(long)]
     control_port: Option<u16>,
+    /// Where to forward a receiver's phase request on this machine.
+    ///
+    /// The receiver negotiates a decoder with this process, so its request
+    /// arrives here, but the phase it needs moved is the source's: delaying
+    /// the capture of a frame that has already been drawn moves when it is
+    /// ready and not when its content was current, which buys nothing. So this
+    /// process forwards and the producer obeys.
+    #[arg(long, default_value_t = lanplay_present_source::phase::default_target())]
+    phase_relay: std::net::SocketAddr,
     /// Service class to request for the media socket. W2 showed cadence is
     /// not a bandwidth problem, so the next variable is when datagrams are
     /// allowed to leave rather than how many.
@@ -492,8 +501,13 @@ fn split_parameter_sets(header: &[u8]) -> Result<(Vec<u8>, Vec<u8>), String> {
     }
 }
 
-/// Hands the receiver the codec configuration and waits for it to say it has
-/// a decoder for it.
+/// Hands the receiver the codec configuration, waits for it to say it has a
+/// decoder for it, and hands the still-open session back.
+///
+/// The session used to end with the handshake. It outlives it now because the
+/// receiver is the only party that can see where in its refresh period our
+/// frames land, and telling us to hold the next tick back needs a connection
+/// that is still there.
 #[cfg(windows)]
 fn serve_config(
     port: u16,
@@ -502,7 +516,7 @@ fn serve_config(
     height: u16,
     sps: &[u8],
     pps: &[u8],
-) -> Result<(), String> {
+) -> Result<lanplay_transport::ControlSession, String> {
     use lanplay_telemetry::Nanos;
     use lanplay_transport::{ControlMessage, ControlServer};
 
@@ -530,7 +544,7 @@ fn serve_config(
     match session.next_message(WAIT) {
         Ok(Some(ControlMessage::ConfigAck { generation: acked })) if acked == generation => {
             println!("config generation {generation} acknowledged");
-            Ok(())
+            Ok(session)
         }
         Ok(Some(ControlMessage::ConfigAck { generation: acked })) => Err(format!(
             "receiver acknowledged generation {acked}, not {generation}"
@@ -542,6 +556,49 @@ fn serve_config(
         Ok(None) => Err("receiver never acknowledged the configuration".into()),
         Err(error) => Err(format!("waiting for ConfigAck: {error}")),
     }
+}
+
+/// Reads the control connection for the rest of the run, on its own thread,
+/// and forwards every phase request to the producer.
+///
+/// Its own thread because a read with any usable timeout costs a slice of an
+/// 8.33 ms budget on every frame, and the submit loop has none to spare. The
+/// socket blocks here instead, and the forward is one datagram to loopback.
+///
+/// Nothing is sent back. A phase shift is advisory, the receiver does not wait
+/// on an answer, and a run whose receiver never sends one never notices this
+/// thread exists.
+#[cfg(windows)]
+fn listen_for_phase(
+    mut session: lanplay_transport::ControlSession,
+    relay: std::sync::Arc<lanplay_present_source::phase::Relay>,
+) -> Result<(), String> {
+    use lanplay_telemetry::Nanos;
+    use lanplay_transport::ControlMessage;
+
+    // Long enough that an idle receiver costs nothing, short enough that a
+    // connection which went away is noticed within a second rather than at the
+    // end of a soak.
+    const POLL: Nanos = Nanos(1_000_000_000);
+
+    std::thread::Builder::new()
+        .name("control".into())
+        .spawn(move || {
+            loop {
+                match session.next_message(POLL) {
+                    Ok(Some(ControlMessage::PhaseShift { delay_nanos })) => relay.send(delay_nanos),
+                    // A timeout, or something this build has no use for
+                    // mid-run. Neither is a reason to stop reading.
+                    Ok(_) => {}
+                    // The receiver hung up or the link broke. Media is UDP and
+                    // does not depend on this connection, so the run carries on
+                    // at the phase it already has.
+                    Err(_) => break,
+                }
+            }
+        })
+        .map(|_| ())
+        .map_err(|error| format!("spawn control reader: {error}"))
 }
 
 #[cfg(windows)]
@@ -657,11 +714,21 @@ fn windows_main() -> Result<(), String> {
         sps.len(),
         pps.len()
     );
+    // Opened whether or not a receiver ever asks, so the run has one place to
+    // count requests against and the report says the same thing either way.
+    // The rate goes with it: the producer is a separate process started by a
+    // separate script, and one left over from an earlier experiment at another
+    // rate would serve this run's requests while aiming every one of them
+    // somewhere else.
+    let relay = Arc::new(
+        lanplay_present_source::phase::Relay::open(args.phase_relay, args.fps)
+            .map_err(|error| format!("open phase relay to {}: {error}", args.phase_relay))?,
+    );
     if let Some(port) = args.control_port {
         // No media before the receiver has acknowledged a decoder for this
         // configuration. Buffering the first frames until config arrives would
         // build exactly the queue the whole pipeline is designed to refuse.
-        serve_config(
+        let control = serve_config(
             port,
             CONFIG_GENERATION,
             args.width as u16,
@@ -669,6 +736,7 @@ fn windows_main() -> Result<(), String> {
             &sps,
             &pps,
         )?;
+        listen_for_phase(control, Arc::clone(&relay))?;
     }
 
     let mut inputs = Vec::with_capacity(SLOT_COUNT);
@@ -779,7 +847,15 @@ fn windows_main() -> Result<(), String> {
         .join()
         .map_err(|_| "memory sampler panicked".to_owned())?;
     let (metrics, elapsed, pool_exhaustions) = run?;
-    report(&args, frames, &metrics, elapsed, pool_exhaustions, &memory)
+    report(
+        &args,
+        frames,
+        &metrics,
+        elapsed,
+        pool_exhaustions,
+        &memory,
+        relay.counts(),
+    )
 }
 
 #[cfg(windows)]
@@ -856,6 +932,12 @@ fn run_pipeline<'a>(
             }
             if mode == RunMode::Paced {
                 stage::submit(1);
+                // Deliberately not where a phase request lands. Holding this
+                // back moves when a frame is ready and not when its content
+                // was drawn, so it buys nothing until it crosses a display
+                // tick and then it costs a whole period. The producer's
+                // schedule is the only phase worth moving; see
+                // `lanplay_present_source::pace`.
                 wait_until(started + period.mul_f64(offset as f64));
             }
             let wait_start = Instant::now();
@@ -1062,6 +1144,7 @@ fn report(
     elapsed: std::time::Duration,
     pool_exhaustions: u64,
     memory: &[(std::time::Instant, u64)],
+    relayed: lanplay_present_source::phase::RelayCounts,
 ) -> Result<(), String> {
     let throughput = frames as f64 / elapsed.as_secs_f64();
     println!(
@@ -1085,6 +1168,11 @@ fn report(
         throughput,
         pool_exhaustions
     );
+    // Unconditionally, zeros included. Printed only when something happened,
+    // its absence would not distinguish a receiver that never asked from a
+    // host that dropped the request on the floor. What became of a relayed
+    // request is the producer's report to make, not this one's.
+    println!("{relayed}");
     if matches!(args.source, ContentSource::Dda | ContentSource::Wgc) {
         print_stage("capture acquire", metrics.iter().map(|m| m.source_wait_ns));
     }

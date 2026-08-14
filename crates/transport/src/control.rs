@@ -284,6 +284,25 @@ pub enum ControlMessage {
     Pong {
         nonce: u64,
     },
+    /// The receiver asking the sender to move its capture tick within the
+    /// period, without changing the rate.
+    ///
+    /// The largest term in this pipeline's latency is not work, it is the wait
+    /// between a frame being ready and the viewer's display next being willing
+    /// to show it. With two unsynchronised 120 Hz clocks that wait averages half
+    /// a refresh period whatever the software does, and it disappears if the
+    /// sender produces each frame just before the receiver can present it.
+    ///
+    /// A delay only, never an advance. Asking a sender to move a tick earlier
+    /// asks it for a frame it has already produced, while delaying by a period
+    /// minus the amount is the same phase and always in the future, so the
+    /// signed version buys nothing and costs a class of bug.
+    PhaseShift {
+        /// Nanoseconds to hold the next capture tick back by. Less than one
+        /// period; a sender that receives more is entitled to take it modulo the
+        /// period rather than to stall.
+        delay_nanos: u32,
+    },
 }
 
 impl ControlMessage {
@@ -297,6 +316,7 @@ impl ControlMessage {
     pub const PONG: u16 = 8;
     pub const VIDEO_CONFIG: u16 = 9;
     pub const CONFIG_ACK: u16 = 10;
+    pub const PHASE_SHIFT: u16 = 11;
 
     pub const fn message_type(&self) -> u16 {
         match self {
@@ -310,6 +330,7 @@ impl ControlMessage {
             ControlMessage::Pong { .. } => Self::PONG,
             ControlMessage::VideoConfig { .. } => Self::VIDEO_CONFIG,
             ControlMessage::ConfigAck { .. } => Self::CONFIG_ACK,
+            ControlMessage::PhaseShift { .. } => Self::PHASE_SHIFT,
         }
     }
 
@@ -901,6 +922,9 @@ mod tests {
             ControlMessage::StopStream,
             ControlMessage::Ping { nonce: u64::MAX },
             ControlMessage::Pong { nonce: 0 },
+            ControlMessage::PhaseShift {
+                delay_nanos: 8_333_333,
+            },
         ];
         for message in messages {
             let mut buffer = Vec::new();

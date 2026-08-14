@@ -11,6 +11,7 @@
 //! own frame pacing is a second unknown.
 
 pub mod pace;
+pub mod phase;
 pub mod report;
 
 #[cfg(windows)]

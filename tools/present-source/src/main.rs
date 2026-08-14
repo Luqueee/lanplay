@@ -32,6 +32,16 @@ struct Args {
     /// Which monitor to present on, as a DXGI output index.
     #[arg(long, default_value_t = 0)]
     monitor: u32,
+
+    /// Loopback UDP port to accept phase requests on; 0 accepts none.
+    ///
+    /// A viewer that can see where in its refresh period these frames land
+    /// asks for the next one to be held back, which is the only way to change
+    /// how old a frame's content is when it is finally scanned out. The
+    /// request reaches this machine's encoder host first, because that is what
+    /// the viewer negotiated with, and arrives here forwarded.
+    #[arg(long, default_value_t = lanplay_present_source::phase::DEFAULT_PORT)]
+    phase_port: u16,
 }
 
 #[cfg(windows)]
@@ -46,6 +56,7 @@ fn main() -> ExitCode {
         seconds: args.seconds,
         fullscreen: args.fullscreen,
         monitor: args.monitor,
+        phase_port: args.phase_port,
     };
 
     match present::run(options) {

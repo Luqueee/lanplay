@@ -16,6 +16,9 @@ pub struct Report {
     pub delivery: Delivery,
     pub decode: Decode,
     pub display: Display,
+    /// What the phase estimator did, which is not derivable from the wait it
+    /// was trying to shrink.
+    pub phase: Phase,
     pub environment: Environment,
     pub windows: Vec<Window>,
 }
@@ -168,6 +171,102 @@ pub struct Display {
     pub frame_age_p50_ms: f64,
     pub frame_age_p95_ms: f64,
     pub frame_age_p99_ms: f64,
+}
+
+/// The phase estimator's own account of the run.
+///
+/// A run that sent no shift and a run whose estimator never existed produce the
+/// same presentation wait and mean completely different things, so the state is
+/// recorded rather than inferred from the counts being zero.
+#[derive(Serialize)]
+pub struct Phase {
+    /// `on`, `observe` or `off`. Three states rather than a flag, because a run
+    /// that measured the phase and deliberately sent nothing is neither of the
+    /// other two and is the control the comparison needs.
+    pub mode: &'static str,
+    /// False only for `off`. An observing run has the loop enabled: what it does
+    /// not have is a wire.
+    pub enabled: bool,
+    /// True only when the loop actually observed this run.
+    pub ran: bool,
+    /// Why it did not, when it was asked for and could not run.
+    pub unavailable_reason: Option<String>,
+    /// How far in front of the display link's deadline frames ended up being
+    /// aimed. Chosen from the jitter the run measured, so a run can only be read
+    /// against this rather than against the constant it started from.
+    pub margin_ms: f64,
+    /// The least it would have aimed for whatever it measured.
+    pub margin_floor_ms: f64,
+    /// Scatter of the phases the margin was chosen from: the jitter the margin
+    /// exists to absorb. Zero when no batch was ever believable, which
+    /// `decisions` tells apart from a genuinely steady run.
+    pub spread_ms: f64,
+    /// Share of the period the measured phase visited, in sixteenths.
+    ///
+    /// The number that says whether a phase was held or left alone: two
+    /// unsynchronised 120 Hz clocks beat through the whole period about every
+    /// 33 s, so an untouched run of a few minutes approaches one while a held
+    /// phase stays near a sixteenth.
+    pub phase_coverage: f64,
+    pub samples: u64,
+    pub decisions: u64,
+    /// Shifts that reached the wire. Zero while observing.
+    pub shifts: u64,
+    /// Shifts a decision asked for that were deliberately not sent. Non-zero
+    /// only while observing, where it is the count of what an acting run of the
+    /// same shape would have done.
+    pub shifts_withheld: u64,
+    /// Decisions that found the phase already where it was aimed.
+    pub holds: u64,
+    /// Decisions refused for want of evidence.
+    pub declined: u64,
+    /// The phase of the first believable batch: where the two clocks sat before
+    /// anything was asked of them.
+    pub first_phase_ms: Option<f64>,
+    pub last_phase_ms: Option<f64>,
+    pub last_delay_ms: Option<f64>,
+    pub last_refusal: Option<String>,
+    pub send_errors: u64,
+    /// Decisions the series holds, reported separately so a series that stopped
+    /// growing cannot be read as a phase that stopped moving.
+    pub trace_entries: usize,
+    /// Decisions past the series' capacity, and therefore missing from it.
+    pub trace_dropped: u64,
+    /// What the monotonic `at_ns` below was against the wall clock, sampled once
+    /// when this report was written.
+    ///
+    /// An offset between two bases rather than one clock: the monotonic side
+    /// counts through sleep, which is what makes a single pairing valid for the
+    /// whole run. It is here so a decision can be lined up with an event in
+    /// somebody else's log, which is the only reason to cross at all.
+    pub clock_epoch_at_ns: u64,
+    pub clock_epoch_unix_ms: f64,
+    pub trace: Vec<PhaseSample>,
+}
+
+/// One decision from the phase loop.
+///
+/// The series exists because endpoints cannot settle anything on a link that
+/// drifts: two clocks a quarter of a millisecond a second apart sweep two whole
+/// periods across seventy seconds, which buries any single step applied in the
+/// middle. Reading the phase either side of an event, close enough that the
+/// drift between the readings is small against the step, needs every decision
+/// rather than the first and the last.
+#[derive(Serialize)]
+pub struct PhaseSample {
+    /// The newest frame the decision was computed from, on the same monotonic
+    /// clock as every stage mark in this pipeline.
+    pub at_ns: u64,
+    /// Seconds from the first traced decision, which is what a reader wants when
+    /// lining the series up against its own log.
+    pub at_s: f64,
+    pub phase_ms: f64,
+    /// What the phase was being aimed at when this decision was taken.
+    pub margin_ms: f64,
+    /// The delay asked for, absent on a decision that asked for nothing.
+    pub delay_ms: Option<f64>,
+    /// Whether that delay reached the wire. Always false in `observe`.
+    pub sent: bool,
 }
 
 #[derive(Serialize)]

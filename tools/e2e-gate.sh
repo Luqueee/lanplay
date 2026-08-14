@@ -28,6 +28,12 @@ set -euo pipefail
 SECONDS_TO_RUN="${1:-60}"
 IFACE="${IFACE:-${WIRED_IF:-en8}}"
 BITRATE="${BITRATE:-50}"
+# One rate, read by both ends. The producer checks the rate a phase request was
+# computed for against the rate it is pacing and says so when they differ, but
+# what reaches it is the host's number standing in for the client's. Two
+# literals here could drift apart and make that check accuse a matched pair, or
+# stay quiet about a real disagreement, so there is only one.
+FPS="${FPS:-120}"
 PORT="${PORT:-5004}"
 CONTROL_PORT="${CONTROL_PORT:-5005}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -129,9 +135,10 @@ CLIENT_LOG="$(mktemp -t e2e-gate-client)"
 caffeinate -d "$CLIENT" \
     --transport lan --bind "$LOCAL_IP:$PORT" --control "$WIN_IP:$CONTROL_PORT" \
     --parameter-sets "${PARAMETER_SETS:-host}" \
-    --width 1920 --height 1080 --fps 120 \
+    --width 1920 --height 1080 --fps "$FPS" \
     --seconds "$SECONDS_TO_RUN" --fixture-seconds 10 --fixture-dir "$REPO/fixtures" \
     --mode display-link $DISPLAY_ARG \
+    --phase-align "${PHASE_ALIGN:-on}" \
     --window-seconds 10 --report "$REPORT" >"$CLIENT_LOG" 2>&1 &
 CLIENT_PID=$!
 trap 'kill "$CLIENT_PID" 2>/dev/null || true; restore_clocks' EXIT
@@ -198,7 +205,7 @@ Get-Process lanplay-nvenc-probe -ErrorAction SilentlyContinue | Stop-Process -Fo
 # a capture p50 of exactly one frame period and a throughput near 110, with
 # nothing downstream at fault. Uncapped follows the source, which is what the
 # product does anyway.
-& \$probe --mode uncapped --input nv12 --source dda --output-name IDD-LAB --send-to $LOCAL_IP:$PORT --control-port $CONTROL_PORT --service-class ${SERVICE_CLASS:-best-effort} --mtu ${MTU:-1200} --seconds $SECONDS_TO_RUN --warmup 0 --fps 120 --width 1920 --height 1080 --bitrate-mbps $BITRATE --preset p1 --tuning ll --idr-interval 120 --window-seconds 10
+& \$probe --mode uncapped --input nv12 --source dda --output-name IDD-LAB --send-to $LOCAL_IP:$PORT --control-port $CONTROL_PORT --service-class ${SERVICE_CLASS:-best-effort} --mtu ${MTU:-1200} --seconds $SECONDS_TO_RUN --warmup 0 --fps $FPS --width 1920 --height 1080 --bitrate-mbps $BITRATE --preset p1 --tuning ll --idr-interval 120 --window-seconds 10
 exit \$LASTEXITCODE
 PS1
 scp -q "$LOCAL_RUNNER" "windows:$(printf '%s' "$RUNNER" | tr '\\' '/')"

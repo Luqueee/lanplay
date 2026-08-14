@@ -10,6 +10,7 @@ mod config;
 mod dscp;
 mod gate;
 mod nap;
+mod phase;
 mod preflight;
 mod report;
 mod session;
@@ -100,6 +101,26 @@ pub struct Cli {
     pub window_seconds: f64,
     #[arg(long, value_enum, default_value_t = Mode::DisplayLink)]
     pub mode: Mode,
+    /// Ask the host to hold a capture tick back so each frame becomes ready
+    /// just before this display wants one, and keep asking as the two clocks
+    /// drift apart.
+    ///
+    /// `off` is the negative control for the mechanism. A threshold on
+    /// presentation wait cannot tell alignment from luck, so the claim is only
+    /// falsifiable if an unaligned arm of the same run can be measured beside
+    /// the aligned one: the unaligned one has to sit at half a refresh period,
+    /// which is where an arbitrary phase between two unsynchronised clocks puts
+    /// it.
+    ///
+    /// `observe` measures and reports exactly as `on` does and sends nothing. It
+    /// is the control for the phase rather than for the mechanism: a run's
+    /// starting phase is an independent draw, so an arm that happens to begin
+    /// where alignment aims proves a favourable draw, while an untouched arm
+    /// shows the whole distribution the acting arm has to be read against. It
+    /// also needs no host, which is what makes it the place to settle by
+    /// experiment which way a held tick moves the phase measured here.
+    #[arg(long, value_enum, default_value_t = PhaseAlign::Observe)]
+    pub phase_align: PhaseAlign,
 
     /// Burn this long in the renderer before presenting. Proves
     /// latest-frame-wins bounds latency when the consumer is slow.
@@ -138,6 +159,18 @@ pub enum Mode {
     Immediate,
     /// Render when the display asks, through `CAMetalDisplayLink`.
     DisplayLink,
+}
+
+/// Whether the receiver measures the capture phase and asks the host to move
+/// it.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PhaseAlign {
+    /// Measure and ask.
+    On,
+    /// Measure and stay silent.
+    Observe,
+    /// Neither.
+    Off,
 }
 
 /// How access units reach the decoder.
