@@ -17,6 +17,17 @@
 # that wraps makes both signs fit the result and that is the one outcome this
 # cannot afford.
 #
+# This is the instrument for the whole question, and it replaced a two-arm gate
+# that could not work. That gate ran the client once with alignment on and once
+# with it off and compared the waits, which cannot separate a lever from the drift
+# between the two runs: the phase moves about 0.02 ms every second, so two arms
+# minutes apart differ whatever the lever does. Worse, once every lever had
+# measured neutral the comparison could never pass, and a gate that cannot pass
+# teaches its reader to ignore a failure.
+#
+# One run, one known shift, and a step looked for in the series answers it without
+# a control arm at all, because the shift's size and its instant are known.
+#
 # usage:
 #   tools/phase-sign.sh [seconds] [delay-ms]
 
