@@ -1,0 +1,21 @@
+[package]
+name = "lanplay-tone-source"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "lanplay_tone_source"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tone-source"
+path = "src/main.rs"
+
+[dependencies]
+lanplay-telemetry = { workspace = true }
+clap = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }

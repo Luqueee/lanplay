@@ -1,0 +1,36 @@
+[package]
+name = "lanplay-audio-capture"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+clap = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_Media",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Performance",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
+
+# The library carries the wave format tags and subformat GUIDs as plain
+# integers, because the code that decodes a mix format has to run on the
+# machine the tests run on. The proof that those integers are the SDK's own
+# lives in a test, and only the test needs the two modules they come from.
+[target.'cfg(windows)'.dev-dependencies]
+windows = { workspace = true, features = [
+    "Win32_Media_KernelStreaming",
+    "Win32_Media_Multimedia",
+] }
+
+[[bin]]
+name = "audio-capture-probe"
+path = "src/bin/audio-capture-probe.rs"
