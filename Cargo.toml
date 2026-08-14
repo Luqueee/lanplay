@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/audio-codec",
     "crates/input-protocol",
     "crates/link-metrics",
     "crates/protocol",
@@ -36,6 +37,9 @@ rust-version = "1.85"
 license = "MIT"
 
 [workspace.dependencies]
+lanplay-audio-capture = { path = "windows/audio-capture" }
+lanplay-audio-codec = { path = "crates/audio-codec" }
+lanplay-tone-source = { path = "tools/tone-source" }
 lanplay-capabilities = { path = "crates/capabilities" }
 lanplay-capture = { path = "windows/capture" }
 lanplay-encoder-nvenc = { path = "windows/encoder-nvenc" }
@@ -49,6 +53,12 @@ lanplay-telemetry = { path = "crates/telemetry" }
 lanplay-transport = { path = "crates/transport" }
 lanplay-video-core = { path = "crates/video-core" }
 clap = { version = "4", features = ["derive"] }
+# libopus through its reference C implementation, vendored and built by
+# `audiopus_sys`. A pure-Rust reimplementation was considered and rejected: an
+# encoder that is subtly wrong produces audio that sounds nearly right and
+# fails in ways nobody can see, and the reference implementation is what every
+# Opus decoder in the world is tested against.
+opus = "0.3"
 windows = { version = "0.62", features = [
     "Foundation",
     "Win32_Devices_Display",

@@ -1,0 +1,16 @@
+[package]
+name = "lanplay-audio-codec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "audio-codec-probe"
+path = "src/bin/audio_codec_probe.rs"
+
+[dependencies]
+lanplay-audio-capture = { workspace = true }
+lanplay-tone-source = { workspace = true }
+clap = { workspace = true }
+opus = { workspace = true }
