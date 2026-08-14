@@ -1,0 +1,182 @@
+link      en0 192.168.1.108, autoselect
+route     192.168.1.108 -> 192.168.1.70 reachable
+clocks    host GPU locked to 2000-2700 MHz core, 9001 MHz memory
+source    monitor 1920x1080@120
+receiver  listening on 192.168.1.108:5004, negotiating on 5005
+sender    1080p120 NV12 -> NVENC 40 Mbps -> RTP burst for 45 s
+
+device NVIDIA GeForce RTX 4060 Ti (10de:2803, 7949 MB VRAM, feature level 11.1) driving \\.\DISPLAY18 at 1920x1080
+H.264 input formats: [NV_ENC_BUFFER_FORMAT_NV12, NV_ENC_BUFFER_FORMAT_YV12, NV_ENC_BUFFER_FORMAT_IYUV, NV_ENC_BUFFER_FORMAT_YUV444, NV_ENC_BUFFER_FORMAT_ARGB, NV_ENC_BUFFER_FORMAT_ABGR, NV_ENC_BUFFER_FORMAT_AYUV, NV_ENC_BUFFER_FORMAT_ARGB10, NV_ENC_BUFFER_FORMAT_ABGR10]
+sequence header 34 bytes: SPS 22 bytes, PPS 4 bytes
+control listening on 0.0.0.0:5005
+control session with 192.168.1.108:61023
+config generation 1 acknowledged
+service class BestEffort: nothing requested
+config 1920x1080 @ 120 fps, 40 Mbps, P1 Ll CBR, Nv12 input, Dda source, IDR interval 120, async 4 slots, Uncapped
+frames 5400 in 45.067 s = 119.82 frames/s, pool exhaustions 0
+phase requests: 0 relayed to 127.0.0.1:5010, 0.00 ms asked for, 0 not sent
+capture acquire    p50 8.130 ms p95 8.697 ms p99 9.501 ms max 15.859 ms
+DDA AcquireNextFrame S_OK 5400 = 119.82/s
+DDA desktop updates (LastPresentTime != 0) 5400 = 119.82/s
+DDA pointer-only (LastPresentTime == 0, LastMouseUpdateTime != 0) 0 = 0.00/s
+DDA other updates (both timestamps zero) 0 = 0.00/s
+DDA AccumulatedFrames p50 1 p95 1 p99 1 max 23
+capture newer frames accumulated while busy: 32
+admission wait     p50 0.000 ms p95 0.000 ms p99 0.000 ms max 0.001 ms
+map input          p50 0.087 ms p95 0.133 ms p99 0.148 ms max 0.714 ms
+submit CPU         p50 0.066 ms p95 0.091 ms p99 0.096 ms max 0.208 ms
+HW completion      p50 1.836 ms p95 1.891 ms p99 1.982 ms max 2.205 ms
+lock after event   p50 0.003 ms p95 0.004 ms p99 0.006 ms max 0.011 ms
+bitstream copy     p50 0.006 ms p95 0.013 ms p99 0.022 ms max 0.044 ms
+unlock             p50 6.328 ms p95 6.891 ms p99 7.667 ms max 14.023 ms
+network send       p50 0.056 ms p95 0.087 ms p99 0.145 ms max 0.250 ms
+RTP/UDP sent 53708 packets, 61022383 bytes, 0 errors
+RGB->NV12 CPU      p50 0.009 ms p95 0.054 ms p99 0.099 ms max 0.206 ms
+RGB->NV12 GPU      p50 0.032 ms p95 0.292 ms p99 0.296 ms max 2.370 ms
+encoder residency  p50 1.845 ms p95 1.902 ms p99 1.995 ms max 2.216 ms
+slot residency     p50 16.538 ms p95 17.006 ms p99 17.976 ms max 25.316 ms
+P completion       p50 1.836 ms p95 1.891 ms p99 1.981 ms max 2.205 ms
+IDR completion     p50 1.798 ms p95 1.852 ms p99 1.981 ms max 2.028 ms
+P frame            n=5355 p50 10293 B p95 12316 B p99 28768 B max 30277 B
+IDR                n=45 p50 28156 B p95 31553 B p99 31822 B max 31919 B
+output 10.55 Mbit/s, 59438683 bytes over 5400 frames
+resident memory start 57.2 MB end 68.6 MB peak 68.6 MB delta +11.4 MB
+
+windows of 10 s  (encode Hz, completion and capture p99 in ms, wire Mbit/s)
+      0-10       1200 fr   120.0 Hz  enc p99   1.990  cap p99   9.433   10.68 Mbit/s  late 0
+     10-20       1194 fr   119.5 Hz  enc p99   2.009  cap p99   9.727   10.40 Mbit/s  late 0
+     20-30       1199 fr   120.0 Hz  enc p99   1.981  cap p99   9.266   10.69 Mbit/s  late 0
+     30-40       1200 fr   120.1 Hz  enc p99   1.961  cap p99   9.146   10.49 Mbit/s  late 0
+     40-50        607 fr   120.0 Hz  enc p99   1.970  cap p99   9.619   10.53 Mbit/s  late 0
+
+  [pass] frames completed                 5400 of 5400
+  [pass] completion within a period       p99 1.982 ms against 8.333 ms
+  [pass] bitstream produced               59438683 bytes
+  [pass] frames in order                  true
+  [pass] paced rate held                  119.82 of 120 fps, 0 pool exhaustions
+  [pass] socket accepted every datagram   0 send errors
+gate: PASS
+
+fixture /Users/adria/Documents/programacion/projects/lanplay/fixtures/motion-1920x1080@120-10s-50M.h264 (1200 access units, 10 IDR)
+feeding 120 fps for 45 s (5400 access units), mode display link
+control: connecting to 192.168.1.70:5005
+codec config generation 1 from the host: 1920x1080, SPS 22 B, PPS 4 B
+transport: RTP over UDP, listening on 192.168.1.108:5004
+control: acknowledged generation 1
+phase: observing only, sending nothing; measuring against an aim of at least 2.00 ms
+renderer: display-link mode on "Built-in Retina Display" (120 Hz nominal), drawable 2722x1530
+preflight: ok display — window is on "Built-in Retina Display", drawable 2722x1530
+preflight: ok refresh — display "Built-in Retina Display" offers 120 Hz, the run needs 120 Hz
+preflight: ok occlusion — window is unoccluded
+preflight: ok space — window is on the active Space
+preflight: ok miniaturised — window is not miniaturised
+preflight: ok decoder — VideoToolbox reports hardware acceleration
+preflight: ok app-nap — LatencyCritical activity held for the run
+preflight: ok radio — channel 36 at 80 MHz wide, 5170-5250 MHz, -69 dBm
+preflight: complete
+
+VideoToolbox
+  submitted        5400
+  decoded          5400
+  errors/dropped   0 / 0
+  backlog          peak 4 frames, 0 at exit, +0.00 frames/min
+  decode           p50 1.00 ms p95 1.20 ms p99 2.54 ms max 4.88 ms
+
+Metal
+  display          119.97 Hz
+  rendered         5128
+  superseded       272
+  empty ticks      278
+  fresh ticks      94.9% (5128 of 5406 refreshes had a newer frame)
+  drawable wait    n=5128    p50=0.00 ms p95=0.00 ms p99=0.00 ms max=0.00 ms
+  encode cpu       n=5128    p50=0.04 ms p95=0.07 ms p99=0.10 ms max=0.57 ms
+
+Transport (RTP over UDP loopback)
+  access units     0 sent, 5400 reconstructed, 0 verified, 0 mismatched
+  packets          0 (0 single NAL, 0 FU-A), 0.0 per access unit
+  wire             61.0 MB for 0.0 MB of access unit (-100.0% overhead)
+  losses           0 lost, 0 malformed, 0 dropped AUs, 0 duplicates, 1591 reordered
+  reordering       depth max 9, gap filled in 0.002 ms p50 / 0.061 ms p99 / 3.570 ms max over 3511 gaps
+  rfc3550 jitter   0.28 ms
+  au delivery      n=5400 p50 8.05 ms p95 10.29 ms p99 16.76 ms max 116.98 ms
+  au start         n=5400 p50 8.04 ms p95 10.41 ms p99 16.76 ms max 116.98 ms
+  au late/min      >1.25T 281.0  >1.5T 106.5  >2T 71.9  >3T 66.6  >4T 57.3  >6T 5.3
+  au bunching      70.6 clusters/min, catch-up 5.9 mean / 15 max units, stall gap p50 226 ms p95 3915 ms
+  service class    observed DSCP 0 (CS0/best effort) x53708
+  packetization    p50 0.00 ms p95 0.00 ms p99 0.00 ms
+  transit          p50 0.00 ms p95 0.00 ms p99 0.00 ms  (first byte out to last byte in)
+  serialisation    p50 0.00 ms p95 0.00 ms p99 0.00 ms  (overlaps transit)
+  arrival spread   p50 0.05 ms p95 0.39 ms p99 3.39 ms  (overlaps transit)
+  reassembly       p50 0.00 ms p95 0.00 ms p99 0.00 ms
+
+Pipeline
+  presentation wait p50 5.24 ms p95 6.42 ms p99 6.78 ms
+  phase alignment   observing, sent nothing: phase 4.93 ms -> 5.62 ms over 12% of the period, margin 2.57 ms from a 0.86 ms spread (floor 2.00 ms), 47 shifts withheld, 0 holds, 17 declined, 47 traced, last asked 1.53 ms (last refusal: the batch held no single phase (clustering 0.77))
+  render            p50 0.04 ms p95 0.07 ms p99 0.10 ms
+  frame age         p50 0.00 ms p95 0.00 ms p99 0.00 ms max 0.00 ms
+  unattributed gap  p50 0.05 ms p99 3.39 ms
+  cpu plane copies  0 (textures alias the decoder's IOSurfaces)
+  resident memory   155.2 MB -> 162.0 MB, -109.38 MB/min over 180 samples
+
+clock domain: local-mac
+
+segment              count       p50       p95       p99       max  kind
+capture                  0
+preprocess wait          0
+gpu preprocess           0
+admission wait           0
+encode                   0
+packetize wait           0
+packetization            0
+transit                  0
+reassembly            5400   0.00 ms   0.00 ms   0.00 ms   0.29 ms  work
+decoder wait          5400   0.00 ms   0.00 ms   0.01 ms   0.03 ms  wait
+decode                5400   1.00 ms   1.20 ms   2.54 ms   4.88 ms  work
+presentation wait     5128   5.24 ms   6.42 ms   6.78 ms   8.72 ms  wait
+render                5128   0.04 ms   0.07 ms   0.10 ms   0.57 ms  work
+serialisation            0
+arrival               5400   0.05 ms   0.39 ms   3.39 ms  39.06 ms  diag
+
+frame age                0
+local age             5128   6.42 ms   7.67 ms   8.85 ms  10.49 ms  
+unattributed gap      5128   0.05 ms   0.36 ms   3.39 ms   5.01 ms  
+present interval      5127   8.36 ms   8.45 ms  16.78 ms 116.92 ms  
+source interval       5127   8.06 ms  10.49 ms  19.66 ms 120.06 ms  
+
+presented 5128 frames in 44.73 s (114.6/s), started 5400, incomplete 272
+events 37256 recorded, 0 dropped, 0 duplicate, 0 late, 0 clipped, 0 cross-domain
+p99 backed by 51 tail observations from 5128 frames
+
+Windows
+        window    src/s   dec/s   rnd/s  tick/s     aup99   >2T/m  loss   agep99   super%  fresh%
+      0-10         99.4    99.4    92.4    96.9     16.05    66.7     0     8.52      7.0    95.3
+     10-20        120.4   120.4   115.5   120.0     16.26    71.4     0     8.22      4.0    96.2
+     20-30        119.9   119.9   114.8   120.0     31.13    78.0     0     9.04      4.3    95.7
+  worst callback drop between windows: 0.0% over 3 windows
+report written to /tmp/phase-lottery/20260814-230336/4.json
+
+  [pass] pipeline run exercised            5400 access units submitted, 5400 frames decoded, 5400 decode timings, 5368 display callbacks, 5128 frames rendered, 53708 datagrams received, 5400 access unit intervals
+  [pass] pipeline hardware decoder         VTDecompressionSession reports hardware acceleration
+  [pass] link     input sustained          5400 access units submitted, 5400 expected at 120 fps
+  [pass] pipeline decode throughput        5400 decoded of 5400 submitted, 0 errors, 0 dropped
+  [pass] pipeline decoder backlog          peak 4 frames, 0 left at exit, growth +0.00 frames/min
+  [pass] pipeline frames accounted         5400 decoded = 5128 rendered + 272 superseded + 0 held
+  [pass] pipeline span accounted           5368 callbacks = 5128 rendered + 240 empty + 0 without a drawable
+  [pass] pipeline decoder keeps up         decoded 120.0/s against 120.0/s deliverable on a 120.0 Hz display
+  [FAIL] link     link holds cadence       access units arrive p50 8.05 ms p95 10.29 ms p99 16.76 ms max 116.98 ms over 5400 access units, against a 8.33 ms source period (2x allowed at p99)
+  [pass] pipeline presentation tracks arrival present interval p99 16.78 ms against arrival p99 16.76 ms plus one 8.33 ms period
+  [pass] pipeline no present stalls        worst present interval 116.92 ms against a 33.34 ms limit (4x the 8.34 ms present period); worst arrival gap 116.98 ms - the stall arrived with the frames, not from the presenter
+  [pass] pipeline memory stable            -106.18 MB/min in steady state (140 samples after 10000.00 ms), -109.38 MB/min including warm-up, peak 221.2 MB
+  [pass] pipeline instrumentation intact   0 dropped marks, 0 duplicate, 0 late
+  [pass] pipeline drops explained          272 frames never presented, 272 superseded + 0 held explain them (0 unexplained)
+  [pass] pipeline gap instrumented         5128 of 5128 presented frames have a measured gap, p99 3.39 ms
+  [pass] pipeline zero copy path           structural: CVMetalTextureCache textures over VideoToolbox pixel buffers, no CPU plane access on the render path
+  [pass] pipeline decode measured          p50 1.00 ms p95 1.20 ms p99 2.54 ms max 4.88 ms over 5400 frames
+  [pass] link     access units intact      5400 expected from the remote sender, 5400 reconstructed, 0 verified byte-for-byte, 0 mismatched
+  [pass] link     transport clean          0 lost, 0 malformed, 0 dropped AUs, 0 missing fragments, 0 send errors, 0 duplicates, 1591 reordered
+  [note] transport cost   0 packets (0 single NAL, 0 FU-A), 0.0 bytes on the wire per byte of access unit, RFC 3550 jitter 0.28 ms
+gate: pipeline PASS, link FAIL
+
+host gate   PASS
+client gate FAIL (1)
+report      /tmp/phase-lottery/20260814-230336/4.json

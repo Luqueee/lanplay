@@ -1,3 +1,30 @@
+//
+// VERDICT, recorded because this mechanism works and does not help.
+//
+// Holding IddCxSwapChainFinishedProcessingFrame back moves nothing the receiver
+// can see. A 3.00 ms hold, confirmed by the counters below (moved 11.000 to
+// 14.000 ms, 14.545 ms actually held), left a 79-sample phase trace on the client
+// inside 1.00 to 2.04 ms with a largest movement between samples of 0.306 ms, on a
+// healthy link. The header itself calls that call a progress report and the sample
+// calls it a hint; it behaves like one.
+//
+// Nor is there anywhere else to look. The rate is set by the committed target
+// mode's vSyncFreq over vSyncFreqDivider, a per-mode quantity; the acquire loop's
+// only output is IDDCX_METADATA, every field [out], including PresentDisplayQPCTime
+// which is the OS stating the phase it already chose, with no [in] counterpart;
+// IddCxSwapChainReportFrameStatistics has no documented OS reaction and its
+// predecessor is documented as ETW-log-only; IddCxMonitorUpdateModes changes the
+// available list, not the active mode, so there is no fractional rate to walk a
+// phase with; and the wireless transmission types live in EndPointDiagnostics,
+// declared inert for runtime decisions.
+//
+// And the phase is not re-rolled by restarting: across six sessions every boundary
+// was explained by elapsed time times the measured drift to within 0.28 ms of an
+// 8.33 ms period, so re-establishing until the draw is good is not a lever either.
+//
+// This file and its IOCTL are kept as the instrument that proved that, not as a
+// feature. Nothing sends a request by default.
+//
 #pragma once
 
 // What the IDD-LAB driver and whoever moves its phase have to agree on.

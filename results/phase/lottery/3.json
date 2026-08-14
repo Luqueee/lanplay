@@ -1,0 +1,492 @@
+{
+  "run": {
+    "drive_mode": "display-link",
+    "seconds": 45.0,
+    "target_fps": 120.0,
+    "invalidated": false,
+    "invalidating_events": []
+  },
+  "stream": {
+    "expected": 5400,
+    "reconstructed": 5400,
+    "packet_loss": 0,
+    "au_loss": 0,
+    "corruption": 0,
+    "reordered": 1583,
+    "max_reorder_depth": 10,
+    "reorder_wait_mean_ms": 0.026506,
+    "reorder_wait_p50_ms": 0.00175,
+    "reorder_wait_p99_ms": 0.091391,
+    "reorder_wait_max_ms": 5.185959,
+    "reorder_gaps": 3451,
+    "duplicates": 0
+  },
+  "network": {
+    "arrival_p50_ms": 0.049151,
+    "arrival_p95_ms": 0.409599,
+    "arrival_p99_ms": 3.555327,
+    "arrival_max_ms": 5.439487,
+    "rtp_jitter_us": 271.039,
+    "observed_dscp": 0,
+    "observed_dscp_share": 100.0
+  },
+  "delivery": {
+    "delivered": 5400,
+    "au_interval_p50_ms": 8.036351,
+    "au_interval_p95_ms": 10.387455,
+    "au_interval_p99_ms": 13.656063,
+    "au_interval_max_ms": 90.177535,
+    "first_interval_p50_ms": 8.028159,
+    "first_interval_p95_ms": 10.510335,
+    "first_interval_p99_ms": 13.623295,
+    "first_interval_max_ms": 89.653247,
+    "span_s": 45.00735875,
+    "over_1_25t_per_min": 326.6132563266668,
+    "over_1_5t_per_min": 79.98691991673472,
+    "over_2t_per_min": 61.32330526949662,
+    "over_3t_per_min": 58.657074605605466,
+    "over_4t_per_min": 45.32592128614968,
+    "over_6t_per_min": 2.6662306638911573,
+    "stall_clusters_per_min": 61.32330526949662,
+    "mean_catch_up_units": 5.782608695652174,
+    "max_catch_up_units": 11,
+    "stall_gap_p50_ms": 227.016703,
+    "stall_gap_p95_ms": 4141.875199
+  },
+  "decode": {
+    "decoded": 5400,
+    "errors": 0,
+    "p50_ms": 1.011711,
+    "p95_ms": 1.179647,
+    "p99_ms": 2.007039,
+    "backlog_slope_per_min": -0.006160011525298778
+  },
+  "display": {
+    "nominal_hz": 119.97083748882322,
+    "observed_hz": 119.97083748882322,
+    "cadence_valid": true,
+    "invalid_reason": null,
+    "callbacks": 5365,
+    "rendered": 5182,
+    "superseded": 218,
+    "empty_refreshes": 183,
+    "callback_interval_p50_ms": 8.335359,
+    "callback_interval_p95_ms": 8.359935,
+    "fresh_tick_ratio": 96.58900279589935,
+    "callback_interval_p99_ms": 9.076735,
+    "callback_interval_max_ms": 16.670719,
+    "frame_age_p50_ms": 5.210111,
+    "frame_age_p95_ms": 6.520831,
+    "frame_age_p99_ms": 7.962623
+  },
+  "phase": {
+    "mode": "observe",
+    "enabled": true,
+    "ran": true,
+    "unavailable_reason": null,
+    "margin_ms": 2.487162,
+    "margin_floor_ms": 2.0,
+    "spread_ms": 0.829054,
+    "phase_coverage": 0.1875,
+    "samples": 5182,
+    "decisions": 63,
+    "shifts": 0,
+    "shifts_withheld": 41,
+    "holds": 0,
+    "declined": 22,
+    "first_phase_ms": 3.259815,
+    "last_phase_ms": 4.429113,
+    "last_delay_ms": 0.970975,
+    "last_refusal": "the batch held no single phase (clustering 0.76)",
+    "send_errors": 0,
+    "trace_entries": 41,
+    "trace_dropped": 0,
+    "clock_epoch_at_ns": 35873750256416,
+    "clock_epoch_unix_ms": 1786741595571.5151,
+    "trace": [
+      {
+        "at_ns": 35824749546291,
+        "at_s": 0.0,
+        "phase_ms": 3.259815,
+        "margin_ms": 2.542998,
+        "delay_ms": 0.358408,
+        "sent": false
+      },
+      {
+        "at_ns": 35826266220000,
+        "at_s": 1.516673709,
+        "phase_ms": 3.482632,
+        "margin_ms": 2.432394,
+        "delay_ms": 0.525119,
+        "sent": false
+      },
+      {
+        "at_ns": 35827024563333,
+        "at_s": 2.275017042,
+        "phase_ms": 3.543516,
+        "margin_ms": 2.503707,
+        "delay_ms": 0.519904,
+        "sent": false
+      },
+      {
+        "at_ns": 35827774536250,
+        "at_s": 3.024989959,
+        "phase_ms": 3.542913,
+        "margin_ms": 2.307318,
+        "delay_ms": 0.617797,
+        "sent": false
+      },
+      {
+        "at_ns": 35828282871291,
+        "at_s": 3.533325,
+        "phase_ms": 3.656787,
+        "margin_ms": 2.307918,
+        "delay_ms": 0.674434,
+        "sent": false
+      },
+      {
+        "at_ns": 35829766203250,
+        "at_s": 5.016656959,
+        "phase_ms": 3.576169,
+        "margin_ms": 2.369595,
+        "delay_ms": 0.603287,
+        "sent": false
+      },
+      {
+        "at_ns": 35831316163291,
+        "at_s": 6.566617,
+        "phase_ms": 3.701322,
+        "margin_ms": 2.437626,
+        "delay_ms": 0.631848,
+        "sent": false
+      },
+      {
+        "at_ns": 35831824499833,
+        "at_s": 7.074953542,
+        "phase_ms": 3.656606,
+        "margin_ms": 2.623311,
+        "delay_ms": 0.516647,
+        "sent": false
+      },
+      {
+        "at_ns": 35832582830625,
+        "at_s": 7.833284334,
+        "phase_ms": 3.71153,
+        "margin_ms": 2.655966,
+        "delay_ms": 0.527782,
+        "sent": false
+      },
+      {
+        "at_ns": 35833341169583,
+        "at_s": 8.591623292,
+        "phase_ms": 3.678134,
+        "margin_ms": 2.640987,
+        "delay_ms": 0.518573,
+        "sent": false
+      },
+      {
+        "at_ns": 35833849484291,
+        "at_s": 9.099938,
+        "phase_ms": 3.972638,
+        "margin_ms": 2.356071,
+        "delay_ms": 0.808283,
+        "sent": false
+      },
+      {
+        "at_ns": 35834616124666,
+        "at_s": 9.866578375,
+        "phase_ms": 3.784991,
+        "margin_ms": 2.526093,
+        "delay_ms": 0.629449,
+        "sent": false
+      },
+      {
+        "at_ns": 35836124458875,
+        "at_s": 11.374912584,
+        "phase_ms": 3.75278,
+        "margin_ms": 2.447328,
+        "delay_ms": 0.652726,
+        "sent": false
+      },
+      {
+        "at_ns": 35836632805708,
+        "at_s": 11.883259417,
+        "phase_ms": 3.88613,
+        "margin_ms": 2.373135,
+        "delay_ms": 0.756497,
+        "sent": false
+      },
+      {
+        "at_ns": 35837382746791,
+        "at_s": 12.6332005,
+        "phase_ms": 3.821221,
+        "margin_ms": 2.382462,
+        "delay_ms": 0.719379,
+        "sent": false
+      },
+      {
+        "at_ns": 35837891108958,
+        "at_s": 13.141562667,
+        "phase_ms": 3.767957,
+        "margin_ms": 2.635701,
+        "delay_ms": 0.566128,
+        "sent": false
+      },
+      {
+        "at_ns": 35839399445208,
+        "at_s": 14.649898917,
+        "phase_ms": 3.886126,
+        "margin_ms": 2.49729,
+        "delay_ms": 0.694418,
+        "sent": false
+      },
+      {
+        "at_ns": 35841432737666,
+        "at_s": 16.683191375,
+        "phase_ms": 3.849418,
+        "margin_ms": 2.291001,
+        "delay_ms": 0.779208,
+        "sent": false
+      },
+      {
+        "at_ns": 35842191061083,
+        "at_s": 17.441514792,
+        "phase_ms": 3.917041,
+        "margin_ms": 2.349342,
+        "delay_ms": 0.783849,
+        "sent": false
+      },
+      {
+        "at_ns": 35842699404083,
+        "at_s": 17.949857792,
+        "phase_ms": 3.757808,
+        "margin_ms": 2.558196,
+        "delay_ms": 0.599806,
+        "sent": false
+      },
+      {
+        "at_ns": 35843457741208,
+        "at_s": 18.708194917,
+        "phase_ms": 3.810948,
+        "margin_ms": 2.527593,
+        "delay_ms": 0.641677,
+        "sent": false
+      },
+      {
+        "at_ns": 35844724381416,
+        "at_s": 19.974835125,
+        "phase_ms": 3.793876,
+        "margin_ms": 2.564907,
+        "delay_ms": 0.614484,
+        "sent": false
+      },
+      {
+        "at_ns": 35846232687708,
+        "at_s": 21.483141417,
+        "phase_ms": 3.908996,
+        "margin_ms": 2.507001,
+        "delay_ms": 0.700997,
+        "sent": false
+      },
+      {
+        "at_ns": 35847749341375,
+        "at_s": 22.999795084,
+        "phase_ms": 4.09686,
+        "margin_ms": 2.463633,
+        "delay_ms": 0.816613,
+        "sent": false
+      },
+      {
+        "at_ns": 35849524343666,
+        "at_s": 24.774797375,
+        "phase_ms": 3.970813,
+        "margin_ms": 2.381898,
+        "delay_ms": 0.794457,
+        "sent": false
+      },
+      {
+        "at_ns": 35850282674458,
+        "at_s": 25.533128167,
+        "phase_ms": 4.015592,
+        "margin_ms": 2.584293,
+        "delay_ms": 0.715649,
+        "sent": false
+      },
+      {
+        "at_ns": 35851807647708,
+        "at_s": 27.058101417,
+        "phase_ms": 3.948924,
+        "margin_ms": 2.307495,
+        "delay_ms": 0.820714,
+        "sent": false
+      },
+      {
+        "at_ns": 35852565966000,
+        "at_s": 27.816419709,
+        "phase_ms": 4.168544,
+        "margin_ms": 2.41482,
+        "delay_ms": 0.876862,
+        "sent": false
+      },
+      {
+        "at_ns": 35853074309125,
+        "at_s": 28.324762834,
+        "phase_ms": 3.993359,
+        "margin_ms": 2.567772,
+        "delay_ms": 0.712793,
+        "sent": false
+      },
+      {
+        "at_ns": 35853832640583,
+        "at_s": 29.083094292,
+        "phase_ms": 4.094444,
+        "margin_ms": 2.552265,
+        "delay_ms": 0.771089,
+        "sent": false
+      },
+      {
+        "at_ns": 35855849273333,
+        "at_s": 31.099727042,
+        "phase_ms": 4.18351,
+        "margin_ms": 2.547912,
+        "delay_ms": 0.817799,
+        "sent": false
+      },
+      {
+        "at_ns": 35856607593583,
+        "at_s": 31.858047292,
+        "phase_ms": 4.163661,
+        "margin_ms": 2.603898,
+        "delay_ms": 0.779881,
+        "sent": false
+      },
+      {
+        "at_ns": 35857357572125,
+        "at_s": 32.608025834,
+        "phase_ms": 4.231445,
+        "margin_ms": 2.547813,
+        "delay_ms": 0.841816,
+        "sent": false
+      },
+      {
+        "at_ns": 35858115899458,
+        "at_s": 33.366353167,
+        "phase_ms": 4.164673,
+        "margin_ms": 2.634582,
+        "delay_ms": 0.765045,
+        "sent": false
+      },
+      {
+        "at_ns": 35858865914458,
+        "at_s": 34.116368167,
+        "phase_ms": 4.190496,
+        "margin_ms": 2.272278,
+        "delay_ms": 0.959109,
+        "sent": false
+      },
+      {
+        "at_ns": 35859624250416,
+        "at_s": 34.874704125,
+        "phase_ms": 4.130453,
+        "margin_ms": 2.418063,
+        "delay_ms": 0.856195,
+        "sent": false
+      },
+      {
+        "at_ns": 35861149206625,
+        "at_s": 36.399660334,
+        "phase_ms": 4.244548,
+        "margin_ms": 2.596059,
+        "delay_ms": 0.824244,
+        "sent": false
+      },
+      {
+        "at_ns": 35861907539541,
+        "at_s": 37.15799325,
+        "phase_ms": 4.322721,
+        "margin_ms": 2.315457,
+        "delay_ms": 1.003632,
+        "sent": false
+      },
+      {
+        "at_ns": 35863424209000,
+        "at_s": 38.674662709,
+        "phase_ms": 4.255045,
+        "margin_ms": 2.415399,
+        "delay_ms": 0.919823,
+        "sent": false
+      },
+      {
+        "at_ns": 35866440830541,
+        "at_s": 41.69128425,
+        "phase_ms": 4.489671,
+        "margin_ms": 2.41767,
+        "delay_ms": 1.036,
+        "sent": false
+      },
+      {
+        "at_ns": 35867707474625,
+        "at_s": 42.957928334,
+        "phase_ms": 4.429113,
+        "margin_ms": 2.487162,
+        "delay_ms": 0.970975,
+        "sent": false
+      }
+    ]
+  },
+  "environment": {
+    "occlusion_changes": 0,
+    "space_changes": 0,
+    "miniaturise_events": 0,
+    "display_changes": 0,
+    "link_pauses": 0,
+    "app_nap_protection": true
+  },
+  "windows": [
+    {
+      "from_s": 0.0,
+      "to_s": 10.0,
+      "callback_hz": 96.9131716867537,
+      "source_hz": 100.43119520520112,
+      "decode_hz": 100.43119520520112,
+      "render_hz": 93.73019802720604,
+      "superseded_pct": 6.59432387312187,
+      "fresh_pct": 96.71564390665515,
+      "au_interval_p50_ms": 8.032255,
+      "au_interval_p99_ms": 14.278655,
+      "over_2t_per_min": 66.1195863633813,
+      "au_loss": 0,
+      "frame_age_p99_ms": 7.471103
+    },
+    {
+      "from_s": 10.0,
+      "to_s": 20.0,
+      "callback_hz": 120.00002850000676,
+      "source_hz": 120.00002850000676,
+      "decode_hz": 120.00002850000676,
+      "render_hz": 116.50002766875656,
+      "superseded_pct": 2.9166666666666665,
+      "fresh_pct": 97.08333333333333,
+      "au_interval_p50_ms": 8.044543,
+      "au_interval_p99_ms": 12.435455,
+      "over_2t_per_min": 54.01024326407703,
+      "au_loss": 0,
+      "frame_age_p99_ms": 7.667711
+    },
+    {
+      "from_s": 20.0,
+      "to_s": 30.0,
+      "callback_hz": 119.99999750400006,
+      "source_hz": 119.89999750608006,
+      "decode_hz": 119.89999750608006,
+      "render_hz": 115.09999760592005,
+      "superseded_pct": 4.0033361134278564,
+      "fresh_pct": 95.91666666666667,
+      "au_interval_p50_ms": 8.040447,
+      "au_interval_p99_ms": 31.457279,
+      "over_2t_per_min": 71.998782320594,
+      "au_loss": 0,
+      "frame_age_p99_ms": 7.995391
+    }
+  ]
+}
