@@ -16,4 +16,12 @@ lanplay-telemetry = { workspace = true }
 clap = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true }
+# Added here rather than to the workspace list because only this crate reaches
+# the display driver: the configuration manager to find its interface, and a
+# file handle and an IOCTL to use it.
+windows = { workspace = true, features = [
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
+] }

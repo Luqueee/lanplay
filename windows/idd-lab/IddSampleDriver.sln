@@ -6,6 +6,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "IddSampleDriver", "IddSampl
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "IddSampleApp", "IddSampleApp\IddSampleApp.vcxproj", "{ED59DFCA-E75B-4DD8-B5C2-6BFF77A225A6}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "IddPhase", "IddPhase\IddPhase.vcxproj", "{7B3F1E24-9C4D-4A6E-B0F2-5E8A1D3C7A91}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|ARM64 = Debug|ARM64
@@ -34,6 +36,14 @@ Global
 		{ED59DFCA-E75B-4DD8-B5C2-6BFF77A225A6}.Release|ARM64.Build.0 = Release|ARM64
 		{ED59DFCA-E75B-4DD8-B5C2-6BFF77A225A6}.Release|x64.ActiveCfg = Release|x64
 		{ED59DFCA-E75B-4DD8-B5C2-6BFF77A225A6}.Release|x64.Build.0 = Release|x64
+		{7B3F1E24-9C4D-4A6E-B0F2-5E8A1D3C7A91}.Debug|ARM64.ActiveCfg = Debug|ARM64
+		{7B3F1E24-9C4D-4A6E-B0F2-5E8A1D3C7A91}.Debug|ARM64.Build.0 = Debug|ARM64
+		{7B3F1E24-9C4D-4A6E-B0F2-5E8A1D3C7A91}.Debug|x64.ActiveCfg = Debug|x64
+		{7B3F1E24-9C4D-4A6E-B0F2-5E8A1D3C7A91}.Debug|x64.Build.0 = Debug|x64
+		{7B3F1E24-9C4D-4A6E-B0F2-5E8A1D3C7A91}.Release|ARM64.ActiveCfg = Release|ARM64
+		{7B3F1E24-9C4D-4A6E-B0F2-5E8A1D3C7A91}.Release|ARM64.Build.0 = Release|ARM64
+		{7B3F1E24-9C4D-4A6E-B0F2-5E8A1D3C7A91}.Release|x64.ActiveCfg = Release|x64
+		{7B3F1E24-9C4D-4A6E-B0F2-5E8A1D3C7A91}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

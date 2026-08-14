@@ -6,9 +6,7 @@
 //! the display will never scan out, which is precisely the case a capture
 //! backend has to be measured against. The schedule comes from
 //! [`crate::pace::Pacer`], which derives each deadline from the start instant
-//! rather than accumulating periods, and which is where a viewer's phase
-//! request lands: moving this loop is the only way to change how old a frame's
-//! content is when the viewer's display finally scans it out.
+//! rather than accumulating periods.
 
 #![cfg(windows)]
 
@@ -31,8 +29,6 @@ pub struct Options {
     pub seconds: u64,
     pub fullscreen: bool,
     pub monitor: u32,
-    /// Loopback port to accept phase requests on; 0 to accept none.
-    pub phase_port: u16,
 }
 
 /// Presents until the window closes or `--seconds` elapses, and reports what
@@ -74,19 +70,7 @@ pub fn run(options: Options) -> Result<Report, Error> {
     let recorder = telemetry.recorder();
     let frames = FrameIdSource::new();
 
-    let mut pacer = Pacer::new(Timestamp::now(), options.fps);
-    if options.phase_port != 0 {
-        // Advisory in both directions: a port already taken, or a build of the
-        // viewer that never asks, leaves the producer presenting exactly as it
-        // did before any of this existed.
-        let listening = crate::phase::listen(options.phase_port, options.fps, pacer.inbox());
-        if let Err(error) = listening {
-            eprintln!(
-                "present-source: no phase requests on port {}: {error}",
-                options.phase_port
-            );
-        }
-    }
+    let pacer = Pacer::new(Timestamp::now(), options.fps);
     let final_index = pacer.last_index(options.seconds);
     let mut missed = 0u64;
     let mut index = 0u64;
@@ -94,24 +78,6 @@ pub fn run(options: Options) -> Result<Report, Error> {
     loop {
         if !window.pump() {
             break;
-        }
-
-        // Obeyed here, between two frames, where it moves the origin the whole
-        // schedule is derived from. An extra sleep inside this iteration would
-        // delay this frame and every frame after it, which is a rate change
-        // wearing a phase change's clothes.
-        if let Some(applied) = pacer.apply_pending() {
-            let shifts = pacer.shifts();
-            // A producer in the laboratory runs for days and prints its report
-            // only when it stops, so a request that arrived and did nothing
-            // would otherwise never be visible anywhere. The fold count is on
-            // this line for the same reason: it is how a viewer working from a
-            // different period than this one announces itself.
-            eprintln!(
-                "present-source: phase shift {applied} applied at frame {index}, \
-                 {} requested, {} moved in all, {} folded past a period",
-                shifts.requested, shifts.moved, shifts.folded
-            );
         }
 
         let deadline = pacer.deadline(index);
@@ -147,10 +113,5 @@ pub fn run(options: Options) -> Result<Report, Error> {
     }
 
     let snapshot = telemetry.shutdown();
-    Ok(Report::from_snapshot(
-        &snapshot,
-        options.fps,
-        missed,
-        pacer.shifts(),
-    ))
+    Ok(Report::from_snapshot(&snapshot, options.fps, missed))
 }

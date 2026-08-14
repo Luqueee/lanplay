@@ -24,6 +24,7 @@
   <ItemGroup>
     <ClInclude Include="Driver.h" />
     <ClInclude Include="Trace.h" />
+    <ClInclude Include="..\PhaseContract.h" />
   </ItemGroup>
   <ItemGroup>
     <Inf Include="IddSampleDriver.inf" />

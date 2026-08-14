@@ -135,6 +135,8 @@ EVT_IDD_CX_MONITOR_QUERY_TARGET_MODES IddSampleMonitorQueryModes;
 EVT_IDD_CX_MONITOR_ASSIGN_SWAPCHAIN IddSampleMonitorAssignSwapChain;
 EVT_IDD_CX_MONITOR_UNASSIGN_SWAPCHAIN IddSampleMonitorUnassignSwapChain;
 
+EVT_IDD_CX_DEVICE_IO_CONTROL IddLabPhaseIoDeviceControl;
+
 struct IndirectDeviceContextWrapper
 {
     IndirectDeviceContext* pContext;
@@ -216,8 +218,13 @@ NTSTATUS IddSampleDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT pDeviceInit)
     IDD_CX_CLIENT_CONFIG_INIT(&IddConfig);
 
     // If the driver wishes to handle custom IoDeviceControl requests, it's necessary to use this callback since IddCx
-    // redirects IoDeviceControl requests to an internal queue. This sample does not need this.
-    // IddConfig.EvtIddCxDeviceIoControl = IddSampleIoDeviceControl;
+    // redirects IoDeviceControl requests to an internal queue.
+    //
+    // The phase request arrives this way, so this driver does. Without the
+    // callback a control code addressed perfectly correctly is swallowed by
+    // that internal queue and the sender is told the device does not support
+    // it, which is a fault that looks nothing like its cause.
+    IddConfig.EvtIddCxDeviceIoControl = IddLabPhaseIoDeviceControl;
 
     IddConfig.EvtIddCxAdapterInitFinished = IddSampleAdapterInitFinished;
 
@@ -254,6 +261,17 @@ NTSTATUS IddSampleDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT pDeviceInit)
     }
 
     Status = IddCxDeviceInitialize(Device);
+
+    // Advertised after the device exists so that a sender can find it without
+    // knowing how the device was enumerated.
+    //
+    // A failure here is deliberately not fatal. The phase lever is an
+    // instrument and the display is the laboratory: every video measurement in
+    // this project needs this monitor to exist, so a device that comes up
+    // without its interface is a lever that cannot be pulled, while a device
+    // that refuses to start is no lab at all. The sender reports the missing
+    // interface loudly enough that the degraded case cannot pass unnoticed.
+    WdfDeviceCreateDeviceInterface(Device, &GUID_DEVINTERFACE_IDD_LAB_PHASE, nullptr);
 
     // Create a new device context object and attach it to the WDF device object
     auto* pContext = WdfObjectGet_IndirectDeviceContextWrapper(Device);
@@ -314,6 +332,252 @@ HRESULT Direct3DDevice::Init()
     }
 
     return S_OK;
+}
+
+#pragma endregion
+
+#pragma region PhaseLever
+
+// An occupied slot is distinguishable from an empty one by a bit above the
+// delay rather than by the delay being non-zero, because a request for zero is
+// a real request. It arrives, it is taken, and it moves nothing, and that is a
+// different event from no request at all.
+static constexpr LONG64 PHASE_SLOT_OCCUPIED = 0x1'0000'0000ll;
+
+PhaseLever& PhaseLever::Instance()
+{
+    // Constructed on first use and never destroyed. The host process outlives
+    // every swap chain in it, and a lever torn down at exit while a frame loop
+    // is still winding up would be a crash in the display path to save a page.
+    static PhaseLever s_Lever;
+    return s_Lever;
+}
+
+PhaseLever::PhaseLever() :
+    m_Slot(0),
+    m_pCounters(nullptr),
+    m_Local{},
+    m_hSection(nullptr),
+    m_hTimer(nullptr),
+    m_TicksPerSecond(0)
+{
+    LARGE_INTEGER Frequency = {};
+    QueryPerformanceFrequency(&Frequency);
+    m_TicksPerSecond = Frequency.QuadPart;
+
+    // A high resolution timer, and the reason nothing simpler will do.
+    //
+    // The requests this serves are single-digit milliseconds inside an 8.33 ms
+    // period. Sleep rounds to the system timer tick, which is 15.6 ms unless
+    // something on the machine has raised the global resolution, so a 2 ms
+    // request would become a delay longer than the period it is trying to
+    // position within - the lever would be worse than not pulling it. Spinning
+    // is accurate but burns a core inside a thread the multimedia scheduler has
+    // already prioritised, on the one thread the whole display depends on.
+    // CREATE_WAITABLE_TIMER_HIGH_RESOLUTION expires within a few tens of
+    // microseconds without raising the timer resolution for the entire system,
+    // and being a waitable object it can be waited on together with the
+    // terminate event, which is what keeps a pending delay from outliving the
+    // thread serving it.
+    m_hTimer = CreateWaitableTimerExW(nullptr, nullptr,
+        CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    if (m_hTimer == nullptr)
+    {
+        // Older kernels refuse the high resolution flag. A coarse timer still
+        // ends, still wakes on terminate and still moves the phase, just less
+        // precisely than asked; losing the lab display over a timer flag would
+        // be the worse trade.
+        m_hTimer = CreateWaitableTimerExW(nullptr, nullptr, 0, TIMER_ALL_ACCESS);
+    }
+
+    // Read by whoever asks what the driver did; see PhaseContract.h for why a
+    // section and not a trace, a registry value or an output buffer. Granting
+    // authenticated users read and nothing else keeps the report available to
+    // an ordinary lab script without making the driver's own state writable by
+    // anything that can open a name.
+    SECURITY_ATTRIBUTES Security = {};
+    Security.nLength = sizeof(Security);
+    Security.bInheritHandle = FALSE;
+    if (ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            L"D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GR;;;AU)",
+            SDDL_REVISION_1, &Security.lpSecurityDescriptor, nullptr))
+    {
+        m_hSection = CreateFileMappingW(INVALID_HANDLE_VALUE, &Security,
+            PAGE_READWRITE, 0, sizeof(IddLabPhaseCounters), IDD_LAB_PHASE_SECTION_NAME);
+        LocalFree(Security.lpSecurityDescriptor);
+    }
+
+    if (m_hSection != nullptr)
+    {
+        m_pCounters = static_cast<IddLabPhaseCounters*>(
+            MapViewOfFile(m_hSection, FILE_MAP_WRITE, 0, 0, sizeof(IddLabPhaseCounters)));
+    }
+
+    if (m_pCounters == nullptr)
+    {
+        m_pCounters = &m_Local;
+    }
+
+    // 1080p120 is the only mode this package publishes, so the modulus comes
+    // from the mode list rather than from a constant that could drift away from
+    // it when a second mode is eventually added.
+    m_pCounters->PeriodNanos = 1000000000ul / s_SampleDefaultModes[0].VSync;
+    m_pCounters->Size = sizeof(IddLabPhaseCounters);
+    m_pCounters->Version = IDD_LAB_PHASE_VERSION;
+
+    // Written last and with a release, so a reader that finds the magic is
+    // guaranteed to find the rest of the header already there rather than a
+    // half-published block.
+    InterlockedExchange(reinterpret_cast<volatile LONG*>(&m_pCounters->Magic),
+        static_cast<LONG>(IDD_LAB_PHASE_MAGIC));
+}
+
+void PhaseLever::Post(ULONG DelayNanos)
+{
+    InterlockedIncrement64(&m_pCounters->Requested);
+
+    LONG64 Displaced = InterlockedExchange64(&m_Slot, PHASE_SLOT_OCCUPIED | DelayNanos);
+    if (Displaced != 0)
+    {
+        InterlockedIncrement64(&m_pCounters->Superseded);
+    }
+}
+
+void PhaseLever::Reject()
+{
+    InterlockedIncrement64(&m_pCounters->Rejected);
+}
+
+bool PhaseLever::HoldBack(HANDLE TerminateEvent)
+{
+    // Plain read first. This runs on every frame of every run, almost always
+    // finds nothing, and an unconditional interlocked exchange here would drag
+    // the slot's cache line away from the sender for no gain 120 times a
+    // second. The exchange below is what actually claims the request, so a post
+    // racing this read is not lost - it is simply seen by the next frame.
+    if (m_Slot == 0)
+    {
+        return true;
+    }
+
+    LONG64 Held = InterlockedExchange64(&m_Slot, 0);
+    if (Held == 0)
+    {
+        return true;
+    }
+
+    ULONG Asked = static_cast<ULONG>(Held & 0xFFFFFFFFll);
+    ULONG Period = m_pCounters->PeriodNanos;
+    ULONG Delay = Asked % Period;
+
+    bool Terminating = false;
+    LONG64 HeldNanos = 0;
+
+    if (Delay != 0 && m_hTimer != nullptr)
+    {
+        LARGE_INTEGER DueTime = {};
+        // Negative is relative, in hundreds of nanoseconds.
+        DueTime.QuadPart = -static_cast<LONGLONG>(Delay / 100);
+        if (SetWaitableTimer(m_hTimer, &DueTime, 0, nullptr, nullptr, FALSE))
+        {
+            LARGE_INTEGER Opened = {};
+            QueryPerformanceCounter(&Opened);
+
+            HANDLE WaitHandles[] = { m_hTimer, TerminateEvent };
+
+            // The timeout is insurance and not the schedule. The timer expires
+            // first by construction, so this returns after Delay; the bound
+            // only exists so that a timer which somehow never signals cannot
+            // hold the display's frame loop for the lifetime of the machine.
+            // Terminating takes priority over serving the delay, which is why
+            // the terminate event is waited on here rather than checked once
+            // the delay has been served.
+            DWORD Bound = (Delay / 1000000ul) + 2ul;
+            DWORD WaitResult = WaitForMultipleObjects(ARRAYSIZE(WaitHandles), WaitHandles, FALSE, Bound);
+
+            LARGE_INTEGER Closed = {};
+            QueryPerformanceCounter(&Closed);
+            if (m_TicksPerSecond > 0)
+            {
+                HeldNanos = ((Closed.QuadPart - Opened.QuadPart) * 1000000000ll) / m_TicksPerSecond;
+            }
+
+            if (WaitResult == WAIT_OBJECT_0 + 1)
+            {
+                CancelWaitableTimer(m_hTimer);
+                Terminating = true;
+            }
+        }
+        else
+        {
+            // Nothing was held, so nothing is claimed to have been.
+            Delay = 0;
+        }
+    }
+
+    // Published only now that the request is finished with, and Taken written
+    // last of all. A reader watching for its own request to be served waits on
+    // Taken, so anything raised after it would be read as belonging to the
+    // request before. Counting the claim on arrival instead cost an hour: a
+    // 2.50 ms request read back as taken and applied to nothing, because the
+    // reader arrived between the two counters while the hold it was asking
+    // about was still being served, and reported the lever inert at the exact
+    // moment it was working.
+    if (Asked >= Period)
+    {
+        InterlockedIncrement64(&m_pCounters->Folded);
+    }
+    if (Delay != 0)
+    {
+        InterlockedIncrement64(&m_pCounters->Applied);
+        InterlockedExchangeAdd64(&m_pCounters->MovedNanos, Delay);
+        InterlockedExchangeAdd64(&m_pCounters->HeldNanos, HeldNanos);
+    }
+    InterlockedIncrement64(&m_pCounters->Taken);
+
+    return !Terminating;
+}
+
+_Use_decl_annotations_
+VOID IddLabPhaseIoDeviceControl(WDFDEVICE Device, WDFREQUEST Request, size_t OutputBufferLength, size_t InputBufferLength, ULONG IoControlCode)
+{
+    UNREFERENCED_PARAMETER(Device);
+
+    if (IoControlCode != IOCTL_IDD_LAB_PHASE_SHIFT)
+    {
+        // Not counted. Anything arriving here with another code was addressed
+        // to a driver this is not, and folding it into the rejection count
+        // would make an unrelated program look like a broken sender.
+        WdfRequestComplete(Request, STATUS_INVALID_DEVICE_REQUEST);
+        return;
+    }
+
+    PVOID pInput = nullptr;
+    size_t Retrieved = 0;
+    NTSTATUS Status = WdfRequestRetrieveInputBuffer(Request, sizeof(ULONG), &pInput, &Retrieved);
+
+    // Exactly four bytes in and nothing out, checked rather than assumed. A
+    // buffer of another size is a sender built against a different idea of this
+    // contract, and obeying the first four bytes of it would move the display by
+    // an amount nobody chose.
+    if (!NT_SUCCESS(Status) || Retrieved != sizeof(ULONG) ||
+        InputBufferLength != sizeof(ULONG) || OutputBufferLength != 0)
+    {
+        PhaseLever::Instance().Reject();
+        WdfRequestComplete(Request, STATUS_INVALID_PARAMETER);
+        return;
+    }
+
+    ULONG DelayNanos = 0;
+    memcpy(&DelayNanos, pInput, sizeof(DelayNanos));
+
+    // Posted rather than served here. This runs on whichever thread the
+    // reflector delivered the request on, and holding a frame back from
+    // anywhere but the swap-chain thread would delay nothing at all while
+    // blocking the sender for a period.
+    PhaseLever::Instance().Post(DelayNanos);
+
+    WdfRequestComplete(Request, STATUS_SUCCESS);
 }
 
 #pragma endregion
@@ -444,6 +708,37 @@ void SwapChainProcessor::RunCore()
             // for better quality if there is no new frame for a while
             AcquiredBuffer.Reset();
             
+            // The phase lever, and the reason this exact call is it.
+            //
+            // The receiving end of this pipeline waits between decoding a frame
+            // and the display next being willing to show it. Over a ten minute
+            // soak that wait ran to 4.4, 7.8 and 8.4 ms at the median, the
+            // ninetieth and the ninety-ninth, against 4.17, 7.9 and 8.25 for a
+            // phase spread uniformly through one 8.33 ms period. It is phase and
+            // not work, and it is larger than decode, encode, capture and the
+            // network added together.
+            //
+            // Two other places were tried and neither can move it. Delaying the
+            // capture tick is neutral by derivation: it changes when a frame is
+            // ready, never when its content was drawn. Delaying the producer's
+            // draw is neutral by measurement: a 3.00 ms shift the producer
+            // confirmed applying left fifty phase samples on the receiver inside
+            // 3.61 to 4.69 ms, the largest movement between consecutive samples
+            // being 0.374 ms. The reason both fail is that Desktop Duplication
+            // follows the compositor, so a draw moved within a composition
+            // interval is composited at the same virtual-display vblank and
+            // leaves the host at the same instant.
+            //
+            // That vblank is defined here. Holding this call back is what tells
+            // the OS a frame is still being worked on, which moves when the next
+            // composition is scheduled and therefore moves the cadence every
+            // stage downstream inherits. Nothing else in this driver has that
+            // effect, and no amount of moving work around upstream will find it.
+            if (!PhaseLever::Instance().HoldBack(m_hTerminateEvent.Get()))
+            {
+                break;
+            }
+
             // Indicate to OS that we have finished inital processing of the frame, it is a hint that
             // OS could start preparing another frame
             hr = IddCxSwapChainFinishedProcessingFrame(m_hSwapChain);

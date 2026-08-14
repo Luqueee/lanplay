@@ -30,26 +30,23 @@ OUT="${OUT:-/tmp/phase-sign}"
 mkdir -p "$OUT"
 rm -f "$OUT"/*.log "$OUT"/*.json
 
-# The producer takes its requests as an 8-byte loopback datagram: the four bytes
-# LPPH and a little-endian u32 of nanoseconds. Sent from the host itself, because
-# the port is bound to loopback and nothing off the machine can reach it.
-delay_ns=$(python3 -c "print(int($DELAY_MS * 1_000_000))")
-cat >"$OUT/shift.ps1" <<PS1
-\$bytes = [byte[]]@(0x4C, 0x50, 0x50, 0x48) + [System.BitConverter]::GetBytes([uint32]$delay_ns)
-\$client = New-Object System.Net.Sockets.UdpClient
-\$client.Send(\$bytes, \$bytes.Length, '127.0.0.1', 5010) | Out-Null
-\$client.Close()
-Write-Output "sent $DELAY_MS ms as $delay_ns ns"
-PS1
-scp -q "$OUT/shift.ps1" 'windows:C:/Users/luque/phase-shift-once.ps1'
+# The request goes to the indirect display driver, which is the only lever left
+# standing. The capture tick is neutral by derivation and the producer's draw is
+# neutral by measurement - a 3.00 ms shift it confirmed applying moved the phase
+# by nothing, because Desktop Duplication follows the compositor rather than the
+# program drawing into it. What defines that compositor's cadence is the vblank of
+# the virtual display, and this project owns the driver that declares it.
+#
+# Sent through the driver's own sender rather than by writing an IOCTL from here,
+# so the path under test is the one the relay will use in a real session.
+PHASE_SENDER="${PHASE_SENDER:-C:\\Users\\luque\\lanplay-rs\\windows\\idd-lab\\x64\\Release\\idd-phase.exe}"
 
 # Halfway, so each half has the same number of samples and the same share of
 # whatever the link was doing.
 (
     sleep $((SECONDS_TO_RUN / 2 + 12))
-    "$REPO/tools/win-ssh.sh" \
-        'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\luque\phase-shift-once.ps1' \
-        >"$OUT/shift.log" 2>&1 || true
+    "$REPO/tools/win-ssh.sh" "$PHASE_SENDER $DELAY_MS" >"$OUT/shift.log" 2>&1 ||
+        echo "the sender failed; see $OUT/shift.log" >>"$OUT/shift.log"
     echo "shift     applied at the halfway mark"
 ) &
 shifter=$!
@@ -122,10 +119,22 @@ if dropped:
     print(f"\nFAIL {dropped} trace entries were dropped, so a gap could hide the step")
     sys.exit(1)
 if len(trace) < 8:
-    print(
-        "\nFAIL the report carries no usable phase trace, and the ends of a run cannot\n"
-        f"     answer this: the drift sweeps a period every {period / DRIFT_MS_PER_S / 1000:.0f} s"
-    )
+    # Named rather than left as a missing trace. A phase can only be measured
+    # against a stream that arrives every refresh, so a link delivering in bursts
+    # takes the measurement away - and it does it through a refusal about the
+    # display link, which reads like a client fault and is not one.
+    body = open(f"{out}/observe.log").read()
+    arrival = re.search(r"access units arrive p50 [\d.]+ ms p95 [\d.]+ ms p99 ([\d.]+) ms", body)
+    print(f"\nFAIL only {len(trace)} believable batches, so there is no phase to compare")
+    if arrival and float(arrival.group(1)) > period * 2:
+        print(
+            f"     the link is the reason: access units arrived p99 {float(arrival.group(1)):.1f} ms "
+            f"against a {period:.2f} ms period,\n"
+            "     so pickups are several refreshes apart and no batch holds a single phase"
+        )
+    else:
+        print(f"     and the ends of a run cannot answer it: the drift sweeps a period "
+              f"every {period / DRIFT_MS_PER_S / 1000:.0f} s")
     sys.exit(1)
 
 

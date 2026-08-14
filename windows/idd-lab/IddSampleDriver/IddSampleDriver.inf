@@ -36,6 +36,24 @@ CopyFiles=UMDriverCopy
 Include=WUDFRD.inf
 Needs=WUDFRD.NT.HW
 AddReg = MyDevice_HardwareDeviceSettings
+; A root-enumerated software device otherwise reaches user mode with a
+; descriptor that grants nothing to ordinary callers: the phase sender finds
+; the interface, opens it and is refused with error 5, which reads like a
+; driver fault and is not one. An elevated session is refused too, so this is
+; not something a caller can work around by running as an administrator.
+;
+; Written as a directive rather than as an AddReg of the same string, because
+; the installer converts it to the binary form the PnP manager expects. An
+; SDDL string stored under the same value name as text is read as a malformed
+; descriptor and the device then fails to start at all, taking the laboratory
+; display with it.
+;
+; The service accounts keep everything they had, since the framework's own host
+; opens this device before any caller does. Authenticated users get read and
+; write, which is the whole of what the relay needs and is worth no more than
+; it sounds: the only thing writable here is a four-byte delay the driver folds
+; into one refresh period.
+Security = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;LS)(A;;GA;;;NS)(A;;GRGW;;;AU)"
 
 [MyDevice_HardwareDeviceSettings]
 HKR,, "UpperFilters",  %REG_MULTI_SZ%, "IndirectKmd"
