@@ -279,7 +279,8 @@ fn decode(description: &AudioStreamBasicDescription) -> Result<OutputFormat, Err
         return Err(Error::Unsupported(format!(
             "this device's stream is '{}' rather than linear PCM, so there is no PCM buffer to \
              fill",
-            four_cc(description.mFormatID as i32).unwrap_or_else(|| description.mFormatID.to_string())
+            four_cc(description.mFormatID as i32)
+                .unwrap_or_else(|| description.mFormatID.to_string())
         )));
     }
     // The float flag is what decides, and it is the only thing that decides: a

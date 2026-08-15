@@ -47,7 +47,12 @@ const HIGH_REFRESH_HZ: f64 = 119.0;
 /// requirements are properties of that host and one more is a property of the
 /// path to it.
 pub fn detect(host: &str, wanted: &BTreeSet<&str>) -> Environment {
-    let host_side = ["nvidia-nvenc", "virtual-display", "lab-source", "audio-endpoint"];
+    let host_side = [
+        "nvidia-nvenc",
+        "virtual-display",
+        "lab-source",
+        "audio-endpoint",
+    ];
     let needs_host = wanted.contains("windows-host")
         || wanted.contains("radio")
         || host_side.iter().any(|name| wanted.contains(name));
@@ -70,10 +75,7 @@ pub fn detect(host: &str, wanted: &BTreeSet<&str>) -> Environment {
                 .map(|name| {
                     (
                         *name,
-                        Satisfaction::Unknown(format!(
-                            "the host was not asked: {}",
-                            other.why()
-                        )),
+                        Satisfaction::Unknown(format!("the host was not asked: {}", other.why())),
                     )
                 })
                 .collect(),
@@ -144,7 +146,9 @@ fn radio(host: &Option<Satisfaction>) -> Satisfaction {
             String::from_utf8_lossy(&output.stdout).trim().to_string()
         }
         Ok(_) => String::new(),
-        Err(why) => return Satisfaction::Unknown(format!("could not read {WIFI_INTERFACE}: {why}")),
+        Err(why) => {
+            return Satisfaction::Unknown(format!("could not read {WIFI_INTERFACE}: {why}"));
+        }
     };
     if address.is_empty() {
         return Satisfaction::Absent(format!("{WIFI_INTERFACE} has no address"));
@@ -326,17 +330,27 @@ fn host_capabilities(host: &str) -> BTreeMap<&'static str, Satisfaction> {
 }
 
 fn unknown_host_answers(why: &str) -> BTreeMap<&'static str, Satisfaction> {
-    ["nvidia-nvenc", "virtual-display", "lab-source", "audio-endpoint"]
-        .into_iter()
-        .map(|name| (name, Satisfaction::Unknown(why.to_string())))
-        .collect()
+    [
+        "nvidia-nvenc",
+        "virtual-display",
+        "lab-source",
+        "audio-endpoint",
+    ]
+    .into_iter()
+    .map(|name| (name, Satisfaction::Unknown(why.to_string())))
+    .collect()
 }
 
 /// `<requirement> yes <what was found>` or `<requirement> no`. A line in any
 /// other shape is left out, and the caller reports the requirement as unknown:
 /// a report this program cannot read is not evidence of absence.
 fn parse_host_report(text: &str) -> BTreeMap<&'static str, Satisfaction> {
-    let known = ["nvidia-nvenc", "virtual-display", "lab-source", "audio-endpoint"];
+    let known = [
+        "nvidia-nvenc",
+        "virtual-display",
+        "lab-source",
+        "audio-endpoint",
+    ];
     let mut found = BTreeMap::new();
     for line in text.lines() {
         let line = line.trim();

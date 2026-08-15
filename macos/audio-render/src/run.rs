@@ -50,6 +50,7 @@ use objc2_core_audio_types::{AudioBufferList, AudioTimeStamp};
 use crate::device::{self, Error};
 use crate::report::Report;
 use crate::ring::PcmRing;
+use crate::schedule::ScheduledAs;
 
 /// The level everything in this crate plays at.
 ///
@@ -192,10 +193,7 @@ unsafe extern "C-unwind" fn render(
                     // holding `frames` samples, and `offset + index` is below
                     // the frames this cycle asked for.
                     unsafe {
-                        *buffers[channel]
-                            .mData
-                            .cast::<f32>()
-                            .add(offset + index) = *sample;
+                        *buffers[channel].mData.cast::<f32>().add(offset + index) = *sample;
                     }
                 }
             }
@@ -416,7 +414,17 @@ pub fn run(options: Options) -> Result<Report, Error> {
     let channels = usize::from(format.channels);
     let ring_frames = buffer_frames as usize * options.ring_multiple as usize;
     let ring = Arc::new(PcmRing::new(ring_frames, channels));
-    let producer_target_frames = ring_frames / 2;
+    // As full as the ring will go while still leaving room to write a whole chunk
+    // without a partial fill. Half the ring was the first choice, on the reasoning that
+    // the occupancy then reports the margin the producer kept - but it also halves that
+    // margin, and measured on this machine it was not enough: five underruns in twenty
+    // seconds, each one a whole callback of silence, with the ring pinned at exactly
+    // half and dipping to zero. The callback drains a chunk every 5.3 ms and an ordinary
+    // thread on this system misses a 10 ms deadline several times a minute whatever it
+    // is doing, so the margin has to be the whole ring rather than a readable fraction
+    // of it. Occupancy still reports the margin, as a dip from full rather than a dip
+    // from half.
+    let producer_target_frames = ring_frames.saturating_sub(buffer_frames as usize);
 
     // Enough room for every cycle the run should see, plus a quarter, plus a
     // floor for a very short run. A store that filled would leave the
@@ -458,11 +466,45 @@ pub fn run(options: Options) -> Result<Report, Error> {
         // A quarter of an IO buffer: short enough that a ring drained by one
         // cycle is topped up before the next one needs it, long enough that the
         // producer is asleep rather than spinning between them.
-        let nap = Duration::from_secs_f64(
-            f64::from(buffer_frames) / f64::from(format.sample_rate) / 4.0,
-        )
-        .max(MINIMUM_NAP);
+        let period_ns = (f64::from(buffer_frames) / f64::from(format.sample_rate) * 1e9) as u64;
+        let nap =
+            Duration::from_secs_f64(f64::from(buffer_frames) / f64::from(format.sample_rate) / 4.0)
+                .max(MINIMUM_NAP);
         thread::spawn(move || {
+            // The producer feeds a callback the system has already promoted, and an
+            // ordinary thread cannot reliably keep up with it. Measured here, in order:
+            // filling half the ring underran five times in twenty seconds; filling the
+            // whole ring for sixteen milliseconds of margin underran ten times in three
+            // hundred; and asking for a user-interactive quality of service produced
+            // zero, twelve, zero and zero across four runs. Every underrun is a whole
+            // callback of silence, because this deadline is not soft.
+            //
+            // What that sequence says is that a priority band is not a deadline. The
+            // intermittency was never explained - a controlled comparison with a build
+            // running showed no underruns at all, so sustained load is not the trigger -
+            // and the fix does not depend on explaining it: the system provides a
+            // real-time policy for precisely this shape of work, and asking for a band
+            // and hoping is the thing being replaced.
+            //
+            // Growing the ring instead would work and is the wrong answer: in the
+            // finished pipeline this ring sits between the jitter buffer and the device,
+            // so every frame of it is latency added to audio that has already crossed a
+            // network. The buffer stays small and the producer becomes reliable.
+            //
+            // The period is the callback's, because that is the cycle the producer has to
+            // keep up with. The computation is an eighth of it, which is generous for
+            // generating at most one buffer of sine and honest about it - a computation
+            // claimed larger than the work steals a share of the machine nothing here
+            // needs. Preemptible, because a non-preemptible thread that misbehaves takes
+            // the machine with it and no measurement is worth that.
+            let policy = ScheduledAs::request(period_ns);
+            eprintln!("audio-render: producer scheduled as {policy}");
+            if !policy.is_real_time() {
+                eprintln!(
+                    "audio-render: the producer did not get a deadline, so underruns below \
+                     are the scheduler's and not the ring's"
+                );
+            }
             let mut tone = Tone::new(spec);
             while !stop.load(Ordering::Acquire) {
                 let occupancy = ring.occupancy_frames();

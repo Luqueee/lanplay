@@ -1,0 +1,32 @@
+audio-render: producer scheduled as time constraint, period 5.333 ms computation 0.667 ms constraint 2.667 ms
+device Altavoces del MacBook Pro
+output format 48000 Hz 2 ch 32 bit float
+io buffer frames 256
+callbacks 56251
+frames requested p50 256 p95 256 p99 256 max 256
+callback interval us p50 5333 p95 5341 p99 5345 max 5386
+ring occupancy frames p50 768 p95 768 p99 768 max 768
+underruns 0
+underrun frames 0
+overruns 0
+frames produced 14401024
+frames consumed 14400256
+span seconds 299.998
+overrun frames 0
+frames still in the ring 768
+frames missing 0
+io buffer frames requested 256
+io buffer frames range 15 to 4096
+odd cycles 0
+io buffer ms 5.333
+stream layout interleaved
+physical format 48000 Hz 2 ch 32 bit float
+ring frames 1024 being 4 io buffers, 21.333 ms
+producer target frames 768 being 16.000 ms
+ring occupancy frames min 768 over 56251 samples
+callback interval us min 5274 over 56250 samples
+frames requested min 256
+measured frames per second 48000.26
+requested seconds 300.000
+tone 997 Hz left 1997 Hz right at -40 dBFS
+format matches contract yes

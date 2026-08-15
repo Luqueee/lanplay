@@ -108,8 +108,26 @@ impl Report {
 
     /// Frames the ring is still holding, which is the only amount by which the
     /// two totals are allowed to disagree.
-    pub fn unaccounted_frames(&self) -> i64 {
+    pub fn residual_frames(&self) -> i64 {
         self.frames_produced as i64 - self.frames_consumed as i64
+    }
+
+    /// Frames that went missing, as opposed to frames that were merely still in
+    /// the ring when the stream stopped.
+    ///
+    /// Reported apart from the residual because they mean opposite things and one
+    /// of them is arithmetic. A single number covering both cannot distinguish a
+    /// run that lost audio from a run that ended, and it was printed as
+    /// "unaccounted frames" for exactly as long as it took somebody to read 768
+    /// and go looking for a leak that was the ring being full.
+    pub fn missing_frames(&self) -> i64 {
+        let residual = self.residual_frames();
+        if residual < 0 {
+            // More consumed than produced is not a residual at all: the sink was
+            // handed frames nobody wrote.
+            return -residual;
+        }
+        (residual - self.ring_frames as i64).max(0)
     }
 
     /// Frames per second the device actually took, as opposed to the rate it
@@ -162,7 +180,8 @@ impl fmt::Display for Report {
         // harness parsing it, in the order somebody asking "why those numbers"
         // would want it.
         writeln!(f, "overrun frames {}", self.overrun_frames)?;
-        writeln!(f, "unaccounted frames {}", self.unaccounted_frames())?;
+        writeln!(f, "frames still in the ring {}", self.residual_frames())?;
+        writeln!(f, "frames missing {}", self.missing_frames())?;
         writeln!(
             f,
             "io buffer frames requested {}",
@@ -371,9 +390,35 @@ mod tests {
     #[test]
     fn a_clean_run_accounts_for_every_frame() {
         let report = clean();
-        assert_eq!(report.unaccounted_frames(), 1_024);
-        assert_eq!(report.unaccounted_frames(), report.ring_frames as i64 / 2);
+        assert_eq!(report.residual_frames(), 1_024);
+        assert_eq!(
+            report.missing_frames(),
+            0,
+            "a residual inside the ring is the ring being full, not a leak"
+        );
+        assert_eq!(report.residual_frames(), report.ring_frames as i64 / 2);
         assert!((report.measured_rate() - 48_000.0).abs() < 0.5);
+    }
+
+    /// And the complement, which is the reason the two are separate numbers: a gap
+    /// wider than the ring cannot be the ring, so it is audio that went missing.
+    #[test]
+    fn a_gap_wider_than_the_ring_is_missing_audio_and_not_a_residual() {
+        let mut report = clean();
+        let ring = report.ring_frames as i64;
+        let before = report.residual_frames();
+        report.frames_produced += 4_096;
+        // Written against the ring rather than against a remembered constant: the
+        // first version of this test asserted 4096 because it assumed the fixture's
+        // ring, and the arithmetic it was checking is exactly the arithmetic it got
+        // wrong.
+        assert_eq!(report.residual_frames(), before + 4_096);
+        assert_eq!(report.missing_frames(), before + 4_096 - ring);
+        // Consumed beyond produced is not a residual at all: the sink was handed
+        // frames nobody wrote, which is a different bug and must not read as zero.
+        let mut inverted = clean();
+        inverted.frames_consumed = inverted.frames_produced + 512;
+        assert_eq!(inverted.missing_frames(), 512);
     }
 
     /// The shape this project has been burnt by: everything zero, nothing

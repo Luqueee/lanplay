@@ -38,6 +38,17 @@ OUT="${OUT:-/tmp/jitter-gate/$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "$OUT"
 echo "results   $OUT"
 
+# Anything this gate starts, this gate ends - including on an interrupt. A relay left
+# holding a port after an interrupted run makes the next thing to bind it fail for a
+# reason that has nothing to do with it, and that is a false failure an unattended agent
+# will chase rather than dismiss. It cost one already.
+cleanup() {
+    pkill -f "udp-fault --listen 127.0.0.1:$RELAY_PORT" 2>/dev/null || true
+    pkill -f "audio-jitter-probe --bind 0.0.0.0:$SINK_PORT" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+
 cargo build --release -q -p lanplay-audio-codec -p lanplay-udp-fault
 PROBE="$REPO/target/release/audio-jitter-probe"
 FAULT="$REPO/target/release/udp-fault"

@@ -24,17 +24,23 @@
 
 set -euo pipefail
 
-# Subsystem source, and the evidence directory that stands for it. A subsystem with no
-# entry here is a subsystem this check is silent about, which is why the list is
-# asserted against the tree below rather than trusted.
+# Subsystem source, and the evidence directories that stand for it. Several, because a
+# subsystem is generally covered by more than one harness and evidence from any of them
+# is evidence: the Mac's input capture is exercised by the mouse gate, the safety gate
+# and the fault sweep, and demanding the freshest of one particular directory would
+# report a subsystem as unverified while a harness that does cover it had just run.
+# The newest of the listed directories wins.
+#
+# A subsystem with no entry here is one this check is silent about, which is why the
+# list is asserted against the tree below rather than trusted.
 SUBSYSTEMS=(
     "crates/audio-codec:results/audio"
     "windows/audio-capture:results/audio"
     "crates/transport:results/audio"
-    "macos/input-capture:results/input-gate"
-    "windows/input-inject:results/input-gate"
-    "crates/input-protocol:results/input-fault"
-    "macos/client:results/soak-1080p120"
+    "macos/input-capture:results/input-gate,results/input-safety,results/input-fault,results/input-capture"
+    "windows/input-inject:results/input-gate,results/input-safety,results/input-fault,results/game-input"
+    "crates/input-protocol:results/input-fault,results/input-safety"
+    "macos/client:results/soak-1080p120,results/phase,results/latency"
     "windows/capture:results/soak-1080p120"
     "windows/encoder-nvenc:results/soak-1080p120"
 )
@@ -42,10 +48,16 @@ SUBSYSTEMS=(
 # Every source tree named above has to exist, or the check is quietly covering less
 # than it claims. This is the failure that makes a stale-evidence check useless: it
 # passes because it looked at nothing.
+# Both halves of every mapping, because a named path that does not exist is a mapping
+# nobody checked, and a subsystem whose evidence directory is a typo reports as covered
+# by the other directories in its list while one of them silently counts for nothing.
 missing=()
 for entry in "${SUBSYSTEMS[@]}"; do
     src="${entry%%:*}"
     [ -d "$src" ] || missing+=("$src")
+    while IFS= read -r dir; do
+        [ -n "$dir" ] && [ ! -d "$dir" ] && missing+=("$dir")
+    done < <(printf '%s\n' "${entry##*:}" | tr ',' '\n')
 done
 if [ ${#missing[@]} -gt 0 ]; then
     echo "these subsystems are named here but not in the tree, so the check covers less" >&2
@@ -63,12 +75,22 @@ for entry in "${SUBSYSTEMS[@]}"; do
     # rewrites every mtime and the comparison would then always pass.
     code_at="$(git log -1 --format=%ct -- "$src" 2>/dev/null || echo 0)"
 
-    if [ -d "$evidence" ]; then
-        # And the commit date of the last change to the evidence, for the same reason.
-        evidence_at="$(git log -1 --format=%ct -- "$evidence" 2>/dev/null || echo 0)"
-    else
+    # The newest of the directories that cover it, for the same reason: commit dates,
+    # never mtimes.
+    evidence_at=0
+    saw_one=no
+    while IFS= read -r dir; do
+        [ -d "$dir" ] || continue
+        saw_one=yes
+        at="$(git log -1 --format=%ct -- "$dir" 2>/dev/null || echo 0)"
+        [ "$at" -gt "$evidence_at" ] && evidence_at="$at"
+    done < <(printf '%s\n' "${evidence//,/$'\n'}")
+    # A directory named here that does not exist is a mapping nobody checked, and it is
+    # how this check quietly starts covering less than it says.
+    if [ "$saw_one" = no ]; then
         evidence_at=0
     fi
+    unset saw_one
 
     if [ "$evidence_at" = 0 ]; then
         printf "%-29s %-21s %s\n" "$src" "$(date -u -r "$code_at" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '?')" "NONE"

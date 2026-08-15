@@ -178,6 +178,18 @@ need somebody to put a window in the foreground or to keep their hands off the m
 and an agent working unattended must be able to tell those apart from the rest
 mechanically.
 
+### 5. Every gate ends what it starts
+
+A harness that spawns a relay or a probe must kill it on the way out, including on an
+interrupt. A process surviving an interrupted run holds a port, and the next thing to
+bind that port fails for a reason that has nothing to do with it - which cost a spurious
+failure in an unrelated test suite today, and would cost an unattended agent the time to
+chase it.
+
+`trap cleanup EXIT INT TERM` is the whole mechanism. It is listed as a design point
+rather than a tidiness note because the failure it prevents is indistinguishable, from
+the outside, from a real one.
+
 ## What this does not fix
 
 Two of the session's defects survive every mechanism above, and it is worth being

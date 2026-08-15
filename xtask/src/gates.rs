@@ -424,7 +424,8 @@ pub fn json(index: &Index, selection: &Selection, environment: Option<&Environme
             if let Some(verdict) = verdict {
                 let status = match verdict {
                     Verdict::Runnable => serde_json::json!({ "state": "runnable" }),
-                    Verdict::Blocked { requirement, why } | Verdict::Unknown { requirement, why } => {
+                    Verdict::Blocked { requirement, why }
+                    | Verdict::Unknown { requirement, why } => {
                         serde_json::json!({
                             "state": verdict.state(),
                             "requirement": requirement,
@@ -614,10 +615,7 @@ human_attention = "somebody has to look at it"
             proves: "nothing".to_string(),
             phase: "F5".to_string(),
             // The unknown one first, so an order-driven answer would name it.
-            requires: vec![
-                "nvidia-nvenc".to_string(),
-                "human-attention".to_string(),
-            ],
+            requires: vec!["nvidia-nvenc".to_string(), "human-attention".to_string()],
             optional_requires: vec![],
             minutes: 1,
             negative_control: "none".to_string(),

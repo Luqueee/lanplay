@@ -94,6 +94,15 @@ minutes = 7
 negative_control = "the loss arm: it must show concealment happening, and a loss arm with nothing concealed fails rather than passes"
 notes = "the ceiling cannot be exercised by a delay - only a sink slower than its source can breach it, which is A7"
 
+[gates.render-gate]
+script = "tools/render-gate.sh"
+proves = "a ring buffer feeds CoreAudio for five minutes with nothing unfilled, nothing overwritten and nothing missing"
+phase = "A5"
+requires = ["audio-output"]
+minutes = 6
+negative_control = "the producer at default priority: it underran ten times in three hundred seconds, and that arrangement is what the promoted one has to beat"
+notes = "five minutes because a twenty second run called the broken arrangement clean two times out of three"
+
 # ---------------------------------------------------------------------------
 # Video
 # ---------------------------------------------------------------------------

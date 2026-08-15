@@ -295,12 +295,19 @@ mod tests {
         assert!(preflight.finish().is_err());
     }
 
+    /// Only the direction that cannot race. A port this process holds is taken, and
+    /// nothing else on the machine can make that false.
+    ///
+    /// The complement - that a released port reads as free - was asserted here and is not
+    /// testable on a shared machine: between the release and the check, anything may take
+    /// it, and in this repository the things most likely to are the gates, several of
+    /// which bind ports for minutes at a time. It failed twice during a session of
+    /// running them, both times for that reason, and a test that fails when the machine
+    /// is busy teaches its reader to re-run rather than to look.
     #[test]
     fn a_bound_port_is_reported_as_taken() {
         let held = UdpSocket::bind(("0.0.0.0", 0)).expect("bind an ephemeral port");
         let port = held.local_addr().expect("local addr").port();
         assert!(udp_port_free(port).is_err());
-        drop(held);
-        assert!(udp_port_free(port).is_ok());
     }
 }
