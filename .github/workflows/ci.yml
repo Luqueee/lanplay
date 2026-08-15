@@ -51,16 +51,26 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
+      # `set +e` around the pipeline on purpose. The runner starts `shell: bash` with
+      # `-eo pipefail`, so a failing cargo kills the step at the pipe and the reporter
+      # below never speaks - which is exactly what happened on run 5, where the only
+      # annotation was the runner's own "exit code 101" and the reason stayed unreadable.
       - name: clippy
         shell: bash
         run: |
+          set +e
           cargo clippy --workspace --all-targets --locked -- -D warnings 2>&1 | tee /tmp/clippy.log
-          tools/ci-annotate.sh /tmp/clippy.log "${PIPESTATUS[0]}" "macos clippy"
+          code=${PIPESTATUS[0]}
+          set -e
+          tools/ci-annotate.sh /tmp/clippy.log "$code" "macos clippy"
       - name: test
         shell: bash
         run: |
+          set +e
           cargo test --workspace --locked 2>&1 | tee /tmp/test.log
-          tools/ci-annotate.sh /tmp/test.log "${PIPESTATUS[0]}" "macos tests"
+          code=${PIPESTATUS[0]}
+          set -e
+          tools/ci-annotate.sh /tmp/test.log "$code" "macos tests"
       # The index that tells an agent which harnesses can run. Its own tests assert
       # that every harness is described and every described script exists, so this is
       # what stops the index rotting away from the scripts. And `platforms` checks the
@@ -86,6 +96,7 @@ jobs:
       - name: test what Windows can build
         shell: bash
         run: |
+          set +e
           cargo test --workspace --locked \
             --exclude lanplay-client \
             --exclude lanplay-decoder-videotoolbox \
@@ -94,10 +105,13 @@ jobs:
             --exclude lanplay-audio-render \
             --exclude lanplay-mouse-mover \
             --exclude lanplay-radio-sample 2>&1 | tee /tmp/test.log
-          tools/ci-annotate.sh /tmp/test.log "${PIPESTATUS[0]}" "windows tests"
+          code=${PIPESTATUS[0]}
+          set -e
+          tools/ci-annotate.sh /tmp/test.log "$code" "windows tests"
       - name: clippy the same set
         shell: bash
         run: |
+          set +e
           cargo clippy --workspace --all-targets --locked \
             --exclude lanplay-client \
             --exclude lanplay-decoder-videotoolbox \
@@ -107,7 +121,9 @@ jobs:
             --exclude lanplay-mouse-mover \
             --exclude lanplay-radio-sample \
             -- -D warnings 2>&1 | tee /tmp/clippy.log
-          tools/ci-annotate.sh /tmp/clippy.log "${PIPESTATUS[0]}" "windows clippy"
+          code=${PIPESTATUS[0]}
+          set -e
+          tools/ci-annotate.sh /tmp/clippy.log "$code" "windows clippy"
 
   # rust-version in Cargo.toml is a promise, and an unenforced promise drifts within a
   # release or two. Checked rather than tested: the guarantee is that it compiles on the
