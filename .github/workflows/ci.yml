@@ -45,49 +45,69 @@ jobs:
   macos:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked
+      - name: clippy
+        shell: bash
+        run: |
+          cargo clippy --workspace --all-targets --locked -- -D warnings 2>&1 | tee /tmp/clippy.log
+          tools/ci-annotate.sh /tmp/clippy.log "${PIPESTATUS[0]}" "macos clippy"
+      - name: test
+        shell: bash
+        run: |
+          cargo test --workspace --locked 2>&1 | tee /tmp/test.log
+          tools/ci-annotate.sh /tmp/test.log "${PIPESTATUS[0]}" "macos tests"
       # The index that tells an agent which harnesses can run. Its own tests assert
       # that every harness is described and every described script exists, so this is
-      # what stops the index rotting away from the scripts.
+      # what stops the index rotting away from the scripts. And `platforms` checks the
+      # windows job's exclude list against what each crate declares it supports, which
+      # is the mechanism the comment below claims and did not have.
       - run: cargo run -q -p xtask --locked -- gates --debt
+      - run: cargo run -q -p xtask --locked -- platforms
 
   # Windows carries the capture, encoder, injection and driver-facing crates. The
-  # macOS-only members are excluded by name rather than by a filter, so that adding a
-  # macOS crate fails here loudly instead of being silently skipped.
+  # macOS-only members are excluded by name, and `xtask platforms` in the job above
+  # checks this list against what each crate declares it supports. The list alone did
+  # not fail loudly as its comment used to claim: a macOS-only crate missing from it
+  # arrived as `cannot find wifi in lanplay_capabilities` in an unrelated-looking
+  # crate, which cost a wrong diagnosis and two red runs.
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: test what Windows can build
-        run: >
-          cargo test --workspace --locked
-          --exclude lanplay-client
-          --exclude lanplay-decoder-videotoolbox
-          --exclude lanplay-input-capture
-          --exclude lanplay-renderer-metal
-          --exclude lanplay-audio-render
-          --exclude lanplay-mouse-mover
+        shell: bash
+        run: |
+          cargo test --workspace --locked \
+            --exclude lanplay-client \
+            --exclude lanplay-decoder-videotoolbox \
+            --exclude lanplay-input-capture \
+            --exclude lanplay-renderer-metal \
+            --exclude lanplay-audio-render \
+            --exclude lanplay-mouse-mover \
+            --exclude lanplay-radio-sample 2>&1 | tee /tmp/test.log
+          tools/ci-annotate.sh /tmp/test.log "${PIPESTATUS[0]}" "windows tests"
       - name: clippy the same set
-        run: >
-          cargo clippy --workspace --all-targets --locked
-          --exclude lanplay-client
-          --exclude lanplay-decoder-videotoolbox
-          --exclude lanplay-input-capture
-          --exclude lanplay-renderer-metal
-          --exclude lanplay-audio-render
-          --exclude lanplay-mouse-mover
-          -- -D warnings
+        shell: bash
+        run: |
+          cargo clippy --workspace --all-targets --locked \
+            --exclude lanplay-client \
+            --exclude lanplay-decoder-videotoolbox \
+            --exclude lanplay-input-capture \
+            --exclude lanplay-renderer-metal \
+            --exclude lanplay-audio-render \
+            --exclude lanplay-mouse-mover \
+            --exclude lanplay-radio-sample \
+            -- -D warnings 2>&1 | tee /tmp/clippy.log
+          tools/ci-annotate.sh /tmp/clippy.log "${PIPESTATUS[0]}" "windows clippy"
 
   # rust-version in Cargo.toml is a promise, and an unenforced promise drifts within a
   # release or two. Checked rather than tested: the guarantee is that it compiles on the
@@ -95,7 +115,7 @@ jobs:
   msrv:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - id: msrv
         run: echo "version=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@stable
@@ -109,7 +129,7 @@ jobs:
   deny:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check bans licenses advisories sources
