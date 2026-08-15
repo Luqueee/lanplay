@@ -1,0 +1,111 @@
+# What CI can honestly say about this repository.
+#
+# It can say the code compiles for the platforms it claims and that its pure logic
+# holds. It cannot say the system works: the behaviour that matters lives in an NVENC
+# engine, a virtual display driver, a radio between two machines, a 120 Hz panel and
+# two crystals that drift against each other, and a runner has none of those. See
+# docs/ci.md for what is covered where, and docs/testing.md for the harnesses that
+# cover the rest.
+#
+# ACTIONS ARE NOT PINNED YET. Every `uses:` below names a version tag, which resolves
+# to whatever that tag points at today. Before this workflow is trusted, run
+# tools/pin-actions.sh to rewrite each one to a commit SHA; `xtask actions --check`
+# fails while any remain unpinned and is the mechanism rather than the intention.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A pull request superseded by another push has nothing to prove; a push to main is
+# never cancelled, because its result is what a release later depends on.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Read-only by default. No job here needs more, and a job that later does should raise
+# it for itself rather than inheriting it from the file.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # A dependency resolved differently from the lockfile is a different program, and a
+  # green check on one says nothing about the other.
+  CARGO_NET_LOCKED: "true"
+  RUSTFLAGS: -D warnings
+
+jobs:
+  # The workspace builds and tests whole on macOS, which is the only platform where
+  # every member compiles: the crates under windows/ are Windows-only and the ones
+  # under macos/ need AppKit.
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked
+      - run: cargo test --workspace --locked
+      # The index that tells an agent which harnesses can run. Its own tests assert
+      # that every harness is described and every described script exists, so this is
+      # what stops the index rotting away from the scripts.
+      - run: cargo run -q -p xtask --locked -- gates --debt
+
+  # Windows carries the capture, encoder, injection and driver-facing crates. The
+  # macOS-only members are excluded by name rather than by a filter, so that adding a
+  # macOS crate fails here loudly instead of being silently skipped.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: test what Windows can build
+        run: >
+          cargo test --workspace --locked
+          --exclude lanplay-client
+          --exclude lanplay-decoder-videotoolbox
+          --exclude lanplay-input-capture
+          --exclude lanplay-renderer-metal
+          --exclude lanplay-mouse-mover
+      - name: clippy the same set
+        run: >
+          cargo clippy --workspace --all-targets --locked
+          --exclude lanplay-client
+          --exclude lanplay-decoder-videotoolbox
+          --exclude lanplay-input-capture
+          --exclude lanplay-renderer-metal
+          --exclude lanplay-mouse-mover
+
+  # rust-version in Cargo.toml is a promise, and an unenforced promise drifts within a
+  # release or two. Checked rather than tested: the guarantee is that it compiles on the
+  # oldest toolchain claimed, not that the test harness of that vintage behaves.
+  msrv:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - id: msrv
+        run: echo "version=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets --locked
+
+  # Licences and advisories. Separate from the build so that a new advisory names
+  # itself instead of arriving inside a compilation failure.
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check bans licenses advisories sources

@@ -1,0 +1,24 @@
+[package]
+name = "lanplay-audio-render"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "audio-render-probe"
+path = "src/bin/probe.rs"
+
+[dependencies]
+# `Samples` and `Percentiles` come from the capture crate rather than being
+# written again here. Both are plain arithmetic, tested off Windows, and
+# `Samples` is already fixed-capacity for exactly the reason this crate needs:
+# it is recorded into from a callback that must not allocate.
+lanplay-audio-capture = { workspace = true }
+lanplay-tone-source = { workspace = true }
+clap = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-audio = { workspace = true }
+objc2-core-audio-types = { workspace = true }
+objc2-core-foundation = { workspace = true }

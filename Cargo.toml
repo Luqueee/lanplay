@@ -8,6 +8,7 @@ members = [
     "crates/telemetry",
     "crates/transport",
     "crates/video-core",
+    "macos/audio-render",
     "macos/client",
     "macos/decoder-videotoolbox",
     "macos/input-capture",
@@ -102,10 +103,21 @@ parking_lot = "0.12"
 sha2 = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The gate index is TOML, and `xtask gates` reads it. `preserve_order` keeps the
+# gates in the order the file states them, which groups them by subsystem;
+# sorted by name they interleave audio, video and input for no reason.
+toml = { version = "1", default-features = false, features = [
+    "parse",
+    "serde",
+    "std",
+    "preserve_order",
+] }
 
 block2 = "0.6"
 objc2 = "0.6.4"
 objc2-app-kit = "0.3.2"
+objc2-core-audio = "0.3.2"
+objc2-core-audio-types = "0.3.2"
 objc2-core-foundation = "0.3.2"
 objc2-core-graphics = "0.3.2"
 objc2-core-media = "0.3.2"

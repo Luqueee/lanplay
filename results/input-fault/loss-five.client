@@ -1,0 +1,12 @@
+sending a W, A, S, D cycle to 127.0.0.1:5106 as session 1 for 8 s at 40 events/s
+failed sends 0
+key datagrams 322  presses 161  releases 161
+button presses 0  releases 0
+wheel events 0  notches sent dx 0  dy 0
+keys still held 0  buttons still held 0  every press matched by a release: yes
+releases sent 1  by cause: focus lost 0  release hotkey 0  command-tab 0  session failure 0  capture released 0  exit 1
+heartbeats sent 20 at one every 400 ms
+reliable events sent 323  acknowledged 323  abandoned 0  still outstanding at exit 0
+events accounted 323 of 323
+retransmissions 30 over a ladder of 5  acknowledgement datagrams received 320  snapshots sent 158
+clock read to send_to returning:  p50 49.18µs  p95 97.41µs  p99 141.95µs  max 267.01µs

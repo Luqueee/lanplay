@@ -1,0 +1,126 @@
+# A release, and the one thing here that is not ordinary.
+#
+# Building and attesting artefacts is routine. What is not routine is that CI in this
+# repository cannot test the system it releases - no GPU with an encoder, no virtual
+# display driver, no second machine, no radio, no panel - so a green check says only
+# that the code compiles and its pure logic holds.
+#
+# Which means a release built from a green check would carry a claim it never earned.
+# The `evidence` job below is the answer: it refuses to publish while the recorded
+# output of the lab gates is older than the code those gates cover. That makes the
+# un-CI-able verification a release requirement rather than a good intention.
+#
+# ACTIONS ARE NOT PINNED YET - see the note at the top of ci.yml. A release workflow is
+# the one that most needs SHA pinning, because it holds an id-token and writes to the
+# repository, so pin it before the first tag rather than after.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Nothing at file level. Each job takes only what it needs, and the two that need
+# something are the ones that attest and the one that publishes.
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_LOCKED: "true"
+
+jobs:
+  # The gate that has no equivalent in an ordinary project. Every harness writes its
+  # numbers under results/; if the code moved after the evidence was recorded, the
+  # numbers in the release notes describe a different program.
+  evidence:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The check compares commit dates, so a shallow clone would compare against
+          # a history that is not there.
+          fetch-depth: 0
+      - run: tools/check-evidence.sh
+
+  build:
+    needs: evidence
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            # The Mac ships the client and the input capture; the tone source is here
+            # because a lab needs it on whichever machine is producing.
+            packages: -p lanplay-client -p lanplay-input-capture
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            # cmake comes with Visual Studio on this runner, which is what lets
+            # libopus's vendored C build; a Mac cannot cross-compile it.
+            packages: -p lanplay-nvenc-probe -p lanplay-input-inject -p lanplay-audio-capture
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked --target ${{ matrix.target }} ${{ matrix.packages }}
+      - name: gather the binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Copied by extension rather than by name, so a renamed binary is a missing
+          # artefact rather than a silently empty archive.
+          find "target/${{ matrix.target }}/release" -maxdepth 1 -type f \
+            \( -perm -u+x -o -name '*.exe' \) ! -name '*.d' -exec cp {} dist/ \;
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # OIDC for provenance, so nothing long-lived is stored to sign a build.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: archive per target
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for dir in artifacts/*/; do
+              target="$(basename "$dir")"
+              tar -czf "dist/lanplay-${GITHUB_REF_NAME}-${target}.tar.gz" -C "$dir" .
+          done
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS)
+          cat dist/SHA256SUMS
+      - uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/*.tar.gz
+      # The numbers themselves, not a summary of them. Whoever installs a build should
+      # be able to read what was measured, on what hardware, and when.
+      - name: assemble the lab evidence
+        run: tools/collect-evidence.sh dist/EVIDENCE.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+            dist/EVIDENCE.md
+          body_path: dist/EVIDENCE.md
+          fail_on_unmatched_files: true

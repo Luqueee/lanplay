@@ -1,0 +1,224 @@
+# What every harness in this project proves, and what it needs to prove it.
+#
+# This exists because the expensive question is not running a gate, it is knowing
+# which ones can run right now. Answering that by reading eighteen shell scripts and
+# reasoning about each one's prerequisites - every time a machine is switched off or a
+# radio degrades - was the largest single cost to working unattended. Stated as data it
+# is one read.
+#
+# `requires` is physical and its vocabulary is deliberately small:
+#
+#   windows-host      the lab PC answers over ssh
+#   nvidia-nvenc      that PC's encoder, so a GPU has to be present and idle enough
+#   virtual-display   the IDD-LAB driver loaded and its monitor active
+#   lab-source        present-source drawing on it, because Desktop Duplication only
+#                     hands over a frame while something changes
+#   radio             traffic has to cross the air between two machines; sending to
+#                     this machine's own address does not, the kernel short-circuits it
+#   mac-display       an unoccluded window on a 120 Hz panel, so the display link runs
+#   audio-endpoint    an active render endpoint on the host
+#   audio-output      an output device on the Mac, and something audible comes out
+#   human-attention   a person has to hold a window in the foreground, keep their
+#                     hands off a mouse, or say whether it felt right
+#
+# `negative_control` names the arm that MUST fail. A gate whose failure mode has never
+# been observed is a gate nobody has any reason to trust; two false passes in this
+# project came from the one harness that lacked one. `none yet` is honest and is a
+# debt, not a property.
+#
+# `minutes` is wall clock for the default invocation, so an agent can plan rather than
+# discover.
+
+[meta]
+schema = 1
+# Kept beside the harnesses rather than in docs/ so that adding a gate and forgetting
+# to describe it shows up in the same diff.
+docs = "docs/testing.md"
+# The scripts in tools/ that are not harnesses: machinery the gates run on, and
+# machinery that runs on what the gates produced. Stated here so that adding a
+# script forces the question - gate or plumbing? - to be answered in the same
+# diff, and so that the test which checks this index against the directory
+# needs no list of its own.
+plumbing = [
+    "tools/link-arm.sh",
+    "tools/link-pacer.sh",
+    "tools/win-session.sh",
+    "tools/win-ssh.sh",
+    "tools/win-sync.sh",
+    # Release machinery: these read the results a harness left behind rather
+    # than measuring anything, so they have nothing to require and no negative
+    # control to owe.
+    "tools/check-evidence.sh",
+    "tools/collect-evidence.sh",
+    "tools/pin-actions.sh",
+]
+
+# ---------------------------------------------------------------------------
+# Audio
+# ---------------------------------------------------------------------------
+
+[gates.audio-gate]
+script = "tools/audio-gate.sh"
+proves = "WASAPI loopback delivers a known format and cadence with every frame accounted for by device position"
+phase = "A1"
+requires = ["windows-host", "audio-endpoint"]
+minutes = 2
+negative_control = "none yet: with tone-source stopped the capture sees silence, which the gate refuses on the silent-packet count, but that arm is not wired as a control"
+notes = "the tone carries a different frequency per channel so channel order and content are provable, which a frame count cannot do"
+
+[gates.codec-gate]
+script = "tools/codec-gate.sh"
+proves = "Opus round-trips the tone with the sample count exact, and what a 5 ms frame costs against a 10 ms one"
+phase = "A2"
+requires = []
+minutes = 1
+negative_control = "none yet: an arm at a frame duration Opus does not permit is refused by the probe, which is a different thing from a gate arm"
+notes = "runs entirely on the Mac; libopus vendors C so nothing here cross-checks for Windows"
+
+[gates.audio-rtp-gate]
+script = "tools/audio-rtp-gate.sh"
+proves = "one Opus frame is one datagram and the RTP timestamp counts samples exactly"
+phase = "A3"
+requires = []
+optional_requires = ["windows-host", "radio"]
+minutes = 1
+negative_control = "none yet"
+notes = "the radio arm needs a second endpoint and declares itself unavailable rather than sending to this machine's own address, which the kernel puts on loopback"
+
+[gates.jitter-gate]
+script = "tools/jitter-gate.sh"
+proves = "the jitter buffer conceals rather than stalling and never grows past its ceiling under loss, a stall and churn"
+phase = "A4"
+requires = []
+minutes = 7
+negative_control = "the loss arm: it must show concealment happening, and a loss arm with nothing concealed fails rather than passes"
+notes = "the ceiling cannot be exercised by a delay - only a sink slower than its source can breach it, which is A7"
+
+# ---------------------------------------------------------------------------
+# Video
+# ---------------------------------------------------------------------------
+
+[gates.e2e-gate]
+script = "tools/e2e-gate.sh"
+proves = "capture to NVENC to RTP to VideoToolbox to Metal, with delivery and presentation accounted separately"
+phase = "video"
+requires = ["windows-host", "nvidia-nvenc", "virtual-display", "lab-source", "radio", "mac-display"]
+minutes = 2
+negative_control = "the fixture parameter set: a decoder configured from anything but the encoder's own parameter sets rejects real slices, so that arm must fail"
+notes = "REQUIRE_CLEAN_DISPLAY=0 makes it a link experiment and its presentation figures then mean nothing; LINK_ONLY=1 drops the renderer entirely"
+
+[gates.phase-sign]
+script = "tools/phase-sign.sh"
+proves = "which way a known shift moves the phase between a source's frame and the viewer's refresh"
+phase = "video"
+requires = ["windows-host", "virtual-display", "lab-source", "radio", "mac-display"]
+minutes = 2
+negative_control = "a run where the shift never reached the producer: the step is absent and the gate refuses instead of reading the drift as a direction"
+notes = "finds the step in the series rather than comparing the ends of a run, because the drift sweeps a period every few hundred seconds"
+
+[gates.phase-lottery]
+script = "tools/phase-lottery.sh"
+proves = "whether the presentation phase is drawn afresh per session or is one free-running clock"
+phase = "video"
+requires = ["windows-host", "nvidia-nvenc", "virtual-display", "lab-source", "radio", "mac-display"]
+minutes = 8
+negative_control = "not applicable: both outcomes are answers, and the harness reports which rather than passing or failing"
+notes = "needs several sessions and refuses a run too short to sample the phase"
+
+[gates.wifi-matrix]
+script = "tools/wifi-matrix.sh"
+proves = "which channel and width the link should use, ranked"
+phase = "video"
+requires = ["windows-host", "radio"]
+minutes = 20
+negative_control = "none yet"
+
+[gates.bitrate-sweep]
+script = "tools/bitrate-sweep.sh"
+proves = "where bitrate starts costing delivery rather than quality"
+phase = "video"
+requires = ["windows-host", "nvidia-nvenc", "virtual-display", "lab-source", "radio", "mac-display"]
+minutes = 25
+negative_control = "none yet"
+
+[gates.mtu-sweep]
+script = "tools/mtu-sweep.sh"
+proves = "the datagram size the link carries best"
+phase = "video"
+requires = ["windows-host", "nvidia-nvenc", "virtual-display", "lab-source", "radio", "mac-display"]
+minutes = 20
+negative_control = "none yet"
+
+[gates.qos-sweep]
+script = "tools/qos-sweep.sh"
+proves = "whether a service class changes anything this radio does"
+phase = "video"
+requires = ["windows-host", "radio"]
+minutes = 15
+negative_control = "none yet"
+
+[gates.start-gate]
+script = "tools/start-gate.sh"
+proves = "the session reaches first picture within its budget from cold"
+phase = "video"
+requires = ["windows-host", "nvidia-nvenc", "virtual-display", "lab-source", "radio", "mac-display"]
+minutes = 3
+negative_control = "none yet"
+
+[gates.latency-gate]
+script = "tools/latency-gate.sh"
+proves = "the software latency of the loop by segment, each interval local to one machine"
+phase = "I10"
+requires = ["windows-host", "virtual-display", "mac-display"]
+minutes = 3
+negative_control = "a run where the injector took the foreground: every timed event lands in the background and the gate fails on that count rather than reporting a finding about SendInput"
+notes = "the launch order decides whether the measurement means anything; the injector must be up before the target takes the foreground"
+
+# ---------------------------------------------------------------------------
+# Input
+# ---------------------------------------------------------------------------
+
+[gates.input-gate]
+script = "tools/input-gate.sh"
+proves = "a generator's motion or keys reach the host exactly, compared against what it injected"
+phase = "I1 I2 I3"
+requires = ["windows-host"]
+minutes = 2
+human_attention = "the keyboard arm needs a text window in the foreground on the host; a device touched during a run makes the generator comparison unavailable rather than failed"
+negative_control = "a dry run: the injector counts without calling SendInput, so the host-side injection count must be zero"
+
+[gates.input-capture-gate]
+script = "tools/input-capture-gate.sh"
+proves = "nothing leaks across a capture boundary and nothing is left held"
+phase = "I9"
+requires = ["windows-host"]
+minutes = 2
+negative_control = "none yet, though the barrier is checked in both directions: events before it refused and events after it accepted"
+notes = "synthetic by default; REMOTE=1 injects for real"
+
+[gates.input-safety-gate]
+script = "tools/input-safety-gate.sh"
+proves = "the whole input set survives a link that misbehaves, and a client that vanishes releases everything"
+phase = "I5 I6 I7"
+requires = []
+optional_requires = ["windows-host"]
+minutes = 2
+negative_control = "the killed arm: a client that vanishes mid-stream must still leave nothing held, and it is checked apart from the graceful arm rather than summed with it"
+notes = "the one harness here that had two arms from the start, and the only one that never produced a false pass"
+
+[gates.input-fault-sweep]
+script = "tools/input-fault-sweep.sh"
+proves = "reliable input survives loss, duplication, reordering and stalls across eight seeded arms"
+phase = "I7"
+requires = []
+minutes = 4
+negative_control = "each arm is its own control: an arm that reports nothing abandoned and nothing held while the injector dropped datagrams is a pass that has to be explained"
+
+[gates.game-input-test]
+script = "tools/game-input-test.sh"
+proves = "a real game receives the input, and whether it feels right"
+phase = "I8"
+requires = ["windows-host", "human-attention"]
+minutes = 2
+negative_control = "not applicable"
+notes = "the only harness whose most important result is not a number; a person plays and says"
