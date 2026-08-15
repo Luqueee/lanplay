@@ -1,0 +1,26 @@
+results   /tmp/jitter-gate/20260815-145816
+arm       clean done
+arm       loss done
+arm       stall done
+arm       churn done
+
+target 10 ms, ceiling 30 ms, frame 5 ms
+
+  arm       sent   recv  late   dup  reord  conceal  under  over  occ p99  occ max
+  clean     2000   2000     0     0      0        0      0     0     10.0     10.0
+  loss      2000   1968     0     0      0       32      0     0     10.0     10.0
+  stall     2000   2000    18     0      0       18     18     0     10.0     10.0
+  churn     2000   2056     0    56     93        0      0     0     10.0     10.0
+
+  clean   tone 997.0 / 1997.0 Hz   continuity expected 480000 played 480000 hole 0
+  loss    tone 997.0 / 1997.0 Hz   continuity expected 480000 played 480000 hole 0
+  stall   tone 997.0 / 1997.0 Hz   continuity expected 480000 played 475680 hole 4320
+  churn   tone 997.0 / 1997.0 Hz   continuity expected 480000 played 480000 hole 0
+
+FINDING loss: 32 frames concealed of 2000 sent, 1.60 %, and the tone survived it
+FINDING stall: 18 frames arrived past their moment and were discarded, 18 concealed, 18 underruns, and the 4320 sample hole is exactly 18 frames of 240
+FINDING the ceiling was NOT exercised by any arm and cannot be by a delay: only a sink slower than its source can breach it, which is A7's subject
+FINDING churn: 93 reordered and 56 duplicates absorbed, 0 concealed, 0 underruns
+
+PASS the buffer holds its bound under loss, a stall and churn, conceals rather than
+     stalling, and plays the tone in every arm

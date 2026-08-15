@@ -1,0 +1,113 @@
+{
+  "checks": [
+    {
+      "kind": "must_not_be_zero",
+      "name": "packets came out of the encoder",
+      "reads": "packets",
+      "why": "every percentile and the effective rate in this run is computed over these packets, so a run that produced none makes each of those figures an absence rather than a number"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "every submitted frame came back",
+      "population": "frames_submitted",
+      "reads": "frame_count_disagreement",
+      "why": "Opus is lossy in amplitude and exact in length, so a decoded length that disagrees with the submitted one is a defect and not a tolerance; the population is the submitted frames, because two counts of nothing agree perfectly"
+    },
+    {
+      "bound": 1000.0,
+      "kind": "must_be_below",
+      "name": "encode p99 under a tenth of the frame",
+      "reads": "encode_p99_us",
+      "why": "a tenth of the 10 ms frame is 1000 us, and an encoder under that cannot be the term that matters in a budget measured in whole milliseconds; p99 rather than the mean, because a frame late once every hundred is a click a listener hears"
+    },
+    {
+      "kind": "must_be_within",
+      "name": "the left channel decodes to its own tone",
+      "reads": "tone_left_hz",
+      "target": 997.0,
+      "tolerance": 5.0,
+      "why": "a byte count and a frame count agree just as happily when the decoder returns silence, and this project has read that agreement as success; 997 Hz comes out of the decoded samples, at a window resolution of 2 Hz"
+    },
+    {
+      "kind": "must_be_within",
+      "name": "the right channel decodes to its own tone",
+      "reads": "tone_right_hz",
+      "target": 1997.0,
+      "tolerance": 5.0,
+      "why": "the two channels carry different frequencies so that channel order is provable rather than assumed, and a right channel reading 997 Hz is what a swap looks like"
+    },
+    {
+      "kind": "must_not_be_zero",
+      "name": "the decoded channels stay distinct",
+      "reads": "tone_channels_distinct",
+      "why": "two channels reading one frequency is consistent with a fold to mono, with one channel encoded twice, and with a detector measuring its own scratch buffer, and a frame count is consistent with all three"
+    }
+  ],
+  "declared": [
+    "encoder",
+    "decoder",
+    "tone analysis"
+  ],
+  "environment": {
+    "application": "OPUS_APPLICATION_RESTRICTED_LOWDELAY",
+    "channels": 2,
+    "complexity": 9,
+    "dtx": false,
+    "encoder_reports_bitrate_bps": 128000,
+    "frame_samples_per_channel": 480,
+    "inband_fec": false,
+    "libopus": "libopus unknown",
+    "lookahead_samples": 120,
+    "sample_rate_hz": 48000,
+    "vbr": true,
+    "vbr_constrained": true
+  },
+  "exercised": [
+    "encoder",
+    "decoder",
+    "tone analysis"
+  ],
+  "findings": [
+    "a 10 ms frame carries 161 byte packets at 128.9 kbps effective against the 128 kbps asked for"
+  ],
+  "gate": "codec-gate",
+  "observations": {
+    "decode_max_us": 24,
+    "decode_p50_us": 9,
+    "decode_p95_us": 11,
+    "decode_p99_us": 14,
+    "effective_kbps": 128.928,
+    "encode_max_us": 55,
+    "encode_p50_us": 31,
+    "encode_p95_us": 36,
+    "encode_p99_us": 41,
+    "frame_count_disagreement": 0,
+    "frames_returned": 480000,
+    "frames_submitted": 480000,
+    "packet_bytes_max": 233,
+    "packet_bytes_min": 161,
+    "packet_bytes_p50": 161,
+    "packet_bytes_p95": 161,
+    "packet_bytes_p99": 161,
+    "packets": 1000,
+    "tone_analysed_frames": 24000,
+    "tone_channels_distinct": 1,
+    "tone_left_dbfs": -19.680718512633884,
+    "tone_left_hz": 997.0000499893812,
+    "tone_resolution_hz": 2,
+    "tone_right_dbfs": -19.684025303834275,
+    "tone_right_hz": 1997.0006057344654,
+    "total_packet_bytes": 161160
+  },
+  "run": {
+    "args": {
+      "bitrate_kbps": 128,
+      "frame_ms": 10,
+      "seconds": 10.0
+    },
+    "arm": "10 ms frames",
+    "commit": "e7a606d",
+    "span_s": 0.359541916,
+    "started_unix_ms": 1786796755699
+  }
+}

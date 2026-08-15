@@ -1,0 +1,21 @@
+frame duration 10
+frames submitted 480000
+frames returned 480000
+packets 1000
+encode us p50 31 p95 36 p99 41 max 55
+decode us p50 9 p95 11 p99 14 max 24
+packet bytes p50 161 p95 161 p99 161 max 233
+effective kbps 128.9
+tone left 997.0 right 1997.0
+tone channels distinct yes
+requested kbps 128
+encoder reports bitrate 128000
+application OPUS_APPLICATION_RESTRICTED_LOWDELAY
+vbr yes constrained yes
+dtx no inband fec no
+complexity 9
+lookahead samples 120
+frame samples per channel 480
+packet bytes min 161 count 1000
+tone resolution 2.00 hz over 24000 frames
+libopus libopus unknown

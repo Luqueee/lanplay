@@ -1,28 +1,32 @@
 target ms 10
-packets received 4000
-packets late 36
+sink scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+sender scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+receiver scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+every deadline granted yes
+packets received 2000
+packets late 18
 packets duplicate 0
 packets reordered 0
-frames played 3964
-frames concealed 36
+frames played 1982
+frames concealed 18
 occupancy ms p50 10.0 p95 10.0 p99 10.0 max 10.0
-underruns 36
+underruns 18
 overruns 0 dropping 0 frames
-decode us p50 7 p99 13
+decode us p50 5 p99 10
 sink interval us p50 5000 p99 5000
-continuity expected 960000 played 951360
+continuity expected 480000 played 475680
 tone left 997.0 right 1997.0
 tone channels distinct yes
-continuity hole 8640 samples over 4000 frame periods
-packets sent 4000
+continuity hole 4320 samples over 2000 frame periods
+packets sent 2000
 send failures 0
 packets off grid 0
 packets oversize 0
 decode failures 0
 ceiling ms 30 over 8 slots
-occupancy ms min 0.0 count 4000
-sink interval us min 4233 max 5766 count 3999
-conceal us p50 8 p99 40
+occupancy ms min 0.0 count 2000
+sink interval us min 4999 max 5000 count 1999
+conceal us p50 5 p99 40
 frame ms 5
 bind 0.0.0.0:5109 send to 127.0.0.1:5108
 tone resolution 2.00 hz over 24000 frames
