@@ -6,6 +6,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+# An AppKit application whose run loop is turned by hand, presenting through a
+# Metal layer and decoding on VideoToolbox. Every one of those three is a macOS
+# framework, so this is the platform half rather than a portable crate.
+[package.metadata.lanplay]
+platforms = ["macos"]
+
 [[bin]]
 name = "lanplay-client"
 path = "src/main.rs"

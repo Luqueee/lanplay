@@ -6,6 +6,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+# A VideoToolbox decompression session, which is the only hardware H.264
+# decoder a Mac exposes and exists nowhere else.
+[package.metadata.lanplay]
+platforms = ["macos"]
+
 [[bin]]
 name = "decode-fixture"
 path = "src/bin/decode_fixture.rs"

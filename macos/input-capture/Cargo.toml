@@ -6,6 +6,13 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+# AppKit: a global event monitor for the pointer and the keyboard, and
+# `NSApplication`/`NSWindow` focus notifications for when the capture must let
+# go. `CGEventTap` was rejected upstream, so there is no portable arm hiding
+# behind this.
+[package.metadata.lanplay]
+platforms = ["macos"]
+
 [[bin]]
 name = "input-capture-probe"
 path = "src/bin/probe.rs"

@@ -6,6 +6,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+# A Metal device from `MTLCreateSystemDefaultDevice`, drawing into a
+# `CAMetalLayer` inside an AppKit window and paced by `CAMetalDisplayLink`.
+[package.metadata.lanplay]
+platforms = ["macos"]
+
 [[bin]]
 name = "render-pattern"
 path = "src/bin/render_pattern.rs"

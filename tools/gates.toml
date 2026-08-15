@@ -46,6 +46,10 @@ docs = "docs/testing.md"
 # diff, and so that the test which checks this index against the directory
 # needs no list of its own.
 plumbing = [
+    # Turns a red CI run into something readable without a token: it prints what
+    # cargo said as annotations, which the public API serves and the run log does
+    # not. It measures nothing and decides nothing, keeping cargo's exit code.
+    "tools/ci-annotate.sh",
     "tools/link-arm.sh",
     "tools/link-pacer.sh",
     "tools/win-session.sh",

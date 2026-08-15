@@ -6,6 +6,13 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+# CoreAudio's HAL, entered through `AudioDeviceCreateIOProcID` on the default
+# output device and driven by the HAL's own real-time thread. Nothing off macOS
+# has that device layer, so this crate has to be named in the Windows job's
+# exclusions and states here that it does.
+[package.metadata.lanplay]
+platforms = ["macos"]
+
 [[bin]]
 name = "audio-render-probe"
 path = "src/bin/probe.rs"

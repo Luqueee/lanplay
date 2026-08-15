@@ -6,6 +6,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+# `CGWarpMouseCursorPosition` and synthetic `CGEvent`s posted into the HID tap,
+# which is how a Mac generates pointer motion no real device produced.
+[package.metadata.lanplay]
+platforms = ["macos"]
+
 [[bin]]
 name = "mouse-mover"
 path = "src/main.rs"

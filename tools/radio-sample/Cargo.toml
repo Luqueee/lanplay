@@ -6,6 +6,15 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+# The Wi-Fi association this samples - RSSI, noise, transmit rate, channel -
+# is only reported by CoreWLAN, so `lanplay_capabilities::wifi` exists solely
+# on macOS and this binary cannot compile without it. That absence used to
+# surface on Windows as `cannot find wifi in lanplay_capabilities`, an error
+# that named the symbol and not the reason; the declaration is what turns it
+# back into a statement about platforms.
+[package.metadata.lanplay]
+platforms = ["macos"]
+
 [[bin]]
 name = "radio-sample"
 path = "src/main.rs"

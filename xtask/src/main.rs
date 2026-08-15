@@ -1,6 +1,6 @@
 //! Repository automation that is too long-winded to keep in a shell script.
 //!
-//! Three things live here. `gate-1c` is the clean display baseline: it drives a
+//! Four things live here. `gate-1c` is the clean display baseline: it drives a
 //! Windows sender over SSH into the macOS client on this machine, and its
 //! whole reason to exist is to refuse to report a number it cannot trust.
 //! `gates` answers the question that costs the most time when working
@@ -8,11 +8,15 @@
 //! and out of what the machine can be seen to have, rather than out of
 //! somebody rereading eighteen shell scripts. `verdict` reads the envelope a
 //! probe emitted and decides, so that no harness parses another program's
-//! prose ever again.
+//! prose ever again. `platforms` checks the Windows job's exclude list against
+//! what each crate declares it supports, which is what the workflow's comment
+//! about failing loudly claimed and, until a macOS-only crate arrived there as
+//! an error about a missing module, did not have.
 
 mod envelope;
 mod environment;
 mod gates;
+mod platforms;
 mod preflight;
 mod report;
 mod run;
@@ -51,6 +55,8 @@ enum Command {
     Gate1c(Box<Gate1c>),
     /// What every harness proves, what it needs, and what can run right now.
     Gates(GatesArgs),
+    /// The windows job's exclude list against what each crate says it supports.
+    Platforms,
     /// Decide one gate run from the envelope its probe emitted.
     Verdict(VerdictArgs),
 }
@@ -127,6 +133,20 @@ fn main() -> ExitCode {
             }
             Err(Abort(why)) => {
                 eprintln!("gates: {why}");
+                ExitCode::from(2)
+            }
+        },
+        Command::Platforms => match platforms::audit(&platforms::default_workflow()) {
+            Ok((report, agreed)) => {
+                print!("{report}");
+                if agreed {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::from(1)
+                }
+            }
+            Err(Abort(why)) => {
+                eprintln!("platforms: {why}");
                 ExitCode::from(2)
             }
         },
