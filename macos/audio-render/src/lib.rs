@@ -1,14 +1,21 @@
-//! Synthetic PCM out of a Mac's real output device, so that the numbers the
-//! rest of the audio path has been designed against stop being assumptions.
+//! A Mac's real output device, and the two things this project sends through
+//! it.
 //!
-//! What this phase has to establish is small and entirely local: what sample
-//! rate and channel count the output device is actually at, how many frames it
-//! asks for per IO cycle after being told what to use, how regularly it asks,
-//! and whether a bounded ring fed by an ordinary thread can stay ahead of it
-//! for five minutes without a gap. Nothing here decodes, receives or converts;
-//! the jitter buffer's synthetic sink in `crates/audio-codec` is what this
-//! replaces with a real render callback, and everything upstream of that sink
-//! stays where it is.
+//! The first is synthetic PCM, so that the numbers the rest of the audio path
+//! has been designed against stop being assumptions: what sample rate and
+//! channel count the output device is actually at, how many frames it asks for
+//! per IO cycle after being told what to use, how regularly it asks, and
+//! whether a bounded ring fed by an ordinary thread can stay ahead of it for
+//! five minutes without a gap. That is [`run`], and it decodes and receives
+//! nothing.
+//!
+//! The second is the far end of the stream. [`receive`] takes RTP off a socket,
+//! orders it through `lanplay-audio-codec`'s jitter buffer, decodes it with
+//! Opus and fills the same ring the tone probe fills, so the sink the buffer
+//! was measured against in the phase before this one is finally a device
+//! instead of a clock. Both run the same callback out of [`stream`], because a
+//! second copy of it would be a second place for the buffer-layout check and
+//! the zero-fill to disagree, and the disagreement would only ever be heard.
 //!
 //! # The route, and what was rejected
 //!
@@ -86,7 +93,13 @@ pub mod ring;
 #[cfg(target_os = "macos")]
 pub mod device;
 #[cfg(target_os = "macos")]
+pub mod receive;
+#[cfg(target_os = "macos")]
+pub mod receive_envelope;
+#[cfg(target_os = "macos")]
 pub mod run;
+#[cfg(target_os = "macos")]
+pub mod stream;
 
 pub use format::{Layout, OutputFormat, SampleKind};
 pub use report::{Report, Verdict};
@@ -94,5 +107,7 @@ pub use ring::{Drained, Filled, PcmRing};
 
 #[cfg(target_os = "macos")]
 pub use device::Error;
+#[cfg(target_os = "macos")]
+pub use receive::{Receipt, ReceiveError, ReceiveOptions, receive};
 #[cfg(target_os = "macos")]
 pub use run::{LEVEL_DBFS, Options, run};

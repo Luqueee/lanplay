@@ -120,6 +120,15 @@ minutes = 6
 negative_control = "the producer at default priority: it underran ten times in three hundred seconds, and that arrangement is what the promoted one has to beat"
 notes = "five minutes because a twenty second run called the broken arrangement clean two times out of three"
 
+[gates.audio-e2e-gate]
+script = "tools/audio-e2e-gate.sh"
+proves = "Windows loopback to Opus to RTP to the jitter buffer to CoreAudio holds continuous audio over a minute and over ten"
+phase = "A6"
+requires = ["windows-host", "radio", "audio-endpoint", "audio-output"]
+minutes = 15
+negative_control = "the broken-link arm: udp-fault holds every datagram for 400 ms every 2 s, forty times the jitter target, so what arrives is past its moment and continuity breaks. The arm must fail, and the gate fails if it passes"
+notes = "the deciding counter is continuity, samples expected against played, because concealment counts as played and an underrun does not - a run whose underruns are zero because the concealer ran throughout carried nothing. The sender runs in the interactive session through win-session.sh since session 0 has no audio endpoints, and it is built on the host because libopus needs the cmake inside BuildTools. Refuses rather than reports when the host, the radio, the endpoint, the output device or an envelope is missing"
+
 # ---------------------------------------------------------------------------
 # Video
 # ---------------------------------------------------------------------------

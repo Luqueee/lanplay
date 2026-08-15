@@ -24,6 +24,13 @@ path = "src/bin/audio_rtp_probe.rs"
 name = "audio-jitter-probe"
 path = "src/bin/audio_jitter_probe.rs"
 
+# The host's A6 sender: loopback capture, Opus and RTP in one process. Here
+# rather than in `windows/audio-capture` because this crate already depends on
+# that one, so the dependency it needs would be a cycle the other way.
+[[bin]]
+name = "audio-e2e-sender"
+path = "src/bin/audio_e2e_sender.rs"
+
 [dependencies]
 lanplay-audio-capture = { workspace = true }
 lanplay-telemetry = { workspace = true }

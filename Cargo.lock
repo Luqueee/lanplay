@@ -320,11 +320,15 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "lanplay-audio-capture",
+ "lanplay-audio-codec",
  "lanplay-telemetry",
  "lanplay-tone-source",
+ "lanplay-transport",
  "objc2-core-audio",
  "objc2-core-audio-types",
  "objc2-core-foundation",
+ "parking_lot",
+ "serde_json",
 ]
 
 [[package]]

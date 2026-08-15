@@ -55,6 +55,16 @@
 //! itself and holds no socket; [`jitter_probe`] is the run that drives it with
 //! a synthetic sink, and nothing in [`jitter`] knows either exists.
 //!
+//! The host's sender lives here for a third instance of the same reason, and
+//! this time it is a component rather than an instrument. It captures the
+//! endpoint mix through `lanplay-audio-capture`, encodes it and puts it on a
+//! socket, so it needs libopus and the WASAPI session at once — and the capture
+//! crate cannot be where it goes, because this crate already depends on that
+//! one and a dependency the other way would be a cycle. [`e2e_sender`] is the
+//! path and [`e2e_envelope`] is the gate document it emits; the split
+//! arithmetic that turns one captured packet into two frames is plain Rust and
+//! is exercised on any machine.
+//!
 //! Discontinuous transmission and in-band forward error correction are both
 //! off, and both are off on purpose. Each spends or withholds bytes according
 //! to conditions this phase does not create — silence for the first, packet
@@ -78,6 +88,8 @@
 
 pub mod config;
 pub mod decoder;
+pub mod e2e_envelope;
+pub mod e2e_sender;
 pub mod encoder;
 pub mod envelope;
 pub mod error;

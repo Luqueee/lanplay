@@ -17,6 +17,15 @@ platforms = ["macos"]
 name = "audio-render-probe"
 path = "src/bin/probe.rs"
 
+# The receiving end of the whole audio path, which needs libopus's decoder and
+# its concealer and so cannot be cross-compiled from a machine without a C
+# toolchain. It lives here rather than beside the codec because CoreAudio does:
+# this is the crate that owns the ring and the render callback, and a binary
+# that reimplemented either would be a second place for them to be wrong.
+[[bin]]
+name = "audio-e2e-receiver"
+path = "src/bin/e2e_receiver.rs"
+
 [dependencies]
 # `Samples` and `Percentiles` come from the capture crate rather than being
 # written again here. Both are plain arithmetic, tested off Windows, and
@@ -25,6 +34,10 @@ path = "src/bin/probe.rs"
 lanplay-audio-capture = { workspace = true }
 lanplay-tone-source = { workspace = true }
 lanplay-telemetry = { workspace = true }
+lanplay-audio-codec = { workspace = true }
+lanplay-transport = { workspace = true }
+parking_lot = { workspace = true }
+serde_json = { workspace = true }
 clap = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]

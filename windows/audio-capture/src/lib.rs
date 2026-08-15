@@ -27,10 +27,18 @@
 //! dominant frequency it found, which is also what proves the two channels
 //! carry different signals and are therefore not one channel read twice.
 //!
-//! What is deliberately absent: no resampling, no format conversion, no
-//! encoding, no process loopback, no network. Learning the real format is the
-//! point, and code that converted it away would have thrown the answer out
-//! before printing it.
+//! What is deliberately absent from the instrument: no resampling, no format
+//! conversion, no encoding, no process loopback, no network. Learning the real
+//! format is the point, and code that converted it away would have thrown the
+//! answer out before printing it.
+//!
+//! Two things here are components rather than instruments, and both exist
+//! because a later phase had to drive the endpoint instead of reporting on it.
+//! [`session`] is the same loopback stream handed over packet by packet, so
+//! that a sender can encode one while the next is still arriving.
+//! [`scheduling`] asks Windows for the periodic-media scheduling such a thread
+//! needs and states what it was granted, which is the registration the capture
+//! probe's ordinary-thread baseline was always meant to be judged against.
 //!
 //! Everything except the WASAPI calls themselves is platform independent and
 //! tested off Windows, because the arithmetic that matters -- position
@@ -44,16 +52,22 @@ pub mod format;
 pub mod goertzel;
 pub mod probe;
 pub mod report;
+pub mod scheduling;
 pub mod wav;
 
 #[cfg(windows)]
 pub mod capture;
+#[cfg(windows)]
+pub mod session;
 
 pub use accounting::{Accounting, Deviation, Packet, Percentiles, Samples, Totals};
 pub use analysis::{ToneReport, analyse};
 pub use format::{MixFormat, RawWaveFormat, SampleKind};
 pub use goertzel::Tone;
 pub use report::{Report, Verdict, Wakeup};
+pub use scheduling::{PRO_AUDIO, ProAudio, Scheduling};
 
 #[cfg(windows)]
 pub use capture::{CaptureError, Captured, Request};
+#[cfg(windows)]
+pub use session::Loopback;

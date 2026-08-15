@@ -57,11 +57,9 @@ use std::time::Duration;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Media::Audio::{
-    AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY, AUDCLNT_BUFFERFLAGS_SILENT,
-    AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR, AUDCLNT_SHAREMODE_SHARED,
-    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK, IAudioCaptureClient,
-    IAudioClient, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, WAVEFORMATEX,
-    WAVEFORMATEXTENSIBLE, eConsole, eRender,
+    AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK,
+    IAudioCaptureClient, IAudioClient, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator,
+    WAVEFORMATEX, WAVEFORMATEXTENSIBLE, eConsole, eRender,
 };
 use windows::Win32::Media::{timeBeginPeriod, timeEndPeriod};
 use windows::Win32::System::Com::StructuredStorage::PropVariantClear;
@@ -74,10 +72,11 @@ use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 use windows::Win32::System::Variant::VT_LPWSTR;
 use windows::core::PCWSTR;
 
-use crate::accounting::{Accounting, Packet, Samples};
+use crate::accounting::{Accounting, Samples};
 use crate::analysis::analyse;
 use crate::format::{FormatError, MixFormat, RawExtensible, RawWaveFormat, WAVE_FORMAT_EXTENSIBLE};
 use crate::report::{Report, Wakeup};
+use crate::session::packet;
 
 /// What the caller wants captured.
 pub struct Request {
@@ -116,14 +115,14 @@ impl fmt::Display for CaptureError {
     }
 }
 
-fn api(stage: &'static str) -> impl Fn(windows::core::Error) -> CaptureError {
+pub(crate) fn api(stage: &'static str) -> impl Fn(windows::core::Error) -> CaptureError {
     move |error| CaptureError::Api { stage, error }
 }
 
 /// Restores the timer resolution however the run ends, including a panic in the
 /// middle of it, because leaving a machine at a one millisecond tick is a
 /// change to every other process on it.
-struct TimerResolution(u32);
+pub(crate) struct TimerResolution(pub(crate) u32);
 
 impl Drop for TimerResolution {
     fn drop(&mut self) {
@@ -135,7 +134,7 @@ impl Drop for TimerResolution {
     }
 }
 
-struct ComApartment;
+pub(crate) struct ComApartment;
 
 impl Drop for ComApartment {
     fn drop(&mut self) {
@@ -164,7 +163,7 @@ impl Drop for TaskMemory {
     }
 }
 
-struct EventHandle(HANDLE);
+pub(crate) struct EventHandle(pub(crate) HANDLE);
 
 impl Drop for EventHandle {
     fn drop(&mut self) {
@@ -179,12 +178,12 @@ impl Drop for EventHandle {
 }
 
 /// An initialised client and everything the endpoint said while opening it.
-struct Opened {
-    client: IAudioClient,
-    format: MixFormat,
-    default_period_ms: f64,
-    minimum_period_ms: f64,
-    buffer_frames: u32,
+pub(crate) struct Opened {
+    pub(crate) client: IAudioClient,
+    pub(crate) format: MixFormat,
+    pub(crate) default_period_ms: f64,
+    pub(crate) minimum_period_ms: f64,
+    pub(crate) buffer_frames: u32,
 }
 
 /// Runs one capture and returns what it found.
@@ -355,15 +354,9 @@ unsafe fn capture(request: &Request) -> Result<Captured, CaptureError> {
                     break;
                 }
 
-                let silent = flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0;
-                account.record(&Packet {
-                    device_position,
-                    frames,
-                    qpc_100ns: qpc_position,
-                    discontinuity: flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY.0 as u32 != 0,
-                    silent,
-                    timestamp_error: flags & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR.0 as u32 != 0,
-                });
+                let described = packet(device_position, frames, qpc_position, flags);
+                let silent = described.silent;
+                account.record(&described);
                 packet_frames.record(u64::from(frames));
 
                 let bytes = frames as usize * frame_bytes;
@@ -423,7 +416,7 @@ unsafe fn capture(request: &Request) -> Result<Captured, CaptureError> {
 }
 
 /// Half the default device period, floored at a millisecond.
-fn poll_interval_ms(default_period_ms: f64) -> f64 {
+pub(crate) fn poll_interval_ms(default_period_ms: f64) -> f64 {
     (default_period_ms / 2.0).max(1.0)
 }
 
@@ -446,7 +439,7 @@ fn micros(ticks: i64, ticks_per_second: f64) -> u64 {
 }
 
 /// Activates a client on the endpoint and initialises a loopback stream on it.
-unsafe fn open(device: &IMMDevice, event_driven: bool) -> Result<Opened, CaptureError> {
+pub(crate) unsafe fn open(device: &IMMDevice, event_driven: bool) -> Result<Opened, CaptureError> {
     unsafe {
         let client: IAudioClient = device
             .Activate(CLSCTX_ALL, None)
@@ -532,7 +525,7 @@ unsafe fn read_wave_format(pointer: *const WAVEFORMATEX) -> RawWaveFormat {
 /// A missing name is not worth failing a run over, but it must not be reported
 /// as an empty string either: a report whose endpoint line is blank looks like
 /// a formatting bug rather than a property store that refused.
-unsafe fn endpoint_name(device: &IMMDevice) -> String {
+pub(crate) unsafe fn endpoint_name(device: &IMMDevice) -> String {
     unsafe {
         let Ok(store) = device.OpenPropertyStore(STGM_READ) else {
             return "<property store unavailable>".to_owned();

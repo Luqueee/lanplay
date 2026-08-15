@@ -1,0 +1,266 @@
+{
+  "checks": [
+    {
+      "kind": "must_not_be_zero",
+      "name": "the stream arrived",
+      "reads": "rtp_received",
+      "why": "every figure in this document is computed over these datagrams, so a run that received none makes each of them an absence rather than a number"
+    },
+    {
+      "kind": "must_not_be_zero",
+      "name": "audio was decoded and not merely concealed",
+      "reads": "frames_played",
+      "why": "the concealer produces plausible samples from an empty stream indefinitely, so a callback count, an underrun count of zero and a continuity figure are all consistent with a path that carried nothing; a decoded frame is not"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "every sample the stream produced reached the device",
+      "population": "samples_expected",
+      "reads": "continuity_hole",
+      "why": "this is the criterion the phase turns on: expected counts every per-channel sample the playout cursor travelled and played counts the ones the producer deposited, with a gap concealment credited because the waveform continued across it and an underrun refused because nothing of the stream was there. The population is the expected samples, because a hole of zero over an expectation of zero is a run that carried nothing"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "the device was never handed silence",
+      "population": "render_callbacks",
+      "reads": "render_underruns",
+      "why": "a cycle the ring could not fill is a whole IO buffer of silence sent to a device in place of audio, which is audible however small the sample count beside it looks; the population is the cycles, because no cycles means no silence for a trivial reason"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "no frame arrived in time and failed to decode",
+      "population": "frames_played",
+      "reads": "decode_failures",
+      "why": "a payload the decoder refuses is a disagreement between the two ends about the format, which no amount of buffering repairs and which concealment hides completely in every other counter here"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "no packet carried a timestamp off the frame grid",
+      "population": "rtp_received",
+      "reads": "rtp_off_grid",
+      "why": "a timestamp that is not a whole number of frames from the one that anchored the stream is a sender running at another frame duration, and the symptom is a run that conceals everything and plays nothing"
+    },
+    {
+      "bound": 500.0,
+      "kind": "must_be_below",
+      "name": "decode p99 under a tenth of the frame",
+      "reads": "decode_p99_us",
+      "why": "a tenth of the 5 ms frame is 500 us, and the producer has to decode and deposit inside its period or the device finds an empty ring; p99 rather than the mean, because a frame late once every hundred is a click a listener hears"
+    },
+    {
+      "kind": "must_be_within",
+      "name": "the left channel arrives as its own tone",
+      "reads": "tone_left_hz",
+      "target": 997.0,
+      "tolerance": 5.0,
+      "why": "a packet count and a callback count agree just as happily when the path carries digital silence, and this project has read that agreement as success; 997 Hz comes out of the samples that were played, at a window resolution of 2 Hz"
+    },
+    {
+      "kind": "must_be_within",
+      "name": "the right channel arrives as its own tone",
+      "reads": "tone_right_hz",
+      "target": 1997.0,
+      "tolerance": 5.0,
+      "why": "the two channels carry different frequencies so that channel order is provable across the whole link rather than assumed, and a right channel reading 997 Hz is what a swap looks like"
+    },
+    {
+      "kind": "must_not_be_zero",
+      "name": "the played channels stay distinct",
+      "reads": "tone_channels_distinct",
+      "why": "two channels reading one frequency is consistent with a fold to mono, with one channel encoded twice, and with an analysis reading its own scratch buffer, and every count in this document is consistent with all three"
+    }
+  ],
+  "declared": [
+    "rtp receive",
+    "jitter buffer",
+    "opus decode",
+    "coreaudio render"
+  ],
+  "environment": {
+    "channels": 2,
+    "device": "Altavoces del MacBook Pro",
+    "device_span_s": 59.972922208,
+    "frame_ms": 5,
+    "io_buffer_frames": 256,
+    "jitter_ceiling_ms": 30.0,
+    "jitter_slots": 8,
+    "jitter_target_ms": 10.0,
+    "measurements_dropped": 0,
+    "producer_scheduled_as": "time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms",
+    "receiver_scheduled_as": "time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms",
+    "ring_frames": 4096,
+    "ring_prime_frames": 496,
+    "sample_rate_hz": 48000,
+    "ssrc": 996632666,
+    "windows": [
+      {
+        "continuity_hole": 10560,
+        "frames_played": 1957,
+        "jitter_underruns": 44,
+        "plc_frames": 44,
+        "render_callbacks": 1876,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2002,
+        "samples_expected": 480240,
+        "samples_played": 469680,
+        "seconds": 10.0053475
+      },
+      {
+        "continuity_hole": 19200,
+        "frames_played": 1920,
+        "jitter_underruns": 80,
+        "plc_frames": 80,
+        "render_callbacks": 1875,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2000,
+        "samples_expected": 480000,
+        "samples_played": 460800,
+        "seconds": 10.003861375
+      },
+      {
+        "continuity_hole": 15600,
+        "frames_played": 1937,
+        "jitter_underruns": 65,
+        "plc_frames": 65,
+        "render_callbacks": 1876,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2002,
+        "samples_expected": 480480,
+        "samples_played": 464880,
+        "seconds": 10.006154208
+      },
+      {
+        "continuity_hole": 16560,
+        "frames_played": 1931,
+        "jitter_underruns": 69,
+        "plc_frames": 69,
+        "render_callbacks": 1876,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2000,
+        "samples_expected": 480000,
+        "samples_played": 463440,
+        "seconds": 10.000478167
+      },
+      {
+        "continuity_hole": 10080,
+        "frames_played": 1958,
+        "jitter_underruns": 42,
+        "plc_frames": 42,
+        "render_callbacks": 1875,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 1996,
+        "samples_expected": 480000,
+        "samples_played": 469920,
+        "seconds": 10.001733083
+      },
+      {
+        "continuity_hole": 15120,
+        "frames_played": 1930,
+        "jitter_underruns": 63,
+        "plc_frames": 63,
+        "render_callbacks": 1868,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 1996,
+        "samples_expected": 478320,
+        "samples_played": 463200,
+        "seconds": 9.964996709
+      }
+    ]
+  },
+  "exercised": [
+    "rtp receive",
+    "jitter buffer",
+    "opus decode",
+    "coreaudio render"
+  ],
+  "findings": [
+    "0.000 per cent of the stream was lost over the link, 0 packets of the 12003 the sequence numbers describe",
+    "frames arrived -12.6 ms past their moment at p50, -8.3 at p95, 15.2 at p99 and 75.5 at worst, against a target of 10 ms; negative is margin in hand, and the shape is what says whether the target is short by a fixed amount every frame pays or long enough for all but a tail",
+    "the jitter buffer held 10.0 ms at p50 and 15.0 ms at p99 against a 10 ms target, measured after serving each frame",
+    "the ring sat at 1120 frames of 4096 at p50, having been primed to 496; the difference is the 10.9 ms `AudioDeviceStart` spent getting the device going, during which the producer kept depositing and the device consumed nothing, so it is the ring's contribution to latency and it belongs to the device rather than to the link"
+  ],
+  "gate": "audio-e2e-gate",
+  "observations": {
+    "arrival_delay_max_ms": 75.537,
+    "arrival_delay_min_ms": -18.122,
+    "arrival_delay_p50_ms": -12.573,
+    "arrival_delay_p95_ms": -8.328,
+    "arrival_delay_p99_ms": 15.21,
+    "continuity_hole": 87120,
+    "deadlines_granted": 1,
+    "decode_failures": 0,
+    "decode_max_us": 66,
+    "decode_p50_us": 6,
+    "decode_p99_us": 13,
+    "device_start_latency_ms": 10.852875,
+    "frames_played": 11637,
+    "jitter_occupancy_max_ms": 15,
+    "jitter_occupancy_p50_ms": 10,
+    "jitter_occupancy_p95_ms": 15,
+    "jitter_occupancy_p99_ms": 15,
+    "jitter_overrun_frames": 0,
+    "jitter_overruns": 0,
+    "jitter_underruns": 363,
+    "plc_frames": 363,
+    "producer_interval_p50_us": 5000,
+    "producer_interval_p99_us": 5000,
+    "render_callbacks": 11246,
+    "render_frames_consumed": 2878976,
+    "render_interval_p50_us": 5333,
+    "render_interval_p99_us": 5350,
+    "render_odd_cycles": 0,
+    "render_overrun_frames": 0,
+    "render_overruns": 0,
+    "render_underrun_frames": 0,
+    "render_underruns": 0,
+    "ring_occupancy_max_frames": 1232,
+    "ring_occupancy_min_frames": 992,
+    "ring_occupancy_p50_frames": 1120,
+    "rtp_duplicate": 0,
+    "rtp_expected": 12003,
+    "rtp_foreign_ssrc": 0,
+    "rtp_late": 363,
+    "rtp_lost": 0,
+    "rtp_off_grid": 0,
+    "rtp_oversize": 0,
+    "rtp_received": 12003,
+    "rtp_reordered": 0,
+    "rtp_unique": 12003,
+    "samples_expected": 2880000,
+    "samples_played": 2792880,
+    "tone_analysed_frames": 24000,
+    "tone_channels_distinct": 1,
+    "tone_left_dbfs": -19.677818242350128,
+    "tone_left_hz": 997.0001307355625,
+    "tone_resolution_hz": 2,
+    "tone_right_dbfs": -19.690014906221748,
+    "tone_right_hz": 1997.001985258168,
+    "windows": 6,
+    "worst_window_hole": 19200
+  },
+  "run": {
+    "args": {
+      "bind": "0.0.0.0:5012",
+      "buffer_frames": 256,
+      "frame_ms": 5,
+      "ring_frames": 4096,
+      "target_ms": 10.0
+    },
+    "arm": "clean-60s",
+    "commit": "4a117e2",
+    "span_s": 60.008934208,
+    "started_unix_ms": 1786814572743
+  }
+}
