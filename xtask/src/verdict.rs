@@ -2,9 +2,20 @@
 //! verdict is decided.
 //!
 //! Nothing here measures anything and nothing here parses prose. An envelope
-//! goes in, a block of text and a pass or a fail come out, and the whole of it
-//! is exercised over fixture documents on any machine at any hour, which is
+//! goes in, a block of text and one of three answers come out, and the whole of
+//! it is exercised over fixture documents on any machine at any hour, which is
 //! what a harness that shelled out to Python for the same judgement never was.
+//!
+//! Three answers rather than two, because the two-way return this had until now
+//! was itself the defect. A check whose observation is missing is unavailable,
+//! an unavailable check was collected into no list of failures, and so a run
+//! whose deciding criterion had never been read printed PASS on the line under
+//! the one naming the criterion it could not read. The distinction that has to
+//! survive is that a criterion which was evaluated and disagreed is a failure,
+//! while one that could not be evaluated at all is a refusal - the run was in no
+//! position to answer, which is neither a pass nor a failure. A run holding both
+//! is a failure, since a criterion that actually disagreed is a stronger
+//! statement than one nobody could read.
 //!
 //! Two rules live here rather than in each probe, because both were already
 //! implemented several times and each implementation was a chance to differ.
@@ -21,9 +32,22 @@ use crate::envelope::{Check, Criterion, Envelope};
 pub enum Outcome {
     Pass,
     Fail,
-    /// The check could not be decided. Not a pass: a gate holding one of these
-    /// says which and why, and does not claim what it did not test.
+    /// The check could not be decided. Not a pass and not a failure either: a
+    /// gate holding one of these refuses, says which and why, and claims
+    /// nothing about it in either direction.
     Unavailable,
+}
+
+/// What a whole run is in a position to say about itself, in the three answers
+/// the harnesses here have exchanged as 0, 1 and 2 since before this module
+/// existed and which it could not express.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Verdict {
+    Passed,
+    Failed,
+    /// Nothing here disagreed with a criterion; one of them simply could not be
+    /// read, so there is no answer to report in either direction.
+    Refused,
 }
 
 pub struct Judgement<'a> {
@@ -115,8 +139,8 @@ fn unavailable<'a>(check: &'a Check, detail: String) -> Judgement<'a> {
     }
 }
 
-/// The block a person reads, and whether the run passed.
-pub fn report(envelope: &Envelope) -> (String, bool) {
+/// The block a person reads, and which of the three answers the run earned.
+pub fn report(envelope: &Envelope) -> (String, Verdict) {
     let judgements: Vec<Judgement<'_>> = envelope
         .checks
         .iter()
@@ -233,26 +257,48 @@ pub fn report(envelope: &Envelope) -> (String, bool) {
     }
 
     out.push('\n');
-    if failures.is_empty() {
-        let held = judgements.len() - untested.len();
+    let held = judgements.len() - untested.len();
+    if failures.is_empty() && untested.is_empty() {
         let _ = writeln!(
             out,
             "PASS {held} of {} checks hold and every declared subsystem was exercised",
             judgements.len()
         );
-        if !untested.is_empty() {
-            let _ = writeln!(
-                out,
-                "     {} could not be tested and is named above, so this run does not claim it",
-                untested.len()
-            );
+        return (out, Verdict::Passed);
+    }
+    if failures.is_empty() {
+        // The name and the reason again, under the verdict as well as in the
+        // section above it, because this is the line a harness quotes and an
+        // agent reads back a month later. A refusal that did not carry the
+        // observation it wanted sends its reader into the document to work out
+        // which of forty numbers was the absent one.
+        for judged in &untested {
+            let _ = writeln!(out, "REFUSE {}: {}", judged.check.name, judged.detail);
+            let _ = writeln!(out, "       {}", judged.check.why);
         }
-        return (out, true);
+        let _ = writeln!(
+            out,
+            "       {held} of {} checks hold, and a run that could not read the rest has \
+             answered neither way",
+            judgements.len()
+        );
+        return (out, Verdict::Refused);
     }
     for failure in &failures {
         let _ = writeln!(out, "FAIL {failure}");
     }
-    (out, false)
+    if !untested.is_empty() {
+        // Said where the two answers could be confused: a criterion that was
+        // read and disagreed says more about the run than one nobody could
+        // read, so the stronger of the two stands and this is not a refusal.
+        let _ = writeln!(
+            out,
+            "     {} more could not be evaluated at all and is named above, which does not \
+             soften a criterion that was read and disagreed",
+            untested.len()
+        );
+    }
+    (out, Verdict::Failed)
 }
 
 fn section(
@@ -347,10 +393,11 @@ mod tests {
             judged.detail
         );
 
-        let (text, passed) = report(&envelope);
-        assert!(
-            passed,
-            "an unavailable check does not fail the run on its own"
+        let (text, answer) = report(&envelope);
+        assert_eq!(
+            answer,
+            Verdict::Refused,
+            "an unavailable check is not a pass, and a run resting on one has not answered"
         );
         assert!(
             text.contains("what could not be tested"),
@@ -369,8 +416,8 @@ mod tests {
         assert_eq!(judged.outcome, Outcome::Pass);
         assert_eq!(judged.detail, "0 over 6001 packets");
 
-        let (text, passed) = report(&envelope);
-        assert!(passed);
+        let (text, answer) = report(&envelope);
+        assert_eq!(answer, Verdict::Passed);
         assert!(text.contains("what must be zero"), "{text}");
         assert!(!text.contains("what could not be tested"), "{text}");
     }
@@ -378,8 +425,8 @@ mod tests {
     #[test]
     fn a_non_zero_over_a_real_population_fails_and_the_failure_carries_its_numbers() {
         let envelope = envelope(r#""gaps": 3, "packets": 6001"#, ZERO_OVER_PACKETS);
-        let (text, passed) = report(&envelope);
-        assert!(!passed);
+        let (text, answer) = report(&envelope);
+        assert_eq!(answer, Verdict::Failed);
         assert!(
             text.contains("FAIL no position gaps: 3 over 6001 packets"),
             "{text}"
@@ -406,7 +453,11 @@ mod tests {
             "{}",
             judged.detail
         );
-        assert!(report(&envelope).1, "it does not fail the run on its own");
+        assert_eq!(
+            report(&envelope).1,
+            Verdict::Refused,
+            "and a criterion nobody could read is a refusal rather than a pass"
+        );
     }
 
     #[test]
@@ -481,8 +532,12 @@ mod tests {
                  "why": "every percentile below is computed over these" }"#,
             r#""declared": ["encoder", "decoder"], "exercised": ["encoder"]"#,
         );
-        let (text, passed) = report(&envelope);
-        assert!(!passed, "every check held, and the run still fails: {text}");
+        let (text, answer) = report(&envelope);
+        assert_eq!(
+            answer,
+            Verdict::Failed,
+            "every check held, and the run still fails: {text}"
+        );
         assert!(
             text.contains("FAIL decoder was declared and nothing exercised it"),
             "{text}"
@@ -496,8 +551,8 @@ mod tests {
     #[test]
     fn a_run_that_states_no_check_cannot_pass() {
         let envelope = envelope(r#""packets": 6001"#, "");
-        let (text, passed) = report(&envelope);
-        assert!(!passed);
+        let (text, answer) = report(&envelope);
+        assert_eq!(answer, Verdict::Failed);
         assert!(
             text.contains("FAIL the run states no check at all"),
             "{text}"
@@ -512,8 +567,8 @@ mod tests {
             r#""declared": [], "exercised": [],
                "findings": ["the endpoint is 48 kHz stereo, so the path to Opus needs no resampler"]"#,
         );
-        let (text, passed) = report(&envelope);
-        assert!(!passed);
+        let (text, answer) = report(&envelope);
+        assert_eq!(answer, Verdict::Failed);
         let finding = text
             .find("FINDING the endpoint is 48 kHz stereo")
             .expect("the finding is reported");
@@ -523,6 +578,63 @@ mod tests {
         assert!(
             finding < failure,
             "and the finding is above the verdict, so it survives it: {text}"
+        );
+    }
+
+    #[test]
+    fn a_criterion_that_was_read_and_disagreed_is_a_failure() {
+        let envelope = envelope(r#""gaps": 3, "packets": 6001"#, ZERO_OVER_PACKETS);
+        let (text, answer) = report(&envelope);
+        assert_eq!(answer, Verdict::Failed);
+        assert!(
+            !text.contains("REFUSE"),
+            "a criterion that was read and disagreed is not a refusal: {text}"
+        );
+    }
+
+    #[test]
+    fn a_criterion_that_could_not_be_read_is_a_refusal_that_names_what_was_missing() {
+        let envelope = envelope(
+            r#""packets": 6001"#,
+            r#"{ "name": "continuity", "kind": "must_be_zero", "reads": "continuity_hole",
+                 "population": "samples_expected",
+                 "why": "concealment counts as played and an underrun does not, so this is what tells a carried run from an empty one" }"#,
+        );
+        let (text, answer) = report(&envelope);
+        assert_eq!(answer, Verdict::Refused);
+        assert!(
+            text.contains("REFUSE continuity: nothing named continuity_hole was observed"),
+            "the verdict names the observation, so nobody has to open the document: {text}"
+        );
+        assert!(
+            !text.contains("PASS"),
+            "and it never reads as a pass: {text}"
+        );
+    }
+
+    #[test]
+    fn a_run_holding_both_a_disagreement_and_an_unread_criterion_is_a_failure() {
+        let envelope = envelope(
+            r#""gaps": 3, "packets": 6001"#,
+            &format!(
+                r#"{ZERO_OVER_PACKETS}, {{ "name": "continuity", "kind": "must_be_zero",
+                     "reads": "continuity_hole", "population": "samples_expected",
+                     "why": "a run whose continuity was never measured is not a run that held continuity" }}"#
+            ),
+        );
+        let (text, answer) = report(&envelope);
+        assert_eq!(
+            answer,
+            Verdict::Failed,
+            "a criterion that disagreed says more than one nobody could read: {text}"
+        );
+        assert!(
+            text.contains("FAIL no position gaps: 3 over 6001 packets"),
+            "{text}"
+        );
+        assert!(
+            text.contains("1 more could not be evaluated at all"),
+            "and the unread one is still counted rather than dropped: {text}"
         );
     }
 

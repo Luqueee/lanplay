@@ -162,11 +162,12 @@ notes = "needs several sessions and refuses a run too short to sample the phase"
 
 [gates.wifi-matrix]
 script = "tools/wifi-matrix.sh"
-proves = "which channel and width the link should use, ranked"
+proves = "whether the link or the pipeline is what limits cadence, for one sender configuration"
 phase = "video"
 requires = ["windows-host", "radio", "mac-h264-decode"]
 minutes = 20
 negative_control = "none yet"
+notes = "the name promises more than the script does: it takes one label, duration, fps and pacer per invocation and cannot change the radio's channel or width, so a ranking is something a person assembles from several runs. Described as ranking channels until an audio tail was diagnosed and this was reached for as the instrument that would settle it"
 
 [gates.bitrate-sweep]
 script = "tools/bitrate-sweep.sh"

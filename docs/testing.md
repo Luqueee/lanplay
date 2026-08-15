@@ -147,6 +147,15 @@ with any `unavailable` check reports which and why, and does not claim what it d
 test - the pattern that let A3 close honestly on correctness while stating that loss
 over the air was owed rather than given.
 
+`xtask verdict` says so with its exit code: 0 passed, 1 a criterion was evaluated and
+disagreed, **2 a criterion could not be evaluated at all**. A run holding both is a
+failure, because a criterion that actually disagreed is a stronger statement than one
+nobody could read. This paragraph was true and unenforced for a while: `report()`
+collected only failures, so an unreadable deciding check was printed under "what could
+not be tested" and the verdict above it said `PASS`. A6's harness found it while wiring
+itself and had to insist on ten observation keys by name to protect itself; that
+insistence stays, as a second lock on a door that is now shut.
+
 ### 3. A mandatory negative control
 
 Every gate declares an invocation that is expected to fail, and the harness runs it.

@@ -85,8 +85,17 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # Built before anything is timed. Compiling inside an arm would put a linker on
-# the cores the producer needs and charge it to the control plane.
-cargo test -q -p lanplay-transport --test control --no-run
+# the cores the producer needs and charge it to the control plane. A build that
+# fails is refused here rather than left to leave with cargo's own code, which is
+# none of the three answers stated above: an instrument that would not compile
+# measured nothing, and a caller reading 101 as a failed claim would be told this
+# gate had an opinion about isolation.
+cargo test -q -p lanplay-transport --test control --no-run || {
+    echo
+    echo "REFUSE the arms would not build, so nothing was measured and nothing here says"
+    echo "       anything about isolation either way"
+    exit 2
+}
 
 # ---- arms ------------------------------------------------------------------
 # `--test-threads=1` because the neighbours are the whole reason this is not an

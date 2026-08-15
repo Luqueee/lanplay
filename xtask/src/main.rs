@@ -7,8 +7,10 @@
 //! unattended - which harnesses can run right now - out of `tools/gates.toml`
 //! and out of what the machine can be seen to have, rather than out of
 //! somebody rereading eighteen shell scripts. `verdict` reads the envelope a
-//! probe emitted and decides, so that no harness parses another program's
-//! prose ever again. `platforms` checks the Windows job's exclude list against
+//! probe emitted and decides, so that no harness parses another program's prose
+//! ever again, and answers in the three the harnesses here already exchange:
+//! held, did not hold, and could not be read, the last of which is a refusal
+//! and not a pass. `platforms` checks the Windows job's exclude list against
 //! what each crate declares it supports, which is what the workflow's comment
 //! about failing loudly claimed and, until a macOS-only crate arrived there as
 //! an error about a missing module, did not have.
@@ -26,6 +28,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
+
+use crate::verdict::Verdict;
 
 /// Something went wrong before, or instead of, a measurement. Distinct from a
 /// gate failure: a gate failure is a result, this is the absence of one.
@@ -151,17 +155,19 @@ fn main() -> ExitCode {
             }
         },
         Command::Verdict(args) => match decide(&args) {
-            Ok((text, passed)) => {
+            Ok((text, answer)) => {
                 print!("{text}");
-                if passed {
-                    ExitCode::SUCCESS
-                } else {
-                    ExitCode::from(1)
+                match answer {
+                    Verdict::Passed => ExitCode::SUCCESS,
+                    Verdict::Failed => ExitCode::from(1),
+                    // The same two as an unreadable document below, and
+                    // deliberately the same: a criterion nobody could evaluate
+                    // and a document nobody could parse are one absence of a
+                    // result, and a caller has nothing to gain from telling
+                    // them apart.
+                    Verdict::Refused => ExitCode::from(2),
                 }
             }
-            // Two, and not one, because a document that could not be read is
-            // the absence of a result and a harness that treated it as a
-            // failure would report a criterion nobody tested.
             Err(Abort(why)) => {
                 eprintln!("verdict: {why}");
                 ExitCode::from(2)
@@ -191,7 +197,7 @@ fn list_gates(args: &GatesArgs) -> Result<String, Abort> {
 /// Reading one envelope, and either deciding it or stating one of its numbers.
 /// Stating a number is not a verdict, so it prints the number alone and says
 /// nothing about the run.
-fn decide(args: &VerdictArgs) -> Result<(String, bool), Abort> {
+fn decide(args: &VerdictArgs) -> Result<(String, Verdict), Abort> {
     let envelope = envelope::Envelope::load(&args.envelope)?;
     if let Some(name) = &args.observation {
         let value = envelope.observation(name).ok_or_else(|| {
@@ -201,7 +207,7 @@ fn decide(args: &VerdictArgs) -> Result<(String, bool), Abort> {
                 args.envelope.display()
             ))
         })?;
-        return Ok((format!("{value}\n"), true));
+        return Ok((format!("{value}\n"), Verdict::Passed));
     }
     Ok(verdict::report(&envelope))
 }

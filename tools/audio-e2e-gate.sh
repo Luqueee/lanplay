@@ -14,9 +14,9 @@
 # would think to write. What tells those apart is samples expected against samples
 # played, and it is the receiver's `continuity_hole` over a population of
 # `samples_expected` that decides this gate - a hole of zero over an expectation of zero
-# comes back Unavailable from `xtask verdict` and never as a pass. Beside it the receiver
-# states that frames were genuinely decoded rather than concealed throughout, which is
-# the other half of the same distinction.
+# comes back Unavailable from `xtask verdict`, which refuses the whole run rather than
+# passing it. Beside it the receiver states that frames were genuinely decoded rather than
+# concealed throughout, which is the other half of the same distinction.
 #
 # Nothing here parses the other end's prose. Both ends print the keyed block a person
 # reads when a gate fails and both write the JSON envelope `xtask verdict` decides, which
@@ -392,13 +392,14 @@ arm_numbers() {
 # The numbers a document is not a result without, insisted on before anything is decided
 # from it.
 #
-# `xtask verdict` is deliberately generous about an absence: a check whose observation or
-# whose population is missing comes out Unavailable, the report names it, the run does not
-# claim it, and the exit code is still zero. That is the right answer for a gate saying
-# what it could not test and the wrong one for the check that decides this phase, because
-# a run whose continuity was never measured is not a run that held continuity. So the
-# harness asks for those names itself, through the same parser rather than through a
-# pattern over the report, and refuses when one is missing.
+# Belt and braces, and both of them deliberate. `xtask verdict` no longer passes a run
+# holding a check it could not evaluate: an absent observation or an empty population makes
+# the whole document a refusal, it exits 2, and the report names the observation it wanted.
+# That was the central hole and it is closed. This stays because it names the ten keys this
+# gate in particular turns on, which the general answer cannot know - a document stating no
+# continuity check at all would parse, would decide whatever else it stated, and would never
+# mention the number this phase exists to measure. Asked through the same parser rather than
+# through a pattern over the report, and refused here when one of them is missing.
 insist() {
     local document="$1"
     shift
@@ -421,9 +422,10 @@ insist_positive() {
 }
 
 # Decides one end of one arm and returns what `xtask` decided: 0 held, 1 did not, 2 could
-# not be read. The third is a refusal wherever it appears, including in the arm that is
-# supposed to fail, because a document nobody could parse is not a failure anybody
-# observed.
+# not be decided at all - either the document would not parse or a criterion in it had no
+# number to read. The third is a refusal wherever it appears, including in the arm that is
+# supposed to fail, because a criterion nobody could evaluate is not a criterion anybody
+# observed disagreeing.
 decide() {
     local document="$1"
     echo
@@ -433,7 +435,8 @@ decide() {
     local code=0
     "$XTASK" verdict "$document" || code=$?
     if [ "$code" -ge 2 ]; then
-        refuse "$document could not be read as a gate document, so nothing was decided from it"
+        refuse "$document was not decided: either it would not parse or a criterion in it" \
+            "had nothing to read, and whichever it was is named above"
     fi
     return "$code"
 }

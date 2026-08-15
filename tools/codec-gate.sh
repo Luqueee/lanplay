@@ -33,6 +33,13 @@
 #
 # usage:
 #   tools/codec-gate.sh [seconds]
+#
+# exit 0  both arms held what they stated
+# exit 1  an arm did not, and the block above its verdict names the criterion and
+#         the numbers it was decided on
+# exit 2  refused: an arm stated a criterion nobody could decide, named in the same
+#         block, so nothing here says whether the encoder holds against the frame
+#         budget either way
 
 set -euo pipefail
 
@@ -64,6 +71,7 @@ for frame_ms in 5 10; do
 done
 
 status=0
+refused=0
 for frame_ms in 5 10; do
     echo
     if [[ ! -s "$OUT/$frame_ms.json" ]]; then
@@ -72,7 +80,17 @@ for frame_ms in 5 10; do
         status=1
         continue
     fi
-    "$XTASK" verdict "$OUT/$frame_ms.json" || status=1
+    # Two and one are different answers and are kept apart here. `xtask verdict`
+    # refuses a document whose criterion had no number to read, and an arm nobody
+    # could decide is not an arm that disagreed: reading the refusal as a failure
+    # would put this gate back to claiming it had tested something it had not.
+    code=0
+    "$XTASK" verdict "$OUT/$frame_ms.json" || code=$?
+    if [[ "$code" -ge 2 ]]; then
+        refused=1
+    elif [[ "$code" -ne 0 ]]; then
+        status=1
+    fi
 done
 
 # The measurement the phase produces, stated rather than voted on, and printed
@@ -88,9 +106,17 @@ if [[ -s "$OUT/5.json" && -s "$OUT/10.json" ]]; then
 fi
 
 echo
+# The failure first when a run produced both, because an arm that was decided and
+# disagreed says more about Opus than one that could not be decided at all.
 if [[ "$status" -ne 0 ]]; then
     echo "FAIL an arm did not hold what it stated, and the block above it says which and why"
     exit 1
+fi
+if [[ "$refused" -ne 0 ]]; then
+    echo "REFUSE an arm stated a criterion with nothing to decide it on, named above, so this"
+    echo "       run says neither that the encoder holds against the frame budget nor that it"
+    echo "       does not"
+    exit 2
 fi
 echo "PASS both frame durations round-trip the tone with the sample count exact, and the"
 echo "     encoder stays under a tenth of the frame it encodes"
