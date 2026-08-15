@@ -1,0 +1,65 @@
+# What this project will accept from its dependencies.
+#
+# The licence list is taken from what is actually in the tree rather than from a template,
+# so an addition that brings something new fails and gets looked at. Nothing here is
+# ignored to make a check pass: an advisory that applies is either fixed or carries a
+# recorded reason and a date, and there are currently none of the latter.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+unmaintained = "all"
+
+# No ignores. The one advisory this project has had - RUSTSEC-2026-0150, audiopus_sys
+# unmaintained and pinned to a CMake version that CMake 4 rejects - was removed by
+# replacing the dependency rather than by silencing it.
+#
+# The reasoning is worth keeping, because the next such advisory will look the same. The
+# risk was not the red mark, it was that the vendored libopus declared
+# `cmake_minimum_required(VERSION 3.1)` and CMake 4.0 removed compatibility below 3.5. So
+# the build worked on every machine until one of them updated CMake, and it worked on the
+# development Mac for a different reason again: Homebrew's libopus was present, pkg-config
+# found it, and the vendored path never ran. A dependency that breaks depending on which
+# machine you are standing at is worse than one that breaks everywhere.
+ignore = []
+
+[licenses]
+version = 2
+# Exactly what the tree contains today. Deliberately not a permissive-by-default list: the
+# point is that a new licence stops the build and gets a decision, and a list that already
+# allows everything reasonable would never stop anything.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unlicense",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.9
+
+# One dependency offers LGPL among its options, and the permissive alternative is the one
+# taken. Stated here rather than left to the resolver's preference, because which of an OR
+# applies is a licensing decision and not a build detail.
+[[licenses.clarify]]
+crate = "libloading"
+expression = "MIT OR Apache-2.0"
+license-files = []
+
+[bans]
+# Warn rather than deny. Duplicate versions in a tree this size are usually somebody else's
+# transitive choice, and a hard failure would mean pinning dependencies for a reason that
+# has nothing to do with this project.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -357,7 +357,7 @@ impl RenderLoop {
                 self.cadence_samples += 1;
                 // Revising from the histogram costs a percentile query, so it
                 // happens once a second rather than once a frame.
-                if self.cadence_samples % CADENCE_REVISION == 0 {
+                if self.cadence_samples.is_multiple_of(CADENCE_REVISION) {
                     let median = self.link_cadence.percentiles().p50;
                     if median.0 > 0 {
                         self.expected_period = median;

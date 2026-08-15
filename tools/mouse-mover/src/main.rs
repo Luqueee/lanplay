@@ -152,7 +152,7 @@ fn main() {
             }
             Pattern::Drift => (amplitude.round() as i64, 0),
             Pattern::Jitter => {
-                if index % 2 == 0 {
+                if index.is_multiple_of(2) {
                     (1, -1)
                 } else {
                     (-1, 1)

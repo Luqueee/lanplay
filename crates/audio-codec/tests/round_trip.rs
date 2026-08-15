@@ -14,7 +14,9 @@
 //! while measuring a frame duration nobody asked for.
 
 use lanplay_audio_codec::probe::{self, Options};
-use lanplay_audio_codec::{CodecConfig, CodecError, FrameDuration, OpusDecoder, OpusEncoder};
+use lanplay_audio_codec::{
+    CodecConfig, CodecError, ErrorCode, FrameDuration, OpusDecoder, OpusEncoder,
+};
 use lanplay_tone_source::tone::{CONTRACT, Tone};
 
 /// Long enough to fill the probe's analysis window past its warm-up skip.
@@ -169,7 +171,7 @@ fn wrong_input_is_refused_rather_than_repaired() {
     // of contents, and 0xFF asks for a code 3 packet whose frame count byte is
     // missing.
     match decoder.decode(&[0xFF]) {
-        Err(CodecError::Decode(code)) => assert_eq!(code, opus::ErrorCode::InvalidPacket),
+        Err(CodecError::Decode(code)) => assert_eq!(code, ErrorCode::InvalidPacket),
         other => panic!("a truncated packet was accepted: {other:?}"),
     }
 

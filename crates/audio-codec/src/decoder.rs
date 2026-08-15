@@ -14,10 +14,9 @@
 //! check: `opus_decode_float` refuses with a buffer-too-small code, which
 //! arrives as [`CodecError::Decode`] naming exactly that.
 
-use opus::{Channels, Decoder};
-
 use crate::config::{CodecConfig, SAMPLE_RATES};
 use crate::error::CodecError;
+use crate::ffi::{Channels, Decoder};
 
 /// One Opus decoder and the single frame buffer it writes into.
 pub struct OpusDecoder {
@@ -40,9 +39,9 @@ impl OpusDecoder {
         }
 
         let decoder =
-            Decoder::new(config.sample_rate, channels).map_err(|error| CodecError::Creation {
-                function: error.function(),
-                code: error.code(),
+            Decoder::new(config.sample_rate, channels).map_err(|code| CodecError::Creation {
+                function: "opus_decoder_create",
+                code,
             })?;
 
         Ok(OpusDecoder {
@@ -75,8 +74,8 @@ impl OpusDecoder {
         let expected = self.config.frame_samples();
         let returned = self
             .decoder
-            .decode_float(packet, &mut self.pcm, false)
-            .map_err(|error| CodecError::Decode(error.code()))?;
+            .decode_float(packet, &mut self.pcm)
+            .map_err(CodecError::Decode)?;
         if returned != expected {
             return Err(CodecError::DecodedLength { returned, expected });
         }
@@ -101,12 +100,14 @@ impl OpusDecoder {
     /// history that did not happen.
     pub fn conceal(&mut self) -> Result<&[f32], CodecError> {
         let expected = self.config.frame_samples();
-        // An empty slice is how the wrapper spells a null packet; the frame
-        // size comes from the buffer's length, which is exactly one frame.
+        // The frame size the concealer is asked for comes from the buffer's own
+        // length, which is exactly one frame, because a concealed frame that
+        // was not the duration of the gap leaves the decoder badly placed to
+        // decode the packet after it.
         let returned = self
             .decoder
-            .decode_float(&[], &mut self.pcm, false)
-            .map_err(|error| CodecError::Decode(error.code()))?;
+            .conceal_float(&mut self.pcm)
+            .map_err(CodecError::Decode)?;
         if returned != expected {
             return Err(CodecError::DecodedLength { returned, expected });
         }
@@ -149,7 +150,7 @@ mod tests {
         let mut decoder = OpusDecoder::new(contract(FrameDuration::Ms5)).expect("decoder");
         match decoder.decode(&packet) {
             Err(CodecError::Decode(code)) => {
-                assert_eq!(code, opus::ErrorCode::BufferTooSmall)
+                assert_eq!(code, crate::ffi::ErrorCode::BufferTooSmall)
             }
             other => panic!("a 20 ms packet was accepted by a 5 ms decoder: {other:?}"),
         }

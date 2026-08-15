@@ -81,7 +81,7 @@ fn run(args: &Args) -> Result<ExitCode, Box<dyn std::error::Error>> {
     // picture, which turns every timing below into nonsense. A picture count
     // that is not a whole number of seconds at the declared rate is the cheap
     // tell.
-    if args.limit.is_none() && units.len() % args.fps as usize != 0 {
+    if args.limit.is_none() && !units.len().is_multiple_of(args.fps as usize) {
         println!(
             "warning: {} access units is not a whole number of seconds at {} fps; \
              the encode may be multi-slice",

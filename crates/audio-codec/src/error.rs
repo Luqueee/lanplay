@@ -1,6 +1,6 @@
 use core::fmt;
 
-use opus::ErrorCode;
+use crate::ffi::ErrorCode;
 
 /// Everything that can go wrong between a buffer of samples and a packet, and
 /// back.

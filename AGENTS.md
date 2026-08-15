@@ -54,6 +54,26 @@ then measured to do nothing at all. Before implementing a lever, work out on pap
 whether it can move what you want, and prefer a cheap experiment to a confident
 implementation.
 
+## Verifying your own work
+
+Two mistakes in the obvious recipe hid sixteen clippy findings for a whole session, and
+both are easy to repeat.
+
+**Clippy answers from cache.** A crate it has already evaluated is not evaluated again, so
+a run that reports nothing may simply not have looked. Force it:
+
+```bash
+find crates macos windows tools xtask -name "*.rs" -exec touch {} +
+cargo clippy --workspace --all-targets --locked -- -D warnings
+```
+
+**Read cargo's exit code, not grep's.** `cargo clippy ... | grep -c error` reports grep's
+status, so it prints success next to the words "could not compile". Let the command's own
+exit code decide, which is what `-D warnings` is for.
+
+CI is always a cold checkout, so it is authoritative where a local run is not. If CI
+disagrees with your local check, CI is right.
+
 ## Prose
 
 Comments explain **why**, never what. Prose, never bullet lists. Never write "we", never

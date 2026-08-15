@@ -237,13 +237,13 @@ pub fn run(
                 report.depacketizer_peak_packets = report
                     .depacketizer_peak_packets
                     .max(depacketizer.buffered_packets());
-                if report.datagrams % MEMORY_SAMPLE_EVERY == 0 {
+                if report.datagrams.is_multiple_of(MEMORY_SAMPLE_EVERY) {
                     report.depacketizer_memory.record_at(at, footprint as f64);
                 }
 
                 if config.stall_every > 0
                     && config.stall.get() > 0
-                    && report.datagrams % config.stall_every == 0
+                    && report.datagrams.is_multiple_of(config.stall_every)
                 {
                     report.stalls += 1;
                     thread::sleep(config.stall.as_duration());

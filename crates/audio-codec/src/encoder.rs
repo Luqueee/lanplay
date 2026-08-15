@@ -12,10 +12,9 @@
 //! changing anything, so a configuration that is only ever written is a
 //! configuration nobody has checked.
 
-use opus::{Application, Bandwidth, Bitrate, Channels, Encoder, FrameSize};
-
 use crate::config::{CodecConfig, MAX_PACKET_BYTES, SAMPLE_RATES};
 use crate::error::CodecError;
+use crate::ffi::{Application, Bandwidth, Channels, Encoder, ErrorCode, FrameSize};
 
 /// What the encoder says it is doing, read out of the encoder rather than
 /// copied from what it was told.
@@ -61,9 +60,9 @@ impl OpusEncoder {
         // with it SILK's 6.5 ms lookahead; against a 5 ms frame budget that
         // lookahead would be larger than the frame.
         let mut encoder = Encoder::new(config.sample_rate, channels, Application::LowDelay)
-            .map_err(|error| CodecError::Creation {
-                function: error.function(),
-                code: error.code(),
+            .map_err(|code| CodecError::Creation {
+                function: "opus_encoder_create",
+                code,
             })?;
 
         // Fullband, set rather than inherited. The endpoint mixes at 48 kHz and
@@ -74,14 +73,14 @@ impl OpusEncoder {
         // what the encoder's own bandwidth decision is clamped to, and the
         // other is that decision overridden.
         encoder
-            .set_max_bandwidth(Bandwidth::Fullband)
+            .set_max_bandwidth(Bandwidth::FULLBAND)
             .map_err(property("OPUS_SET_MAX_BANDWIDTH"))?;
         encoder
-            .set_bandwidth(Bandwidth::Fullband)
+            .set_bandwidth(Bandwidth::FULLBAND)
             .map_err(property("OPUS_SET_BANDWIDTH"))?;
 
         encoder
-            .set_bitrate(Bitrate::Bits(config.bitrate_bps))
+            .set_bitrate(config.bitrate_bps)
             .map_err(property("OPUS_SET_BITRATE"))?;
 
         // Variable rate, constrained. Both are libopus's own defaults and both
@@ -136,7 +135,7 @@ impl OpusEncoder {
         // shorter frames and emit them in one packet, and then a packet count
         // and a frame count stop being the same measurement.
         encoder
-            .set_expert_frame_duration(FrameSize::Arg)
+            .set_expert_frame_duration(FrameSize::ARG)
             .map_err(property("OPUS_SET_EXPERT_FRAME_DURATION"))?;
 
         let settings = EncoderSettings {
@@ -145,14 +144,9 @@ impl OpusEncoder {
                     .get_application()
                     .map_err(property("OPUS_GET_APPLICATION"))?,
             ),
-            bitrate_bps: match encoder
+            bitrate_bps: encoder
                 .get_bitrate()
-                .map_err(property("OPUS_GET_BITRATE"))?
-            {
-                Bitrate::Bits(bits) => bits,
-                Bitrate::Max => -1,
-                Bitrate::Auto => 0,
-            },
+                .map_err(property("OPUS_GET_BITRATE"))?,
             vbr: encoder.get_vbr().map_err(property("OPUS_GET_VBR"))?,
             vbr_constrained: encoder
                 .get_vbr_constraint()
@@ -209,7 +203,7 @@ impl OpusEncoder {
         let written = self
             .encoder
             .encode_float(pcm, &mut self.packet)
-            .map_err(|error| CodecError::Encode(error.code()))?;
+            .map_err(CodecError::Encode)?;
         Ok(&self.packet[..written])
     }
 }
@@ -227,16 +221,18 @@ fn application_name(application: Application) -> &'static str {
         Application::Voip => "OPUS_APPLICATION_VOIP",
         Application::Audio => "OPUS_APPLICATION_AUDIO",
         Application::LowDelay => "OPUS_APPLICATION_RESTRICTED_LOWDELAY",
+        // Unreachable for the three modes this crate sets, and named rather
+        // than folded into one of them so that an encoder in a mode nobody
+        // asked for says so in the report instead of being described as the one
+        // it was meant to be in.
+        Application::Unnamed(_) => "an application this encoder did not ask for",
     }
 }
 
 /// Turns a CTL failure into ours while naming the CTL, because an Opus error
 /// code without the request that produced it is a number nobody can act on.
-fn property(name: &'static str) -> impl FnOnce(opus::Error) -> CodecError {
-    move |error| CodecError::Property {
-        name,
-        code: error.code(),
-    }
+fn property(name: &'static str) -> impl FnOnce(ErrorCode) -> CodecError {
+    move |code| CodecError::Property { name, code }
 }
 
 #[cfg(test)]
@@ -278,6 +274,27 @@ mod tests {
         assert_eq!(
             OpusEncoder::new(config).err(),
             Some(CodecError::UnsupportedChannels(6))
+        );
+    }
+
+    #[test]
+    fn an_encoder_built_on_one_thread_encodes_on_another() {
+        // The encoder state is `Send` and deliberately not `Sync`, which is the
+        // pair of claims the host's shape depends on: it will be built where the
+        // capture callback runs and used where the sender does, and it must
+        // never be reachable from both at once. Nothing in this phase crosses
+        // that boundary yet, so without this the claim would be checked for the
+        // first time by whoever needed it.
+        let config = contract(FrameDuration::Ms5);
+        let mut encoder = OpusEncoder::new(config).expect("encoder");
+        let pcm = vec![0f32; config.frame_interleaved()];
+
+        let encoded = std::thread::spawn(move || encoder.encode(&pcm).map(<[u8]>::len))
+            .join()
+            .expect("the thread the encoder was moved to");
+        assert!(
+            encoded.expect("encode") > 0,
+            "a frame that produced no bytes would pass a test that only moved the encoder"
         );
     }
 }

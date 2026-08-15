@@ -26,7 +26,6 @@ permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_NET_LOCKED: "true"
 
 jobs:
   # The gate that has no equivalent in an ordinary project. Every harness writes its
@@ -50,7 +49,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
             # The Mac ships the client and the input capture; the tone source is here
             # because a lab needs it on whichever machine is producing.

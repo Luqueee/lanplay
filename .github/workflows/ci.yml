@@ -32,17 +32,18 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # A dependency resolved differently from the lockfile is a different program, and a
-  # green check on one says nothing about the other.
-  CARGO_NET_LOCKED: "true"
-  RUSTFLAGS: -D warnings
+  # No RUSTFLAGS here on purpose. Set at workflow level it applies to every dependency as
+  # well, so a warning in somebody else's crate fails this build for a reason nobody here
+  # can fix. Strictness belongs on the clippy invocations, where it covers the code this
+  # project owns. And `--locked` is passed explicitly rather than through an environment
+  # variable, because the one that looks like it would do this does not exist.
 
 jobs:
   # The workspace builds and tests whole on macOS, which is the only platform where
   # every member compiles: the crates under windows/ are Windows-only and the ones
   # under macos/ need AppKit.
   macos:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -50,7 +51,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
       # The index that tells an agent which harnesses can run. Its own tests assert
       # that every harness is described and every described script exists, so this is
@@ -75,6 +76,7 @@ jobs:
           --exclude lanplay-decoder-videotoolbox
           --exclude lanplay-input-capture
           --exclude lanplay-renderer-metal
+          --exclude lanplay-audio-render
           --exclude lanplay-mouse-mover
       - name: clippy the same set
         run: >
@@ -83,13 +85,15 @@ jobs:
           --exclude lanplay-decoder-videotoolbox
           --exclude lanplay-input-capture
           --exclude lanplay-renderer-metal
+          --exclude lanplay-audio-render
           --exclude lanplay-mouse-mover
+          -- -D warnings
 
   # rust-version in Cargo.toml is a promise, and an unenforced promise drifts within a
   # release or two. Checked rather than tested: the guarantee is that it compiles on the
   # oldest toolchain claimed, not that the test harness of that vintage behaves.
   msrv:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - id: msrv

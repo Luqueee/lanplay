@@ -134,7 +134,7 @@ impl MixFormat {
         if raw.samples_per_sec == 0 {
             return Err(FormatError::NoRate);
         }
-        if raw.bits_per_sample == 0 || raw.bits_per_sample % 8 != 0 {
+        if raw.bits_per_sample == 0 || !raw.bits_per_sample.is_multiple_of(8) {
             return Err(FormatError::OddSampleSize(raw.bits_per_sample));
         }
 

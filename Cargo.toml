@@ -34,7 +34,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT"
 
 [workspace.dependencies]
@@ -55,11 +55,26 @@ lanplay-transport = { path = "crates/transport" }
 lanplay-video-core = { path = "crates/video-core" }
 clap = { version = "4", features = ["derive"] }
 # libopus through its reference C implementation, vendored and built by
-# `audiopus_sys`. A pure-Rust reimplementation was considered and rejected: an
+# `opus-head-sys`. A pure-Rust reimplementation was considered and rejected: an
 # encoder that is subtly wrong produces audio that sounds nearly right and
 # fails in ways nobody can see, and the reference implementation is what every
 # Opus decoder in the world is tested against.
-opus = "0.3"
+#
+# A `-sys` crate with nothing above it, which is the point. The wrapper that
+# used to sit there brought `audiopus_sys`, unmaintained since 2020 and flagged
+# by RUSTSEC-2026-0150 for vendoring a libopus whose
+# `cmake_minimum_required(VERSION 3.1)` CMake 4 refuses outright, so the build
+# succeeded only where pkg-config found a system libopus instead. This one
+# vendors a source that asks for 3.16. `crates/audio-codec` owns the FFI now,
+# which is the crate whose job that already was.
+#
+# Default features off, both of them deliberately. `dnn` builds DRED and OSCE,
+# recovery and enhancement features this project does not run, on the same
+# grounds DTX and in-band FEC are off: they spend or withhold bytes according
+# to conditions the measurements do not create. `fast-math` defines
+# OPUS_FLOAT_APPROX and OPUS_FAST_MATH, which change the arithmetic inside the
+# encoder whose output is the measurement.
+opus-head-sys = { version = "0.3", default-features = false }
 windows = { version = "0.62", features = [
     "Foundation",
     "Win32_Devices_Display",

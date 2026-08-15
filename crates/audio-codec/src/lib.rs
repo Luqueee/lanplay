@@ -15,13 +15,23 @@
 //! not agree to. Both own their buffers from construction: one frame in, one
 //! packet out, no allocation, no queue and no lock between them.
 //!
-//! libopus does the coding, through the `opus` crate, which vendors and builds
+//! libopus does the coding, through `opus-head-sys`, which vendors and builds
 //! the reference C. A pure-Rust reimplementation was considered and rejected:
 //! an encoder that is subtly wrong produces audio that sounds nearly right and
 //! fails in ways nobody can see, and the reference implementation is what every
 //! Opus decoder in the world is tested against. The cost of that decision is
 //! that anything depending on this crate needs a C toolchain, and in particular
 //! cannot be cross-checked for Windows from a machine with no MSVC installed.
+//!
+//! That crate publishes bindings and nothing above them, so the safe boundary
+//! is this crate's own: the whole of the FFI lives in one private module and
+//! the encoder and decoder above it are ordinary safe Rust. Which is the right
+//! shape rather than a concession, because this crate already exists to be the
+//! codec boundary, and the wrapper that used to sit in between brought
+//! `audiopus_sys` with it — unmaintained since 2020, and vendoring a libopus
+//! whose `cmake_minimum_required(VERSION 3.1)` CMake 4 refuses, so whether it
+//! built at all depended on whether the machine happened to have a system
+//! libopus for pkg-config to find.
 //!
 //! What is absent, because each belongs to a later phase: no resampler, no
 //! capture, no audio device. The previous phase established that the render
@@ -70,6 +80,7 @@ pub mod config;
 pub mod decoder;
 pub mod encoder;
 pub mod error;
+mod ffi;
 pub mod jitter;
 pub mod jitter_probe;
 pub mod probe;
@@ -79,3 +90,4 @@ pub use config::{CodecConfig, FrameDuration, MAX_PACKET_BYTES, SAMPLE_RATES};
 pub use decoder::OpusDecoder;
 pub use encoder::{EncoderSettings, OpusEncoder};
 pub use error::CodecError;
+pub use ffi::ErrorCode;

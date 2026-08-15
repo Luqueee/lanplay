@@ -29,6 +29,6 @@ lanplay-telemetry = { workspace = true }
 lanplay-tone-source = { workspace = true }
 lanplay-transport = { workspace = true }
 clap = { workspace = true }
-opus = { workspace = true }
+opus-head-sys = { workspace = true }
 parking_lot = { workspace = true }
 sha2 = { workspace = true }

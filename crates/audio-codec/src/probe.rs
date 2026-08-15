@@ -36,6 +36,7 @@ use crate::config::{CodecConfig, FrameDuration};
 use crate::decoder::OpusDecoder;
 use crate::encoder::{EncoderSettings, OpusEncoder};
 use crate::error::CodecError;
+use crate::ffi;
 
 /// Frames skipped before the analysis window opens.
 ///
@@ -164,7 +165,7 @@ pub fn run(options: Options) -> Result<Measurement, CodecError> {
     Ok(Measurement {
         config,
         settings: *encoder.settings(),
-        libopus: opus::version(),
+        libopus: ffi::version(),
         frames_submitted,
         frames_returned,
         packets,
