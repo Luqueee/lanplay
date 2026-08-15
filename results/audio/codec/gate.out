@@ -1,0 +1,161 @@
+results   /tmp/codec-gate/20260815-163535
+arm       5 ms done
+arm       10 ms done
+
+gate      codec-gate   arm 5 ms frames   span 0.4 s   commit c240093
+started   1786804552615 unix ms
+args      bitrate_kbps 128, frame_ms 5, seconds 10.0
+covers    encoder, decoder, tone analysis
+
+environment
+
+  application                              OPUS_APPLICATION_RESTRICTED_LOWDELAY
+  channels                                 2
+  complexity                               9
+  dtx                                      false
+  encoder_reports_bitrate_bps              128000
+  frame_samples_per_channel                240
+  inband_fec                               false
+  libopus                                  libopus unknown
+  lookahead_samples                        120
+  sample_rate_hz                           48000
+  vbr                                      true
+  vbr_constrained                          true
+
+observations
+
+  decode_max_us                            36
+  decode_p50_us                            6
+  decode_p95_us                            12
+  decode_p99_us                            14
+  effective_kbps                           129.664
+  encode_max_us                            206
+  encode_p50_us                            22
+  encode_p95_us                            42
+  encode_p99_us                            56
+  frame_count_disagreement                 0
+  frames_returned                          480000
+  frames_submitted                         480000
+  packet_bytes_max                         115
+  packet_bytes_min                         81
+  packet_bytes_p50                         81
+  packet_bytes_p95                         81
+  packet_bytes_p99                         81
+  packets                                  2000
+  tone_analysed_frames                     24000
+  tone_channels_distinct                   1
+  tone_left_dbfs                           -19.679
+  tone_left_hz                             997
+  tone_resolution_hz                       2
+  tone_right_dbfs                          -19.675
+  tone_right_hz                            1996.998
+  total_packet_bytes                       162080
+
+findings
+
+  FINDING a 5 ms frame carries 81 byte packets at 129.7 kbps effective against the 128 kbps asked for
+
+what must not be zero
+
+  PASS  packets came out of the encoder          2000
+        every percentile and the effective rate in this run is computed over these packets, so a run that produced none makes each of those figures an absence rather than a number
+  PASS  the decoded channels stay distinct       1
+        two channels reading one frequency is consistent with a fold to mono, with one channel encoded twice, and with a detector measuring its own scratch buffer, and a frame count is consistent with all three
+
+what must be zero
+
+  PASS  every submitted frame came back          0 over 480000 frames_submitted
+        Opus is lossy in amplitude and exact in length, so a decoded length that disagrees with the submitted one is a defect and not a tolerance; the population is the submitted frames, because two counts of nothing agree perfectly
+
+what else must hold
+
+  PASS  encode p99 under a tenth of the frame    56 against a bound of 500
+        a tenth of the 5 ms frame is 500 us, and an encoder under that cannot be the term that matters in a budget measured in whole milliseconds; p99 rather than the mean, because a frame late once every hundred is a click a listener hears
+  PASS  the left channel decodes to its own tone 997 against 997 give or take 5
+        a byte count and a frame count agree just as happily when the decoder returns silence, and this project has read that agreement as success; 997 Hz comes out of the decoded samples, at a window resolution of 2 Hz
+  PASS  the right channel decodes to its own tone 1996.998 against 1997 give or take 5
+        the two channels carry different frequencies so that channel order is provable rather than assumed, and a right channel reading 997 Hz is what a swap looks like
+
+PASS 6 of 6 checks hold and every declared subsystem was exercised
+
+gate      codec-gate   arm 10 ms frames   span 0.4 s   commit c240093
+started   1786804553017 unix ms
+args      bitrate_kbps 128, frame_ms 10, seconds 10.0
+covers    encoder, decoder, tone analysis
+
+environment
+
+  application                              OPUS_APPLICATION_RESTRICTED_LOWDELAY
+  channels                                 2
+  complexity                               9
+  dtx                                      false
+  encoder_reports_bitrate_bps              128000
+  frame_samples_per_channel                480
+  inband_fec                               false
+  libopus                                  libopus unknown
+  lookahead_samples                        120
+  sample_rate_hz                           48000
+  vbr                                      true
+  vbr_constrained                          true
+
+observations
+
+  decode_max_us                            33
+  decode_p50_us                            9
+  decode_p95_us                            11
+  decode_p99_us                            14
+  effective_kbps                           128.928
+  encode_max_us                            62
+  encode_p50_us                            32
+  encode_p95_us                            38
+  encode_p99_us                            44
+  frame_count_disagreement                 0
+  frames_returned                          480000
+  frames_submitted                         480000
+  packet_bytes_max                         233
+  packet_bytes_min                         161
+  packet_bytes_p50                         161
+  packet_bytes_p95                         161
+  packet_bytes_p99                         161
+  packets                                  1000
+  tone_analysed_frames                     24000
+  tone_channels_distinct                   1
+  tone_left_dbfs                           -19.681
+  tone_left_hz                             997
+  tone_resolution_hz                       2
+  tone_right_dbfs                          -19.684
+  tone_right_hz                            1997.001
+  total_packet_bytes                       161160
+
+findings
+
+  FINDING a 10 ms frame carries 161 byte packets at 128.9 kbps effective against the 128 kbps asked for
+
+what must not be zero
+
+  PASS  packets came out of the encoder          1000
+        every percentile and the effective rate in this run is computed over these packets, so a run that produced none makes each of those figures an absence rather than a number
+  PASS  the decoded channels stay distinct       1
+        two channels reading one frequency is consistent with a fold to mono, with one channel encoded twice, and with a detector measuring its own scratch buffer, and a frame count is consistent with all three
+
+what must be zero
+
+  PASS  every submitted frame came back          0 over 480000 frames_submitted
+        Opus is lossy in amplitude and exact in length, so a decoded length that disagrees with the submitted one is a defect and not a tolerance; the population is the submitted frames, because two counts of nothing agree perfectly
+
+what else must hold
+
+  PASS  encode p99 under a tenth of the frame    44 against a bound of 1000
+        a tenth of the 10 ms frame is 1000 us, and an encoder under that cannot be the term that matters in a budget measured in whole milliseconds; p99 rather than the mean, because a frame late once every hundred is a click a listener hears
+  PASS  the left channel decodes to its own tone 997 against 997 give or take 5
+        a byte count and a frame count agree just as happily when the decoder returns silence, and this project has read that agreement as success; 997 Hz comes out of the decoded samples, at a window resolution of 2 Hz
+  PASS  the right channel decodes to its own tone 1997.001 against 1997 give or take 5
+        the two channels carry different frequencies so that channel order is provable rather than assumed, and a right channel reading 997 Hz is what a swap looks like
+
+PASS 6 of 6 checks hold and every declared subsystem was exercised
+
+  FINDING a 5 ms frame costs +0.6 % bitrate against 10 ms
+          and buys 5 ms of packetisation delay: 129.7 against 128.9 kbps
+
+PASS both frame durations round-trip the tone with the sample count exact, and the
+     encoder stays under a tenth of the frame it encodes

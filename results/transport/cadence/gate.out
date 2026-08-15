@@ -1,0 +1,31 @@
+results   /tmp/cadence-isolation-gate/20260815-163514
+requires  three cores free for about half a minute; the quiet half of each
+          arm is the evidence, and a run that could not hold 120 Hz in it
+          is refused rather than reported
+arm       wedged done
+arm       contended done
+
+  FINDING  wedged    quiet p99    8.334 ms, worst    8.355 ms   over 239 intervals
+  FINDING  wedged    wedged p99   8.335 ms, worst    8.340 ms   over 239 intervals
+  FINDING  wedged    the wedge moved the producer by +0.001 ms at p99
+  FINDING  contended quiet p99    8.334 ms, worst    8.334 ms   over 119 intervals
+  FINDING  contended wedged p99 203.556 ms, worst  260.613 ms   over 119 intervals
+  FINDING  contended the wedge moved the producer by +195.223 ms at p99
+
+  must not be zero
+    wedged       239  quiet intervals
+    wedged       239  wedged intervals
+    wedged         8  control frames written before the buffers filled
+    wedged        19  writes that timed out afterwards
+    contended    119  quiet intervals
+    contended    119  wedged intervals
+    contended      8  control frames written before the buffers filled
+    contended    112  writes that timed out afterwards
+  must be zero
+    wedged         0  of 1 isolated arms past 0.530 ms, over 239 intervals
+    contended      0  of 1 control arms inside 0.530 ms, over 119 intervals
+
+PASS a wedged control connection moved a 120 Hz producer by +0.001 ms at p99
+     against a 0.530 ms bound, while the same wedge made from the producer's own
+     thread moved it by +195.223 ms; the quiet halves held 8.334 ms and
+     8.334 ms at p99 over 239 and 119 intervals

@@ -382,15 +382,15 @@ impl CaptureBackend for DesktopDuplication {
     }
 
     fn stop(&mut self) {
-        if self.held.take().is_some() {
-            if let Some(duplication) = self.duplication.as_ref() {
-                // SAFETY: live duplication, no arguments.
-                let span = trace::begin("release_frame", "reason=stop");
-                unsafe {
-                    match duplication.ReleaseFrame() {
-                        Ok(()) => span.ok("reason=stop"),
-                        Err(error) => span.error(error.code().0, "reason=stop"),
-                    }
+        if self.held.take().is_some()
+            && let Some(duplication) = self.duplication.as_ref()
+        {
+            // SAFETY: live duplication, no arguments.
+            let span = trace::begin("release_frame", "reason=stop");
+            unsafe {
+                match duplication.ReleaseFrame() {
+                    Ok(()) => span.ok("reason=stop"),
+                    Err(error) => span.error(error.code().0, "reason=stop"),
                 }
             }
         }

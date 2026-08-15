@@ -2,8 +2,8 @@ frame duration 5
 frames submitted 480000
 frames returned 480000
 packets 2000
-encode us p50 17 p95 24 p99 26 max 87
-decode us p50 5 p95 6 p99 7 max 11
+encode us p50 22 p95 42 p99 56 max 206
+decode us p50 6 p95 12 p99 14 max 36
 packet bytes p50 81 p95 81 p99 81 max 115
 effective kbps 129.7
 tone left 997.0 right 1997.0

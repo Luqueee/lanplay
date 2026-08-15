@@ -97,14 +97,25 @@ No counts appear in this file on purpose. It is loaded for every task, so a numb
 that drifts is a number nobody notices going wrong - two were already stale within a day
 of being written.
 
-Cross-check Windows crates by naming them:
+Cross-check Windows crates with `clippy`, not `check`, and with the exclusions the CI job
+uses. `check` compiles and misses every lint, and the lints are platform-specific because
+the code under them is: three collapsible `if`s and a hex literal were invisible to a
+passing `cargo check` and failed the Windows job one at a time.
 
 ```
-cargo check --target x86_64-pc-windows-msvc --all-targets -p lanplay-capture -p ...
+cargo clippy --target x86_64-pc-windows-msvc --workspace --all-targets --locked \
+  --exclude lanplay-client --exclude lanplay-decoder-videotoolbox \
+  --exclude lanplay-input-capture --exclude lanplay-renderer-metal \
+  --exclude lanplay-audio-render --exclude lanplay-mouse-mover \
+  --exclude lanplay-radio-sample --exclude lanplay-audio-codec -- -D warnings
 ```
 
-Checking the whole workspace for that target produces a page of errors about crates that
-are macOS-only by definition.
+`xtask platforms` keeps every exclusion but the last honest: each crate declares its
+platforms and that list is checked against the workflow. `lanplay-audio-codec` is excluded
+here and not there, because only this machine lacks the linker for it.
+
+Touch the sources first. Clippy answers from its cache, and a whole session was spent
+reporting zero warnings from a cache that had never seen the code.
 
 `crates/` is shared, `macos/` and `windows/` are platform halves, `tools/` holds probes,
 generators and harnesses, `xtask` holds repository automation.

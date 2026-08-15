@@ -72,15 +72,15 @@
   ],
   "gate": "codec-gate",
   "observations": {
-    "decode_max_us": 11,
-    "decode_p50_us": 5,
-    "decode_p95_us": 6,
-    "decode_p99_us": 7,
+    "decode_max_us": 36,
+    "decode_p50_us": 6,
+    "decode_p95_us": 12,
+    "decode_p99_us": 14,
     "effective_kbps": 129.664,
-    "encode_max_us": 87,
-    "encode_p50_us": 17,
-    "encode_p95_us": 24,
-    "encode_p99_us": 26,
+    "encode_max_us": 206,
+    "encode_p50_us": 22,
+    "encode_p95_us": 42,
+    "encode_p99_us": 56,
     "frame_count_disagreement": 0,
     "frames_returned": 480000,
     "frames_submitted": 480000,
@@ -106,8 +106,8 @@
       "seconds": 10.0
     },
     "arm": "5 ms frames",
-    "commit": "e7a606d",
-    "span_s": 0.369275917,
-    "started_unix_ms": 1786796755327
+    "commit": "c240093",
+    "span_s": 0.398916833,
+    "started_unix_ms": 1786804552615
   }
 }

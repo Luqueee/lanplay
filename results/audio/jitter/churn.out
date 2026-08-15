@@ -12,7 +12,7 @@ frames concealed 0
 occupancy ms p50 10.0 p95 10.0 p99 10.0 max 10.0
 underruns 0
 overruns 0 dropping 0 frames
-decode us p50 5 p99 10
+decode us p50 6 p99 13
 sink interval us p50 5000 p99 5000
 continuity expected 480000 played 480000
 tone left 997.0 right 1997.0
@@ -25,7 +25,7 @@ packets oversize 0
 decode failures 0
 ceiling ms 30 over 8 slots
 occupancy ms min 0.0 count 2000
-sink interval us min 4999 max 5000 count 1999
+sink interval us min 4998 max 5001 count 1999
 conceal us p50 0 p99 0
 frame ms 5
 bind 0.0.0.0:5109 send to 127.0.0.1:5108

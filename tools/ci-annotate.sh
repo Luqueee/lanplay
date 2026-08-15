@@ -35,20 +35,28 @@ fi
 # `panicked`, so anchoring on `^thread '...' panicked` matches nothing; the panic message is
 # the line after that one and carries no prefix to match on, so it is taken by position; and
 # `left:`/`right:` are indented under the assertion they belong to.
+# And the log is coloured. The workflow sets CARGO_TERM_COLOR=always, so every line clippy
+# reports begins with an escape sequence and every pattern anchored at `^` matches nothing:
+# the windows job's real lint arrived as "printed nothing this reporter recognises" with the
+# lint visible in the tail underneath. Colour is stripped once, here, rather than each
+# pattern being taught to skip it.
+plain() {
+  sed -E $'s/\033\\[[0-9;]*[A-Za-z]//g; s/\r$//' "$log"
+}
+
 extract() {
-  grep -E -A1 \
+  plain | grep -E -A1 \
     -e 'panicked at' \
-    "$log" | grep -vE '^(--|note: run with)'
-  grep -E \
+    | grep -vE '^(--|note: run with)'
+  plain | grep -E \
     -e '^error(\[E[0-9]+\])?:' \
     -e '^error: could not compile' \
-    -e '^  --> ' \
+    -e '^ *--> ' \
     -e '^test .* \.\.\. FAILED$' \
     -e '^failures:$' \
     -e '^ +[a-z_]+::[a-z_:]+$' \
     -e '^ *(assertion|left:|right:)' \
-    -e '^test result: FAILED' \
-    "$log"
+    -e '^test result: FAILED'
 }
 
 # Cargo prints each failure twice, and the runner shows only the first ten annotations per

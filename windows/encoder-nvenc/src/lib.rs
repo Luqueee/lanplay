@@ -926,10 +926,12 @@ impl LockedBitstream<'_> {
 
 impl Drop for LockedBitstream<'_> {
     fn drop(&mut self) {
-        if self.locked {
-            if let Some(unlock) = self.submitted.session.api.functions.nvEncUnlockBitstream {
-                unsafe { unlock(self.submitted.session.encoder, self.submitted.output.output) };
-            }
+        if self.locked
+            && let Some(unlock) = self.submitted.session.api.functions.nvEncUnlockBitstream
+        {
+            // SAFETY: the bitstream is still locked and this runs once, so the unlock cannot
+            // race a second one.
+            unsafe { unlock(self.submitted.session.encoder, self.submitted.output.output) };
         }
     }
 }
@@ -982,10 +984,12 @@ unsafe impl Send for SubmittedFrame<'_> {}
 
 impl Drop for NvencSession {
     fn drop(&mut self) {
-        if !self.encoder.is_null() {
-            if let Some(destroy) = self.api.functions.nvEncDestroyEncoder {
-                unsafe { destroy(self.encoder) };
-            }
+        if !self.encoder.is_null()
+            && let Some(destroy) = self.api.functions.nvEncDestroyEncoder
+        {
+            // SAFETY: the encoder is non-null and was opened by this session, and Drop runs
+            // once, so nothing else can be holding it.
+            unsafe { destroy(self.encoder) };
         }
     }
 }

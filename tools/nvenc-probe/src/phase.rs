@@ -445,7 +445,7 @@ mod tests {
     /// same everywhere and it is the answer an unloaded IDD-LAB driver gets.
     #[test]
     fn an_interface_nothing_exposes_names_itself_absent() {
-        let unused = GUID::from_u128(0x0DEAD0DE_0000_4000_8000_0000_0000_0001);
+        let unused = GUID::from_u128(0x0DEAD0DE_0000_4000_8000_000000000001);
         let opened = Device::open(unused);
 
         match opened {

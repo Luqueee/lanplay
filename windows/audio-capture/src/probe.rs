@@ -65,7 +65,11 @@ pub fn main() -> ExitCode {
     use crate::report::Verdict;
 
     let cli = Cli::parse();
-    if !(cli.seconds > 0.0) {
+    // Spelled out rather than as `<= 0.0`, which accepts NaN: every comparison against NaN
+    // is false, so `--seconds nan` would sail past a `<=` check and be asked of the capture
+    // loop as a duration. The negated `>` said the same thing and clippy reads it as an
+    // accident on a partially ordered type, which is fair - this says which values are meant.
+    if !cli.seconds.is_finite() || cli.seconds <= 0.0 {
         eprintln!("audio-capture-probe: --seconds must be a positive number of seconds");
         return ExitCode::from(BROKEN);
     }
