@@ -110,6 +110,9 @@ pub fn detect(host: &str, wanted: &BTreeSet<&str>) -> Environment {
     if wanted.contains("audio-output") {
         found.insert("audio-output", audio_output());
     }
+    if wanted.contains("quiet-machine") {
+        found.insert("quiet-machine", quiet_machine());
+    }
     if wanted.contains("human-attention") {
         found.insert(
             "human-attention",
@@ -340,6 +343,81 @@ fn parse_audio_outputs(json: &str) -> Result<Option<String>, String> {
         Some(name) => format!("{count} output device(s), {name} by default"),
         None => format!("{count} output device(s), none of them the default"),
     }))
+}
+
+/// Cores a cadence measurement needs to itself.
+///
+/// One for the paced producer, which spins out the tail of every period and has
+/// to be resident when its deadline arrives; one for whatever it is being
+/// measured against; one for everything else the machine is doing. A run taken
+/// with fewer measures the scheduler and reports it as though it were the
+/// subject, which is what a three-core hosted runner did to a 120 Hz claim
+/// before that claim became a gate.
+const FREE_CORES_WANTED: f64 = 3.0;
+
+/// Whether this machine has those cores free.
+///
+/// A prediction rather than a verdict, and the difference matters. The load
+/// average is a run queue length averaged over the last minute, so it lags a
+/// build that has just finished and misses one about to start; what it is good
+/// for is planning, which is what this listing is for. The gates that need it
+/// take their own evidence from the run itself and refuse on that, so a
+/// disagreement between this word and a gate's refusal is the two of them
+/// answering different questions rather than one of them being wrong.
+fn quiet_machine() -> Satisfaction {
+    let output = match run(
+        "sysctl",
+        &["-n", "hw.logicalcpu", "vm.loadavg"],
+        LOCAL_DEADLINE,
+    ) {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => {
+            return Satisfaction::Unknown(format!(
+                "sysctl failed: {}",
+                crate::preflight::last_line(&output)
+            ));
+        }
+        Err(why) => return Satisfaction::Unknown(format!("sysctl: {why}")),
+    };
+    match parse_headroom(&String::from_utf8_lossy(&output.stdout)) {
+        Ok((cores, load)) => judge_headroom(cores, load),
+        Err(why) => Satisfaction::Unknown(why),
+    }
+}
+
+/// `hw.logicalcpu` on the first line and `vm.loadavg` on the second, which
+/// prints as `{ 3.80 4.11 3.90 }`. The one-minute figure is the one taken: the
+/// five and fifteen minute averages describe a machine that has already stopped
+/// being the one a gate is about to run on.
+fn parse_headroom(text: &str) -> Result<(u32, f64), String> {
+    let mut lines = text.lines();
+    let cores = lines
+        .next()
+        .and_then(|line| line.trim().parse::<u32>().ok())
+        .ok_or_else(|| format!("sysctl named no core count: {text:?}"))?;
+    let load = lines
+        .next()
+        .and_then(|line| {
+            line.split(|c: char| !(c.is_ascii_digit() || c == '.'))
+                .find(|field| !field.is_empty())
+                .and_then(|field| field.parse::<f64>().ok())
+        })
+        .ok_or_else(|| format!("sysctl named no load average: {text:?}"))?;
+    Ok((cores, load))
+}
+
+fn judge_headroom(cores: u32, load: f64) -> Satisfaction {
+    let free = f64::from(cores) - load;
+    if free >= FREE_CORES_WANTED {
+        Satisfaction::Present(format!(
+            "{cores} cores at a load of {load:.2}, so about {free:.1} are free"
+        ))
+    } else {
+        Satisfaction::Absent(format!(
+            "{cores} cores at a load of {load:.2} leaves about {free:.1} free, and a cadence \
+             needs {FREE_CORES_WANTED:.0}"
+        ))
+    }
 }
 
 /// One round trip for all four host-side requirements. Four would each pay for
@@ -575,6 +653,41 @@ mod tests {
         let usable = judge_decoders(&[VideoCodec::H264, VideoCodec::Hevc]);
         assert_eq!(usable.state(), "present");
         assert!(usable.why().contains("H.264"), "{usable:?}");
+    }
+
+    #[test]
+    fn the_core_count_and_the_one_minute_load_are_read_out_of_what_sysctl_prints() {
+        let (cores, load) = parse_headroom("10\n{ 3.80 4.11 3.90 }\n").expect("readable");
+        assert_eq!(cores, 10);
+        assert!((load - 3.80).abs() < f64::EPSILON, "read {load}");
+        // The five and fifteen minute figures describe a machine that has
+        // already stopped being the one a gate is about to run on, and reading
+        // one of them by accident is a mistake nothing downstream could see.
+        let (_, quiet) = parse_headroom("8\n{ 0.52 9.90 9.90 }").expect("readable");
+        assert!((quiet - 0.52).abs() < f64::EPSILON, "read {quiet}");
+
+        assert!(parse_headroom("").is_err());
+        assert!(
+            parse_headroom("10\n").is_err(),
+            "a load nobody read is not a load of zero"
+        );
+    }
+
+    #[test]
+    fn a_machine_with_three_cores_free_is_quiet_and_a_hosted_runner_is_not() {
+        let idle = judge_headroom(10, 0.4);
+        assert_eq!(idle.state(), "present");
+        assert!(idle.why().contains("9.6 are free"), "{idle:?}");
+
+        // The runner this became a gate for: three cores, and the rest of a
+        // test binary already running on them.
+        let hosted = judge_headroom(3, 2.1);
+        assert_eq!(hosted.state(), "absent");
+        assert!(hosted.why().contains("needs 3"), "{hosted:?}");
+
+        // Exactly enough is enough; a criterion that refused its own boundary
+        // would be a different criterion from the one written down.
+        assert_eq!(judge_headroom(4, 1.0).state(), "present");
     }
 
     #[test]

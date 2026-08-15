@@ -24,6 +24,13 @@
 #                     machine nobody asked reads as unknown rather than as a failure
 #   audio-endpoint    an active render endpoint on the host
 #   audio-output      an output device on the Mac, and something audible comes out
+#   quiet-machine     three cores this machine is not already using, for a harness whose
+#                     subject is a cadence. Derived rather than chosen: one core for the
+#                     paced producer, one for whatever it is measured against, one for
+#                     everything else. Read from the one-minute load average, so it is a
+#                     prediction and the harness that needs it still takes its own
+#                     evidence from the run - a machine that goes busy between the
+#                     listing and the run is caught there rather than here
 #   human-attention   a person has to hold a window in the foreground, keep their
 #                     hands off a mouse, or say whether it felt right
 #
@@ -241,3 +248,16 @@ requires = ["windows-host", "human-attention"]
 minutes = 2
 negative_control = "not applicable"
 notes = "the only harness whose most important result is not a number; a person plays and says"
+
+# ---------------------------------------------------------------------------
+# Control plane
+# ---------------------------------------------------------------------------
+
+[gates.cadence-isolation]
+script = "tools/cadence-isolation-gate.sh"
+proves = "a control connection wedged until its writes time out costs a 120 Hz producer nothing it can spend"
+phase = "video"
+requires = ["quiet-machine"]
+minutes = 1
+negative_control = "the contended arm: the same wedge, the same timeout and the same filler sent from the producer's own thread rather than from a thread of its own, which is the arrangement this design rejected and which must break the bound the isolated arm holds"
+notes = "this was a unit test until a three-core runner failed it, which made it a claim about whichever machine ran the suite; the arms are still tests and still in the transport crate, ignored so that `cargo test -- --ignored` runs exactly them, and a run whose quiet half could not hold 120 Hz is refused here rather than failed there"

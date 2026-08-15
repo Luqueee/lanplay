@@ -23,12 +23,22 @@ fi
 
 # Cargo says the same thing twice: once as it happens and once in the summary at the end.
 # The summary is the useful half - it names every failing test in one place - and the panic
-# lines are what say why, so both are kept and nothing between them is.
+# is what says why, so both are kept and nothing between them is.
 #
 # Compile errors are matched too, because exit 1 without a panic is a build failure and that
 # is a different diagnosis from a test that ran and disagreed. Distinguishing them from the
-# outside was the whole of the last diagnosis, and it took an exit code and a guess.
+# outside was the whole of one diagnosis here, and it took an exit code and a guess.
+#
+# Every pattern below was fixed against a real cargo failure rather than written from memory,
+# after a first version emitted a test name and no reason at all. Three things it got wrong,
+# each of which silenced the line that mattered: rust puts the thread id between the name and
+# `panicked`, so anchoring on `^thread '...' panicked` matches nothing; the panic message is
+# the line after that one and carries no prefix to match on, so it is taken by position; and
+# `left:`/`right:` are indented under the assertion they belong to.
 extract() {
+  grep -E -A1 \
+    -e 'panicked at' \
+    "$log" | grep -vE '^(--|note: run with)'
   grep -E \
     -e '^error(\[E[0-9]+\])?:' \
     -e '^error: could not compile' \
@@ -36,13 +46,15 @@ extract() {
     -e '^test .* \.\.\. FAILED$' \
     -e '^failures:$' \
     -e '^ +[a-z_]+::[a-z_:]+$' \
-    -e "^thread '.*' panicked at" \
-    -e '^(assertion|left:|right:)' \
+    -e '^ *(assertion|left:|right:)' \
     -e '^test result: FAILED' \
     "$log"
 }
 
-lines=$(extract | head -60)
+# Cargo prints each failure twice, and the runner shows only the first ten annotations per
+# step, so a duplicate costs a line that would have said something. Order is kept: the panic
+# and its reason come first, because that is what a reader needs before the roll call.
+lines=$(extract | awk '!seen[$0]++' | head -20)
 
 if [ -z "$lines" ]; then
   # An unrecognised failure is worse than a recognised one, so say so with the tail rather

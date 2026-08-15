@@ -1,8 +1,15 @@
 //! Control plane over real loopback TCP.
 //!
-//! The last test in this file is the one that matters. Everything else checks
-//! that the handshake and the framing behave; that one checks that the control
-//! plane cannot reach the media path even when it is completely wedged.
+//! Most of this file checks that the handshake and the framing behave. The end
+//! of it checks the property the control plane exists to keep: that it cannot
+//! reach the media path even when it is completely wedged. That last claim is
+//! split in two, because half of it is logic and half of it is a measurement.
+//! The logic - a peer that stops reading turns the server's writes into
+//! timeouts - holds on any machine and stays in the suite. The measurement -
+//! what that costs a 120 Hz producer - is ignored here and runs in
+//! `tools/cadence-isolation-gate.sh`, which can refuse a machine that was in no
+//! position to answer. `cargo test` has only pass and fail, and neither is the
+//! right answer to a runner with three cores and no core to spare.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::io::{self, Read, Write};
@@ -15,7 +22,7 @@ use std::time::Duration;
 use lanplay_telemetry::{Nanos, Timestamp, wait_until};
 use lanplay_transport::{
     CONTROL_MAGIC, CONTROL_VERSION, ControlClient, ControlError, ControlFrame, ControlMessage,
-    ControlServer, FRAME_HEADER_LEN, PROTOCOL_VERSION, SessionToken, Ssrc,
+    ControlServer, ControlSession, FRAME_HEADER_LEN, PROTOCOL_VERSION, SessionToken, Ssrc,
 };
 
 /// Largest single allocation this test binary has ever asked for.
@@ -201,9 +208,7 @@ fn a_hundred_megabyte_payload_length_is_rejected_without_allocating() {
         offset: 0,
         requested: 0,
     };
-    let started = Timestamp::now();
     let error = ControlFrame::read(&mut reader).expect_err("absurd length must be rejected");
-    let elapsed = Timestamp::now().saturating_since(started);
 
     assert_eq!(control_error(&error), ControlError::PayloadTooLarge(ABSURD));
     assert_eq!(
@@ -214,7 +219,10 @@ fn a_hundred_megabyte_payload_length_is_rejected_without_allocating() {
         PEAK_ALLOCATION.load(Ordering::Relaxed) < ABSURD as usize,
         "no allocation may be sized by the declared length"
     );
-    assert!(elapsed < Nanos::from_millis(50), "rejection must be cheap");
+    // Nothing here times the rejection. The two checks above are what "cheap"
+    // means and they hold whatever the machine was doing; a wall-clock ceiling
+    // beside them would add no information and would be the only line in this
+    // test a descheduled thread could break.
 
     // And the same over loopback, where it must also close the connection.
     assert_eq!(
@@ -335,6 +343,14 @@ fn a_full_exchange_pings_and_starts_a_stream() {
 /// The deadline advances by a fixed period rather than from "now", so a late
 /// wakeup is absorbed by the next interval instead of accumulating.
 fn produce(ticks: usize, period: Nanos) -> Vec<u64> {
+    produce_with(ticks, period, || {})
+}
+
+/// The same, with work done on the producer's own thread after each item is
+/// stamped, so that the work delays the item after it rather than the one it
+/// belongs to. That is what a media loop doing anything else looks like from
+/// the inside.
+fn produce_with(ticks: usize, period: Nanos, mut per_tick: impl FnMut()) -> Vec<u64> {
     let mut deadline = Timestamp::now().add(period);
     let mut previous: Option<Timestamp> = None;
     let mut intervals = Vec::with_capacity(ticks);
@@ -345,6 +361,7 @@ fn produce(ticks: usize, period: Nanos) -> Vec<u64> {
             intervals.push(now.saturating_since(previous).get());
         }
         previous = Some(now);
+        per_tick();
         deadline = deadline.add(period);
     }
     intervals
@@ -357,118 +374,293 @@ fn percentile(intervals: &[u64], fraction: f64) -> Nanos {
     Nanos(sorted[index])
 }
 
-/// The isolation test.
+/// How long a sender waits on a write that has nowhere to go.
 ///
-/// A control peer that stops reading while the server keeps writing is the
-/// worst realistic case: the socket buffer fills, the server's writes block
-/// and then time out, and the connection stays wedged for seconds. None of
-/// that may be visible to a 120 fps producer.
-#[test]
-fn a_wedged_control_connection_does_not_perturb_a_120hz_producer() {
-    const TICKS: usize = 240; // two seconds at 120 Hz
+/// Short enough that a sender keeps hammering rather than parking once for the
+/// whole stall, which is what makes the wedge a continuous condition instead of
+/// a single event.
+const WRITE_TIMEOUT: Nanos = Nanos::from_millis(100);
 
-    let (phase_tx, phase_rx) = mpsc::channel();
-    let (baseline_tx, baseline_rx) = mpsc::channel();
-    let producer = thread::spawn(move || {
-        let baseline = produce(TICKS, FRAME_PERIOD);
-        baseline_tx.send(()).unwrap();
-        phase_rx.recv().unwrap();
-        (baseline, produce(TICKS, FRAME_PERIOD))
-    });
+/// A control connection whose peer has stopped reading.
+///
+/// The client is held rather than used: dropping it closes the socket, the
+/// server's writes drain and complete, and the condition being studied stops
+/// existing. The listener is held for the same reason.
+struct Wedged {
+    client: ControlClient,
+    server: Arc<ControlServer>,
+    session: ControlSession,
+}
 
-    // Baseline runs with the control plane entirely absent.
-    baseline_rx.recv().unwrap();
-
+fn wedged() -> Wedged {
     let server = server("host");
     let addr = server.local_addr().unwrap();
-    let stop = Arc::new(AtomicBool::new(false));
-    let writes_blocked = Arc::new(AtomicUsize::new(0));
-
-    let writer = {
+    let accepting = {
         let server = Arc::clone(&server);
-        let stop = Arc::clone(&stop);
-        let writes_blocked = Arc::clone(&writes_blocked);
-        thread::spawn(move || {
-            let mut session = server.accept_session(SECOND).expect("accept session");
-            // Short enough that the writer keeps hammering rather than parking
-            // once for the whole stall.
-            session
-                .set_write_timeout(Nanos::from_millis(100))
-                .expect("write timeout");
-            // Near-maximum frames. macOS grows a loopback socket buffer while
-            // it is being filled, so a stream of thirty-byte pings outruns the
-            // buffer for seconds and the connection never actually wedges; a
-            // test that only sometimes reproduces the condition it names is
-            // worse than no test. At 60 KiB a frame the two 4 MiB buffers are
-            // full in well under a hundred writes.
-            let filler = ControlMessage::ServerHello {
-                protocol_version: PROTOCOL_VERSION,
-                session_token: SessionToken::from_bytes([0u8; 16]),
-                server_name: "x".repeat(60_000),
-            };
-            let mut sent = 0u64;
-            while !stop.load(Ordering::Relaxed) {
-                match session.send(&filler) {
-                    Ok(()) => sent += 1,
-                    Err(_) => {
-                        writes_blocked.fetch_add(1, Ordering::Relaxed);
-                    }
-                }
-            }
-            sent
-        })
+        thread::spawn(move || server.accept_session(SECOND).expect("accept session"))
     };
 
     let mut client = ControlClient::connect(addr, SECOND).expect("connect");
     client.hello("mac").expect("hello");
     // From here the client never reads again. The server's writes have nowhere
     // to go.
-    phase_tx.send(()).unwrap();
+    let session = accepting.join().unwrap();
+    session
+        .set_write_timeout(WRITE_TIMEOUT)
+        .expect("write timeout");
 
-    let (baseline, stalled) = producer.join().unwrap();
-    stop.store(true, Ordering::Relaxed);
-    let sent = writer.join().unwrap();
-    drop(client);
+    Wedged {
+        client,
+        server,
+        session,
+    }
+}
 
-    let baseline_p99 = percentile(&baseline, 0.99);
-    let stalled_p99 = percentile(&stalled, 0.99);
-    let baseline_max = percentile(&baseline, 1.0);
-    let stalled_max = percentile(&stalled, 1.0);
-    println!(
-        "cadence p99: baseline {baseline_p99}, stalled {stalled_p99} \
-         (max {baseline_max} / {stalled_max}); \
-         control frames written {sent}, blocked writes {}",
-        writes_blocked.load(Ordering::Relaxed)
-    );
+/// A near-maximum frame.
+///
+/// macOS grows a loopback socket buffer while it is being filled, so a stream
+/// of thirty-byte pings outruns the buffer for seconds and the connection never
+/// actually wedges; a test that only sometimes reproduces the condition it
+/// names is worse than no test. At 60 KiB a frame the two 4 MiB buffers are
+/// full in well under a hundred writes.
+fn filler() -> ControlMessage {
+    ControlMessage::ServerHello {
+        protocol_version: PROTOCOL_VERSION,
+        session_token: SessionToken::from_bytes([0u8; 16]),
+        server_name: "x".repeat(60_000),
+    }
+}
+
+/// Frames that got out before the buffers filled, and writes that timed out
+/// afterwards.
+///
+/// Both are populations rather than rates. A connection that carried nothing
+/// was never wedged but broken, and one whose every write succeeded was never
+/// wedged at all, so a run reporting a zero in either has proved nothing
+/// whatever the cadence figures next to it say.
+#[derive(Clone, Copy, Default)]
+struct Writes {
+    out: u64,
+    blocked: u64,
+}
+
+impl Writes {
+    fn record(&mut self, sent: io::Result<()>) {
+        match sent {
+            Ok(()) => self.out += 1,
+            Err(_) => self.blocked += 1,
+        }
+    }
+}
+
+/// The half of the isolation claim that is logic: a peer that stops reading
+/// must turn the server's writes into timeouts rather than into a thread that
+/// never comes back.
+///
+/// Nothing here is a measurement, which is why it stays in the suite. The
+/// deadline is a liveness bound two orders of magnitude looser than the time a
+/// loopback buffer takes to fill, not a claim about how fast this machine is.
+#[test]
+fn a_control_peer_that_stops_reading_turns_the_servers_writes_into_timeouts() {
+    let mut wedged = wedged();
+    let filler = filler();
+    let mut writes = Writes::default();
+
+    let deadline = Timestamp::now().add(Nanos::from_millis(30_000));
+    while writes.blocked == 0 && Timestamp::now() < deadline {
+        writes.record(wedged.session.send(&filler));
+    }
 
     assert!(
-        writes_blocked.load(Ordering::Relaxed) > 0,
+        writes.out > 0,
+        "the server got no frame out at all, so the connection was broken \
+         rather than wedged"
+    );
+    assert!(
+        writes.blocked > 0,
+        "no write timed out in thirty seconds, so either the socket never \
+         filled or a send is still parked in the kernel"
+    );
+}
+
+/// How much cadence the isolation claim allows a wedged control connection to
+/// cost, and where the number comes from.
+///
+/// The client aims each frame at least 2.00 ms in front of the refresh it is
+/// meant for - `MARGIN_FLOOR` in `macos/client/src/phase.rs`. That cushion is
+/// not spare: 1.22 ms of it is the reference run's decode spread between p50
+/// and p99, and 0.25 ms is the phase loop's dead zone, which leaves 0.53 ms
+/// nothing has claimed. A producer perturbed by more than that eats into a
+/// cushion something else is already spending, and the frame it lands on waits
+/// a whole period for the next refresh.
+///
+/// Restated here rather than imported, because this crate must not depend on
+/// the client; a number that crosses that seam by hand has to say where it came
+/// from.
+const CADENCE_TOLERANCE: Nanos = Nanos(530_000);
+
+/// A second of production thrown away before the quiet half is taken.
+///
+/// The process has just been started by cargo, which is still linking, waiting
+/// and reaping around it, and a baseline taken in that second describes cargo
+/// rather than the machine: it read 9.05 ms at p99 with a 13.07 ms worst
+/// interval on an otherwise idle Mac that then held 8.34 ms for the rest of the
+/// run. Since the quiet half is the evidence the gate refuses on, a systematic
+/// artefact in it would spend its refusals on the wrong runs.
+fn warm_up() {
+    produce(120, FRAME_PERIOD);
+}
+
+/// The one line the gate reads, and the only place these numbers leave the
+/// process.
+///
+/// The bound is printed with the measurement rather than being known to the
+/// script as well: a criterion stated in two places is a criterion that drifts,
+/// so the gate applies the one the run was actually judged against. Every value
+/// is named, so that a renamed key stops the gate instead of being read as a
+/// zero - which is how a sibling harness once read 6001 captured packets as
+/// none.
+fn report(arm: &str, baseline: &[u64], stalled: &[u64], writes: Writes) -> i64 {
+    let baseline_p99 = percentile(baseline, 0.99);
+    let stalled_p99 = percentile(stalled, 0.99);
+    let perturbation = stalled_p99.get() as i64 - baseline_p99.get() as i64;
+
+    println!(
+        "cadence-isolation arm={arm} period_ns={} tolerance_ns={} \
+         baseline_intervals={} stalled_intervals={} \
+         baseline_p99_ns={} stalled_p99_ns={} \
+         baseline_max_ns={} stalled_max_ns={} perturbation_ns={perturbation} \
+         frames_written={} blocked_writes={}",
+        FRAME_PERIOD.get(),
+        CADENCE_TOLERANCE.get(),
+        baseline.len(),
+        stalled.len(),
+        baseline_p99.get(),
+        stalled_p99.get(),
+        percentile(baseline, 1.0).get(),
+        percentile(stalled, 1.0).get(),
+        writes.out,
+        writes.blocked,
+    );
+    perturbation
+}
+
+/// The isolation measurement, and the reason the control plane is allowed a
+/// thread of its own.
+///
+/// A control peer that stops reading while the server keeps writing is the
+/// worst realistic case: the socket buffer fills, the server's writes block and
+/// then time out, and the connection stays wedged for seconds. None of that may
+/// be visible to a 120 fps producer.
+///
+/// Both halves are produced by this thread moments apart, so what changes
+/// between them is the wedge and not where the producer was placed. Whether the
+/// machine was in a position to be asked at all is the gate's question: the
+/// quiet half is the evidence, and a machine whose quiet half could not hold
+/// the cadence makes the gate refuse rather than fail.
+///
+/// Ignored because it is a measurement rather than logic. It needs three cores
+/// it can have to itself for five seconds - one for the producer, which spins
+/// out the last three milliseconds of every period, one for the writer
+/// hammering the wedged socket, and one for everything else the machine is
+/// doing. `tools/cadence-isolation-gate.sh` is where it runs and what refuses
+/// on its behalf when they were not there.
+#[test]
+#[ignore = "a measurement: tools/cadence-isolation-gate.sh, three free cores"]
+fn a_wedged_control_connection_does_not_perturb_a_120hz_producer() {
+    const TICKS: usize = 240; // two seconds at 120 Hz
+
+    warm_up();
+    // The quiet half, with the control plane entirely absent.
+    let baseline = produce(TICKS, FRAME_PERIOD);
+
+    let Wedged {
+        client,
+        server,
+        mut session,
+    } = wedged();
+    let stop = Arc::new(AtomicBool::new(false));
+    let writer = {
+        let stop = Arc::clone(&stop);
+        thread::spawn(move || {
+            let filler = filler();
+            let mut writes = Writes::default();
+            while !stop.load(Ordering::Relaxed) {
+                writes.record(session.send(&filler));
+            }
+            writes
+        })
+    };
+
+    let stalled = produce(TICKS, FRAME_PERIOD);
+    stop.store(true, Ordering::Relaxed);
+    let writes = writer.join().unwrap();
+    drop(client);
+    drop(server);
+
+    let perturbation = report("wedged", &baseline, &stalled, writes);
+
+    assert!(
+        writes.blocked > 0,
         "the control connection never actually wedged, so this proves nothing"
     );
-
-    // The claim in the name is differential: the wedged connection must not
-    // perturb the producer. Comparing each half against an absolute 8.33 ms
-    // measures the machine's scheduler instead, and a busy machine then fails
-    // a test about isolation while proving nothing either way. Both halves run
-    // on the same machine moments apart, so scheduling noise lands on both and
-    // cancels in the difference.
-    let perturbation = stalled_p99.get() as f64 - baseline_p99.get() as f64;
-    let tolerance = Nanos::from_millis(1).get() as f64;
     assert!(
-        perturbation < tolerance,
-        "the wedged connection cost the producer {:.3} ms at p99 \
-         (baseline {baseline_p99}, stalled {stalled_p99})",
-        perturbation / 1_000_000.0
+        writes.out > 0,
+        "the server got no frame out at all, so the connection was broken \
+         rather than wedged"
     );
 
-    // A loose floor under the whole measurement: if the baseline itself is
-    // nowhere near the target the machine was not producing at 120 Hz at all,
-    // and a small difference between two useless numbers proves nothing.
-    let target = FRAME_PERIOD.get() as f64;
-    let sanity = Nanos::from_millis(4).get() as f64;
+    // The claim in the name is differential. Comparing each half against an
+    // absolute 8.33 ms measures the machine's scheduler instead, and a busy
+    // machine then fails a test about isolation while proving nothing either
+    // way.
     assert!(
-        (baseline_p99.get() as f64 - target).abs() < sanity,
-        "baseline p99 {baseline_p99} is too far from 8.33 ms for this run to \
-         say anything about isolation"
+        perturbation < CADENCE_TOLERANCE.get() as i64,
+        "the wedged connection cost the producer {:.3} ms at p99, against a \
+         bound of {CADENCE_TOLERANCE}",
+        perturbation as f64 / 1_000_000.0
+    );
+}
+
+/// The arm that must fail the criterion above, and the reason passing it means
+/// anything.
+///
+/// One thing changes from the arm above: the same wedge, the same timeout, the
+/// same filler, sent from the producer's own thread instead of from a thread of
+/// its own. That is the arrangement this design rejected, and a measurement
+/// that cannot tell the two apart has nothing to say about the one it likes -
+/// which is the shape both false passes in this project had.
+///
+/// Half as many ticks as the isolated arm, because every tick of its second
+/// half costs the write timeout and the point is made a hundred times over by
+/// the end of a second.
+#[test]
+#[ignore = "a measurement: tools/cadence-isolation-gate.sh, three free cores"]
+fn a_producer_that_sends_on_the_control_plane_itself_is_wrecked_by_the_same_wedge() {
+    const TICKS: usize = 120; // one second at 120 Hz
+
+    warm_up();
+    let baseline = produce(TICKS, FRAME_PERIOD);
+
+    let mut wedged = wedged();
+    let filler = filler();
+    let mut writes = Writes::default();
+    let stalled = produce_with(TICKS, FRAME_PERIOD, || {
+        writes.record(wedged.session.send(&filler));
+    });
+
+    let perturbation = report("contended", &baseline, &stalled, writes);
+
+    assert!(
+        writes.blocked > 0,
+        "the control connection never actually wedged, so this arm contended \
+         with nothing"
+    );
+    assert!(
+        perturbation >= CADENCE_TOLERANCE.get() as i64,
+        "a producer making the blocking write itself lost only {:.3} ms at \
+         p99, so this measurement cannot see the arrangement it exists to rule \
+         out",
+        perturbation as f64 / 1_000_000.0
     );
 }

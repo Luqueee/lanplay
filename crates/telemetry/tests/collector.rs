@@ -161,13 +161,36 @@ fn percentiles_reflect_recorded_segments() {
     assert!(!snapshot.p99_is_soaked(), "100 frames must not claim a p99");
 }
 
+/// The clock of the other machine, whichever machine is running this.
+///
+/// Naming Windows outright quietly asserted that this build is the Mac. On the host
+/// `LocalWindows` is the local domain, so nothing crossed, the counter below read zero and
+/// the failure arrived as `left == right` with no hint that a platform had been assumed.
+fn a_foreign_domain() -> ClockDomain {
+    match ClockDomain::local() {
+        ClockDomain::LocalWindows => ClockDomain::LocalMac,
+        _ => ClockDomain::LocalWindows,
+    }
+}
+
+/// The one thing the helper above has to get right.
+///
+/// It cannot fail on a Mac, and saying so matters more than having it: hardcoding either
+/// platform still differs from the local domain on the other one, so a green run here proves
+/// nothing about this and the Windows job is what exercises it. Kept because that job now
+/// exists and this is the shortest statement of what the helper is for.
+#[test]
+fn the_foreign_domain_is_foreign_wherever_this_runs() {
+    assert_ne!(a_foreign_domain(), ClockDomain::local());
+}
+
 #[test]
 fn marks_from_two_clocks_are_measured_but_flagged() {
     // What phase 5 will do: merge the host's marks, recorded on the Windows
     // clock, into a timeline the Mac is assembling.
     let telemetry = Telemetry::start(config());
     let local = telemetry.recorder();
-    let remote = local.with_domain(ClockDomain::LocalWindows);
+    let remote = local.with_domain(a_foreign_domain());
     let frame = FrameId::new(11);
 
     remote.mark_at(
