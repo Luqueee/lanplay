@@ -1,0 +1,122 @@
+gate      audio-e2e-gate   arm t20-p1   span 120.1 s   commit 7bf7221
+started   1786825514690 unix ms
+args      bind 0.0.0.0:5014, buffer_frames 256, frame_ms 5, ring_frames 4096, target_ms 20.0
+covers    rtp receive, jitter buffer, opus decode, coreaudio render
+
+environment
+
+  channels                                 2
+  device                                   Altavoces del MacBook Pro
+  device_chosen                            named
+  device_span_s                            119.951217833
+  frame_ms                                 5
+  io_buffer_frames                         256
+  jitter_ceiling_ms                        60.0
+  jitter_slots                             14
+  jitter_target_ms                         20.0
+  measurements_dropped                     0
+  producer_scheduled_as                    time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+  receiver_scheduled_as                    time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+  ring_frames                              4096
+  ring_prime_frames                        496
+  sample_rate_hz                           48000
+  ssrc                                     1470326376
+  windows                                  [{"continuity_hole":126000,"frames_played":1476,"jitter_underruns":525,"plc_frames":525,"render_callbacks":1876,"render_overruns":0,"render_underruns":0,"rtp_lost":0,"rtp_received":2002,"samples_expected":480240,"samples_played":354240,"seconds":10.005752667},{"continuity_hole":100080,"frames_played":1584,"jitter_underruns":417,"plc_frames":417,"render_callbacks":1876,"render_overruns":0,"render_underruns":0,"rtp_lost":0,"rtp_received":2006,"samples_expected":480240,"samples_played":380160,"seconds":10.006098625},{"continuity_hole":116400,"frames_played":1516,"jitter_underruns":485,"plc_frames":485,"render_callbacks":1876,"render_overruns":0,"render_underruns":0,"rtp_lost":0,"rtp_received":2000,"samples_expected":480240,"samples_played":363840,"seconds":10.003851917},{"continuity_hole":46800,"frames_played":1805,"jitter_underruns":195,"plc_frames":195,"render_callbacks":1875,"render_overruns":0,"render_underruns":0,"rtp_lost":0,"rtp_received":2000,"samples_expected":480000,"samples_played":433200,"seconds":10.000837833},{"continuity_hole":75120,"frames_played":1688,"jitter_underruns":313,"plc_frames":313,"render_callbacks":1876,"render_overruns":0,"render_underruns":0,"rtp_lost":0,"rtp_received":2002,"samples_expected":480240,"samples_played":405120,"seconds":10.003800667},{"continuity_hole":95520,"frames_played":1603,"jitter_underruns":398,"plc_frames":398,"render_callbacks":1876,"render_overruns":0,"render_underruns":0,"rtp_lost":0,"rtp_received":2000,"samples_expected":480240,"samples_played":384720,"seconds":10.003865875},{"continuity_hole":93840,"frames_played":1609,"jitter_underruns":391,"plc_frames":391,"render_callbacks":1875,"render_overruns":0,"render_underruns":0,"rtp_lost":0,"rtp_received":1992,"samples_expected":480000,"samples_played":386160,"seconds":10.000804875},{"continuity_hole":109920,"frames_played":1542,"jitter_underruns":458,"plc_frames":458,"render_callbacks":1875,"render_overruns":0,"render_underruns":0,"rtp_lost":0,"rtp_received":2008,"samples_expected":480000,"samples_played":370080,"seconds":10.002903666},{"continuity_hole":115200,"frames_played":1521,"jitter_underruns":480,"plc_frames":480,"render_callbacks":1876,"render_overruns":0,"render_underruns":0,"rtp_lost":0,"rtp_received":2002,"samples_expected":480240,"samples_played":365040,"seconds":10.000911834},{"continuity_hole":129360,"frames_played":1462,"jitter_underruns":539,"plc_frames":539,"render_callbacks":1876,"render_overruns":0,"render_underruns":0,"rtp_lost":0,"rtp_received":1992,"samples_expected":480240,"samples_played":350880,"seconds":10.005443916},{"continuity_hole":116880,"frames_played":1513,"jitter_underruns":487,"plc_frames":487,"render_callbacks":1875,"render_overruns":0,"render_underruns":0,"rtp_lost":0,"rtp_received":2006,"samples_expected":480000,"samples_played":363120,"seconds":10.000601209},{"continuity_hole":115920,"frames_played":1501,"jitter_underruns":483,"plc_frames":483,"render_callbacks":1860,"render_overruns":0,"render_underruns":0,"rtp_lost":0,"rtp_received":1988,"samples_expected":476160,"samples_played":360240,"seconds":9.920315125}]
+
+observations
+
+  arrival_delay_max_ms                     45.271
+  arrival_delay_min_ms                     -28.67
+  arrival_delay_p50_ms                     -20.499
+  arrival_delay_p95_ms                     25.868
+  arrival_delay_p99_ms                     34.812
+  continuity_hole                          1241280
+  deadlines_granted                        1
+  decode_failures                          0
+  decode_max_us                            29
+  decode_p50_us                            8
+  decode_p99_us                            17
+  device_start_latency_ms                  33.815
+  frames_played                            18828
+  jitter_occupancy_max_ms                  25
+  jitter_occupancy_p50_ms                  20
+  jitter_occupancy_p95_ms                  25
+  jitter_occupancy_p99_ms                  25
+  jitter_overrun_frames                    0
+  jitter_overruns                          0
+  jitter_underruns                         5172
+  plc_frames                               5172
+  producer_interval_p50_us                 5000
+  producer_interval_p99_us                 5000
+  render_callbacks                         22492
+  render_frames_consumed                   5757952
+  render_interval_p50_us                   5333
+  render_interval_p99_us                   5345
+  render_odd_cycles                        0
+  render_overrun_frames                    0
+  render_overruns                          0
+  render_underrun_frames                   0
+  render_underruns                         0
+  ring_occupancy_max_frames                2352
+  ring_occupancy_min_frames                2080
+  ring_occupancy_p50_frames                2208
+  rtp_duplicate                            0
+  rtp_expected                             24007
+  rtp_foreign_ssrc                         0
+  rtp_late                                 5172
+  rtp_lost                                 0
+  rtp_off_grid                             0
+  rtp_oversize                             0
+  rtp_received                             24007
+  rtp_reordered                            0
+  rtp_unique                               24007
+  samples_expected                         5760000
+  samples_played                           4518720
+  tone_analysed_frames                     24000
+  tone_channels_distinct                   1
+  tone_left_dbfs                           -22.22
+  tone_left_hz                             997.002
+  tone_resolution_hz                       2
+  tone_right_dbfs                          -21.606
+  tone_right_hz                            1997.007
+  windows                                  12
+  worst_window_hole                        129360
+
+findings
+
+  FINDING 0.000 per cent of the stream was lost over the link, 0 packets of the 24007 the sequence numbers describe
+  FINDING frames arrived -20.5 ms past their moment at p50, 25.9 at p95, 34.8 at p99 and 45.3 at worst, against a target of 20 ms; negative is margin in hand, and the shape is what says whether the target is short by a fixed amount every frame pays or long enough for all but a tail
+  FINDING the jitter buffer held 20.0 ms at p50 and 25.0 ms at p99 against a 20 ms target, measured after serving each frame
+  FINDING the ring sat at 2208 frames of 4096 at p50, having been primed to 496; the difference is the 33.8 ms `AudioDeviceStart` spent getting the device going, during which the producer kept depositing and the device consumed nothing, so it is the ring's contribution to latency and it belongs to the device rather than to the link
+
+what must not be zero
+
+  PASS  the stream arrived                       24007
+        every figure in this document is computed over these datagrams, so a run that received none makes each of them an absence rather than a number
+  PASS  audio was decoded and not merely concealed 18828
+        the concealer produces plausible samples from an empty stream indefinitely, so a callback count, an underrun count of zero and a continuity figure are all consistent with a path that carried nothing; a decoded frame is not
+  PASS  the played channels stay distinct        1
+        two channels reading one frequency is consistent with a fold to mono, with one channel encoded twice, and with an analysis reading its own scratch buffer, and every count in this document is consistent with all three
+
+what must be zero
+
+  FAIL  every sample the stream produced reached the device 1241280 over 5760000 samples_expected
+        this is the criterion the phase turns on: expected counts every per-channel sample the playout cursor travelled and played counts the ones the producer deposited, with a gap concealment credited because the waveform continued across it and an underrun refused because nothing of the stream was there. The population is the expected samples, because a hole of zero over an expectation of zero is a run that carried nothing
+  PASS  the device was never handed silence      0 over 22492 render_callbacks
+        a cycle the ring could not fill is a whole IO buffer of silence sent to a device in place of audio, which is audible however small the sample count beside it looks; the population is the cycles, because no cycles means no silence for a trivial reason
+  PASS  no frame arrived in time and failed to decode 0 over 18828 frames_played
+        a payload the decoder refuses is a disagreement between the two ends about the format, which no amount of buffering repairs and which concealment hides completely in every other counter here
+  PASS  no packet carried a timestamp off the frame grid 0 over 24007 rtp_received
+        a timestamp that is not a whole number of frames from the one that anchored the stream is a sender running at another frame duration, and the symptom is a run that conceals everything and plays nothing
+
+what else must hold
+
+  PASS  decode p99 under a tenth of the frame    17 against a bound of 500
+        a tenth of the 5 ms frame is 500 us, and the producer has to decode and deposit inside its period or the device finds an empty ring; p99 rather than the mean, because a frame late once every hundred is a click a listener hears
+  PASS  the left channel arrives as its own tone 997.002 against 997 give or take 5
+        a packet count and a callback count agree just as happily when the path carries digital silence, and this project has read that agreement as success; 997 Hz comes out of the samples that were played, at a window resolution of 2 Hz
+  PASS  the right channel arrives as its own tone 1997.007 against 1997 give or take 5
+        the two channels carry different frequencies so that channel order is provable across the whole link rather than assumed, and a right channel reading 997 Hz is what a swap looks like
+
+FAIL every sample the stream produced reached the device: 1241280 over 5760000 samples_expected
+     this is the criterion the phase turns on: expected counts every per-channel sample the playout cursor travelled and played counts the ones the producer deposited, with a gap concealment credited because the waveform continued across it and an underrun refused because nothing of the stream was there. The population is the expected samples, because a hole of zero over an expectation of zero is a run that carried nothing

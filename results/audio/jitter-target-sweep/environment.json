@@ -1,0 +1,525 @@
+{
+  "counts": {
+    "gates": 22,
+    "listed": 22,
+    "owing_a_negative_control": 6,
+    "runnable": 14
+  },
+  "docs": "docs/testing.md",
+  "environment": {
+    "audio-endpoint": {
+      "state": "present",
+      "why": "LG ULTRAWIDE (NVIDIA High Definition Audio)"
+    },
+    "audio-output": {
+      "state": "present",
+      "why": "7 output device(s), ULT WEAR by default at 44100 Hz 2 ch, which cannot carry the 48000 Hz 2 ch stream without a converter this project refuses; a gate that names its own device is not held up by it"
+    },
+    "human-attention": {
+      "state": "absent",
+      "why": "a person has to be at the machine; no probe can stand in for one"
+    },
+    "lab-source": {
+      "state": "absent",
+      "why": "the host does not have it"
+    },
+    "mac-display": {
+      "state": "present",
+      "why": "Color LCD at 1512 x 982 @ 120.00Hz"
+    },
+    "mac-h264-decode": {
+      "state": "present",
+      "why": "VideoToolbox decodes H.264, HEVC, AV1 in hardware"
+    },
+    "nvidia-nvenc": {
+      "state": "present",
+      "why": "NVIDIA GeForce RTX 4060 Ti"
+    },
+    "quiet-machine": {
+      "state": "present",
+      "why": "10 cores at a load of 3.06, so about 6.9 are free"
+    },
+    "radio": {
+      "state": "present",
+      "why": "en0 is 192.168.1.108 and the host answers"
+    },
+    "virtual-display": {
+      "state": "absent",
+      "why": "the host does not have it"
+    },
+    "windows-host": {
+      "state": "present",
+      "why": "ssh windows answered"
+    }
+  },
+  "gates": [
+    {
+      "human_attention": null,
+      "minutes": 2,
+      "name": "audio-gate",
+      "negative_control": "the silent-endpoint arm: the endpoint held open by a render stream of zeros, which delivers its whole cadence and no audio, so the samples are the only thing that can catch it. Measured, 1001 packets and 480480 frames of 480000 nominal over ten seconds, no position gap, no discontinuity in flight, 0 silent packets and the probe exiting 0 - the criteria firing are the tone frequencies and the channel distinctness, over a full population. Stopping the tone was tried first and refused as the control: an idle endpoint delivers 0 packets and 0 frames, which is the report a capture started in session 0 gives and the report a probe that never started gives, and an arm that produces nothing certifies whatever it was pointed at",
+      "notes": "the tone carries a different frequency per channel so channel order and content are provable, which a frame count cannot do. WASAPI leaves the silent flag clear on a buffer full of zeros, since the flag is the engine declaring its buffer undefined rather than a statement about content, so the silent-packet count cannot stand in for the tone detector",
+      "optional_requires": [],
+      "owes_negative_control": false,
+      "phase": "A1",
+      "proves": "WASAPI loopback delivers a known format and cadence with every frame accounted for by device position",
+      "requires": [
+        "windows-host",
+        "audio-endpoint"
+      ],
+      "script": "tools/audio-gate.sh",
+      "status": {
+        "state": "runnable"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 1,
+      "name": "codec-gate",
+      "negative_control": "the exchanged arm: the 5 ms arm with the two contract tones swapped before the encoder, which the two criteria naming a frequency per channel must refuse. The exchange is the smallest perturbation that reaches a criterion - same spectrum, same level, same frame count - so the other four checks hold and the arm is evidence about those two rather than about a path that broke. Rejected: a frame duration Opus does not permit, refused by the probe before a document exists; a truncated packet, which makes the arm emit nothing; a mono decoder against a stereo encoder, which fires the sample-count criterion but aliases 997 Hz onto 1994 Hz, inside the right channel's tolerance of 1997",
+      "notes": "runs entirely on the Mac; libopus vendors C so nothing here cross-checks for Windows",
+      "optional_requires": [],
+      "owes_negative_control": false,
+      "phase": "A2",
+      "proves": "Opus round-trips the tone with the sample count exact, and what a 5 ms frame costs against a 10 ms one",
+      "requires": [],
+      "script": "tools/codec-gate.sh",
+      "status": {
+        "state": "runnable"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 1,
+      "name": "audio-rtp-gate",
+      "negative_control": "the broken arm: the same loopback path relayed through udp-fault at seed 20250815, which must produce loss, duplicates and reordering this gate reads as failures. Wired with one probe first, sending from the socket it received on, which udp-fault reads as the reply direction: 2000 of 2000 lost and the control passed on the harness being broken rather than on the criteria firing",
+      "notes": "the radio arm needs a second endpoint and declares itself unavailable rather than sending to this machine's own address, which the kernel puts on loopback",
+      "optional_requires": [
+        "windows-host",
+        "radio"
+      ],
+      "owes_negative_control": false,
+      "phase": "A3",
+      "proves": "one Opus frame is one datagram and the RTP timestamp counts samples exactly",
+      "requires": [],
+      "script": "tools/audio-rtp-gate.sh",
+      "status": {
+        "state": "runnable"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 7,
+      "name": "jitter-gate",
+      "negative_control": "the loss arm: it must show concealment happening, and a loss arm with nothing concealed fails rather than passes",
+      "notes": "the ceiling cannot be exercised by a delay - only a sink slower than its source can breach it, which is A7",
+      "optional_requires": [],
+      "owes_negative_control": false,
+      "phase": "A4",
+      "proves": "the jitter buffer conceals rather than stalling and never grows past its ceiling under loss, a stall and churn",
+      "requires": [],
+      "script": "tools/jitter-gate.sh",
+      "status": {
+        "state": "runnable"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 6,
+      "name": "render-gate",
+      "negative_control": "the producer at default priority: it underran ten times in three hundred seconds, and that arrangement is what the promoted one has to beat",
+      "notes": "five minutes because a twenty second run called the broken arrangement clean two times out of three",
+      "optional_requires": [],
+      "owes_negative_control": false,
+      "phase": "A5",
+      "proves": "a ring buffer feeds CoreAudio for five minutes with nothing unfilled, nothing overwritten and nothing missing",
+      "requires": [
+        "audio-output"
+      ],
+      "script": "tools/render-gate.sh",
+      "status": {
+        "state": "runnable"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 15,
+      "name": "audio-e2e-gate",
+      "negative_control": "the broken-link arm: udp-fault holds every datagram for 400 ms every 2 s, forty times the jitter target, so what arrives is past its moment and continuity breaks. The arm must fail, and the gate fails if it passes",
+      "notes": "the deciding counter is continuity, samples expected against played, because concealment counts as played and an underrun does not - a run whose underruns are zero because the concealer ran throughout carried nothing. The sender runs in the interactive session through win-session.sh since session 0 has no audio endpoints, and it is built on the host because libopus needs the cmake inside BuildTools. Refuses rather than reports when the host, the radio, the endpoint, the output device or an envelope is missing",
+      "optional_requires": [],
+      "owes_negative_control": false,
+      "phase": "A6",
+      "proves": "Windows loopback to Opus to RTP to the jitter buffer to CoreAudio holds continuous audio over a minute and over ten",
+      "requires": [
+        "windows-host",
+        "radio",
+        "audio-endpoint",
+        "audio-output"
+      ],
+      "script": "tools/audio-e2e-gate.sh",
+      "status": {
+        "state": "runnable"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 40,
+      "name": "jitter-target-sweep",
+      "negative_control": "the control arm: the largest target in the sweep, 20 ms, behind udp-fault holding every datagram for 400 ms every 2 s at seed 20250815 - twenty times that target, so no candidate here could have held it. It runs first and aborts the sweep rather than being discovered forty minutes later, because a deciding counter that cannot come out negative makes every ranking above it worthless. It has to fail by the right amount as well as fail: a fifth of the stream is held, A6's identical arm lost 21.0 per cent of its samples, and an arm losing less than 10 per cent is refused as a fault that never reached the path rather than counted as a control. Rejected: a target of zero, which the receiver accepts silently and the buffer then quantises up to one frame - measured, --target-ms 0 and --target-ms 1 both report target ms 5 over a 25 ms ceiling, identical to --target-ms 5 - so it is a fourth copy of the smallest candidate arm and would hold every criterion on any link where 5 ms holds them",
+      "notes": "the deciding counter is A6's, continuity of samples expected against played, because a run whose underruns are zero because the concealer ran throughout carried nothing. Each target is measured three times over 120 s, the passes ordered 5-10-15-20 then exactly reversed so a monotone drift cancels between them and then in a third order, and the three arms at the incumbent 10 ms are the instrument's own noise floor. Refuses rather than ranks when those three disagree on the median frame's margin by the 5 ms step between adjacent targets, when the hole rises with the target by more than they disagree by, or when the arms' mean PHY rates differ by more than a factor of two or their mean signal by more than 8 dB. A sweep where every target held or none did is decided without any of that, since neither outcome needs one arm compared with another. VERDICT_ONLY=1 with OUT set re-decides a recorded sweep, which is how the arithmetic is exercised without spending the radio",
+      "optional_requires": [],
+      "owes_negative_control": false,
+      "phase": "A8",
+      "proves": "which jitter target this path should pay: the smallest of 5, 10, 15 and 20 ms that holds continuity, or that none of them does",
+      "requires": [
+        "windows-host",
+        "radio",
+        "audio-endpoint",
+        "audio-output"
+      ],
+      "script": "tools/jitter-target-sweep.sh",
+      "status": {
+        "state": "runnable"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 2,
+      "name": "e2e-gate",
+      "negative_control": "the fixture parameter set: a decoder configured from anything but the encoder's own parameter sets rejects real slices, so that arm must fail",
+      "notes": "REQUIRE_CLEAN_DISPLAY=0 makes it a link experiment and its presentation figures then mean nothing; LINK_ONLY=1 drops the renderer entirely",
+      "optional_requires": [],
+      "owes_negative_control": false,
+      "phase": "video",
+      "proves": "capture to NVENC to RTP to VideoToolbox to Metal, with delivery and presentation accounted separately",
+      "requires": [
+        "windows-host",
+        "nvidia-nvenc",
+        "virtual-display",
+        "lab-source",
+        "radio",
+        "mac-display",
+        "mac-h264-decode"
+      ],
+      "script": "tools/e2e-gate.sh",
+      "status": {
+        "requirement": "virtual-display",
+        "state": "blocked",
+        "why": "the host does not have it"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 2,
+      "name": "phase-sign",
+      "negative_control": "a run where the shift never reached the producer: the step is absent and the gate refuses instead of reading the drift as a direction",
+      "notes": "finds the step in the series rather than comparing the ends of a run, because the drift sweeps a period every few hundred seconds",
+      "optional_requires": [],
+      "owes_negative_control": false,
+      "phase": "video",
+      "proves": "which way a known shift moves the phase between a source's frame and the viewer's refresh",
+      "requires": [
+        "windows-host",
+        "virtual-display",
+        "lab-source",
+        "radio",
+        "mac-display",
+        "mac-h264-decode"
+      ],
+      "script": "tools/phase-sign.sh",
+      "status": {
+        "requirement": "virtual-display",
+        "state": "blocked",
+        "why": "the host does not have it"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 8,
+      "name": "phase-lottery",
+      "negative_control": "not applicable: both outcomes are answers, and the harness reports which rather than passing or failing",
+      "notes": "needs several sessions and refuses a run too short to sample the phase",
+      "optional_requires": [],
+      "owes_negative_control": false,
+      "phase": "video",
+      "proves": "whether the presentation phase is drawn afresh per session or is one free-running clock",
+      "requires": [
+        "windows-host",
+        "nvidia-nvenc",
+        "virtual-display",
+        "lab-source",
+        "radio",
+        "mac-display",
+        "mac-h264-decode"
+      ],
+      "script": "tools/phase-lottery.sh",
+      "status": {
+        "requirement": "virtual-display",
+        "state": "blocked",
+        "why": "the host does not have it"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 20,
+      "name": "wifi-matrix",
+      "negative_control": "none yet",
+      "notes": "the name promises more than the script does: it takes one label, duration, fps and pacer per invocation and cannot change the radio's channel or width, so a ranking is something a person assembles from several runs. Described as ranking channels until an audio tail was diagnosed and this was reached for as the instrument that would settle it",
+      "optional_requires": [],
+      "owes_negative_control": true,
+      "phase": "video",
+      "proves": "whether the link or the pipeline is what limits cadence, for one sender configuration",
+      "requires": [
+        "windows-host",
+        "radio",
+        "mac-h264-decode"
+      ],
+      "script": "tools/wifi-matrix.sh",
+      "status": {
+        "state": "runnable"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 25,
+      "name": "bitrate-sweep",
+      "negative_control": "none yet",
+      "notes": null,
+      "optional_requires": [],
+      "owes_negative_control": true,
+      "phase": "video",
+      "proves": "where bitrate starts costing delivery rather than quality",
+      "requires": [
+        "windows-host",
+        "nvidia-nvenc",
+        "virtual-display",
+        "lab-source",
+        "radio",
+        "mac-display",
+        "mac-h264-decode"
+      ],
+      "script": "tools/bitrate-sweep.sh",
+      "status": {
+        "requirement": "virtual-display",
+        "state": "blocked",
+        "why": "the host does not have it"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 20,
+      "name": "mtu-sweep",
+      "negative_control": "none yet",
+      "notes": null,
+      "optional_requires": [],
+      "owes_negative_control": true,
+      "phase": "video",
+      "proves": "the datagram size the link carries best",
+      "requires": [
+        "windows-host",
+        "nvidia-nvenc",
+        "virtual-display",
+        "lab-source",
+        "radio",
+        "mac-display",
+        "mac-h264-decode"
+      ],
+      "script": "tools/mtu-sweep.sh",
+      "status": {
+        "requirement": "virtual-display",
+        "state": "blocked",
+        "why": "the host does not have it"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 15,
+      "name": "qos-sweep",
+      "negative_control": "none yet",
+      "notes": null,
+      "optional_requires": [],
+      "owes_negative_control": true,
+      "phase": "video",
+      "proves": "whether a service class changes anything this radio does",
+      "requires": [
+        "windows-host",
+        "radio",
+        "mac-h264-decode"
+      ],
+      "script": "tools/qos-sweep.sh",
+      "status": {
+        "state": "runnable"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 3,
+      "name": "start-gate",
+      "negative_control": "none yet",
+      "notes": null,
+      "optional_requires": [],
+      "owes_negative_control": true,
+      "phase": "video",
+      "proves": "the session reaches first picture within its budget from cold",
+      "requires": [
+        "windows-host",
+        "nvidia-nvenc",
+        "virtual-display",
+        "lab-source",
+        "radio",
+        "mac-display",
+        "mac-h264-decode"
+      ],
+      "script": "tools/start-gate.sh",
+      "status": {
+        "requirement": "virtual-display",
+        "state": "blocked",
+        "why": "the host does not have it"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 3,
+      "name": "latency-gate",
+      "negative_control": "a run where the injector took the foreground: every timed event lands in the background and the gate fails on that count rather than reporting a finding about SendInput",
+      "notes": "the launch order decides whether the measurement means anything; the injector must be up before the target takes the foreground",
+      "optional_requires": [],
+      "owes_negative_control": false,
+      "phase": "I10",
+      "proves": "the software latency of the loop by segment, each interval local to one machine",
+      "requires": [
+        "windows-host",
+        "virtual-display",
+        "mac-display"
+      ],
+      "script": "tools/latency-gate.sh",
+      "status": {
+        "requirement": "virtual-display",
+        "state": "blocked",
+        "why": "the host does not have it"
+      }
+    },
+    {
+      "human_attention": "the keyboard arm needs a text window in the foreground on the host; a device touched during a run makes the generator comparison unavailable rather than failed",
+      "minutes": 2,
+      "name": "input-gate",
+      "negative_control": "a dry run: the injector counts without calling SendInput, so the host-side injection count must be zero",
+      "notes": null,
+      "optional_requires": [],
+      "owes_negative_control": false,
+      "phase": "I1 I2 I3",
+      "proves": "a generator's motion or keys reach the host exactly, compared against what it injected",
+      "requires": [
+        "windows-host"
+      ],
+      "script": "tools/input-gate.sh",
+      "status": {
+        "state": "runnable"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 2,
+      "name": "input-capture-gate",
+      "negative_control": "none yet, though the barrier is checked in both directions: events before it refused and events after it accepted",
+      "notes": "synthetic by default; REMOTE=1 injects for real",
+      "optional_requires": [],
+      "owes_negative_control": true,
+      "phase": "I9",
+      "proves": "nothing leaks across a capture boundary and nothing is left held",
+      "requires": [
+        "windows-host"
+      ],
+      "script": "tools/input-capture-gate.sh",
+      "status": {
+        "state": "runnable"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 2,
+      "name": "input-safety-gate",
+      "negative_control": "the killed arm: a client that vanishes mid-stream must still leave nothing held, and it is checked apart from the graceful arm rather than summed with it",
+      "notes": "the one harness here that had two arms from the start, and the only one that never produced a false pass",
+      "optional_requires": [
+        "windows-host"
+      ],
+      "owes_negative_control": false,
+      "phase": "I5 I6 I7",
+      "proves": "the whole input set survives a link that misbehaves, and a client that vanishes releases everything",
+      "requires": [],
+      "script": "tools/input-safety-gate.sh",
+      "status": {
+        "state": "runnable"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 4,
+      "name": "input-fault-sweep",
+      "negative_control": "each arm is its own control: an arm that reports nothing abandoned and nothing held while the injector dropped datagrams is a pass that has to be explained",
+      "notes": null,
+      "optional_requires": [],
+      "owes_negative_control": false,
+      "phase": "I7",
+      "proves": "reliable input survives loss, duplication, reordering and stalls across eight seeded arms",
+      "requires": [],
+      "script": "tools/input-fault-sweep.sh",
+      "status": {
+        "state": "runnable"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 2,
+      "name": "game-input-test",
+      "negative_control": "not applicable",
+      "notes": "the only harness whose most important result is not a number; a person plays and says",
+      "optional_requires": [],
+      "owes_negative_control": false,
+      "phase": "I8",
+      "proves": "a real game receives the input, and whether it feels right",
+      "requires": [
+        "windows-host",
+        "human-attention"
+      ],
+      "script": "tools/game-input-test.sh",
+      "status": {
+        "requirement": "human-attention",
+        "state": "blocked",
+        "why": "a person has to be at the machine; no probe can stand in for one"
+      }
+    },
+    {
+      "human_attention": null,
+      "minutes": 1,
+      "name": "cadence-isolation",
+      "negative_control": "the contended arm: the same wedge, the same timeout and the same filler sent from the producer's own thread rather than from a thread of its own, which is the arrangement this design rejected and which must break the bound the isolated arm holds",
+      "notes": "this was a unit test until a three-core runner failed it, which made it a claim about whichever machine ran the suite; the arms are still tests and still in the transport crate, ignored so that `cargo test -- --ignored` runs exactly them, and a run whose quiet half could not hold 120 Hz is refused here rather than failed there",
+      "optional_requires": [],
+      "owes_negative_control": false,
+      "phase": "video",
+      "proves": "a control connection wedged until its writes time out costs a 120 Hz producer nothing it can spend",
+      "requires": [
+        "quiet-machine"
+      ],
+      "script": "tools/cadence-isolation-gate.sh",
+      "status": {
+        "state": "runnable"
+      }
+    }
+  ],
+  "plumbing": [
+    "tools/ci-annotate.sh",
+    "tools/link-arm.sh",
+    "tools/link-pacer.sh",
+    "tools/win-session.sh",
+    "tools/win-ssh.sh",
+    "tools/win-sync.sh",
+    "tools/check-evidence.sh",
+    "tools/collect-evidence.sh",
+    "tools/pin-actions.sh"
+  ],
+  "schema": 1
+}

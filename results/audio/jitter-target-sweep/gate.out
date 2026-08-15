@@ -1,0 +1,56 @@
+results   /tmp/a8-full
+
+  FINDING 5 ms over 3 arm(s): continuity hole 2.562 % of samples expected at the
+          median of its passes, which were 36.884, 2.562, 2.379 %; 10035 frames concealed,
+          0 device underruns and 1 buffer overruns in total, occupancy p50 0 to
+          5 ms, median margin 7.25 ms; continuity broke
+  FINDING 10 ms over 3 arm(s): continuity hole 2.054 % of samples expected at the
+          median of its passes, which were 37.358, 2.054, 1.750 %; 9879 frames concealed,
+          0 device underruns and 0 buffer overruns in total, occupancy p50 10 to
+          10 ms, median margin 11.48 ms; continuity broke
+  FINDING 15 ms over 3 arm(s): continuity hole 1.317 % of samples expected at the
+          median of its passes, which were 32.171, 1.129, 1.317 %; 8308 frames concealed,
+          0 device underruns and 0 buffer overruns in total, occupancy p50 10 to
+          15 ms, median margin 17.02 ms; continuity broke
+  FINDING 20 ms over 3 arm(s): continuity hole 1.308 % of samples expected at the
+          median of its passes, which were 21.550, 1.308, 0.758 %; 5668 frames concealed,
+          0 device underruns and 0 buffer overruns in total, occupancy p50 20 to
+          20 ms, median margin 22.21 ms; continuity broke
+  FINDING pass 1 ordered by what each target lost: 20 ms at 21.550 % then 15 ms at 32.171 % then 5 ms at 36.884 % then 10 ms at 37.358 %
+          and the margin each one actually ran with, in nominal order: 5 to 28.05, 10 to 10.17, 15 to 14.92, 20 to 20.50 ms, which is not ascending, so this pass did not sweep what it meant to
+  FINDING pass 2 ordered by what each target lost: 15 ms at 1.129 % then 20 ms at 1.308 % then 10 ms at 2.054 % then 5 ms at 2.562 %
+          and the margin each one actually ran with, in nominal order: 5 to 6.90, 10 to 11.48, 15 to 17.02, 20 to 22.21 ms
+  FINDING pass 3 ordered by what each target lost: 20 ms at 0.758 % then 15 ms at 1.317 % then 10 ms at 1.750 % then 5 ms at 2.379 %
+          and the margin each one actually ran with, in nominal order: 5 to 7.25, 10 to 12.75, 15 to 17.42, 20 to 22.85 ms
+  FINDING t5-p1: 36.884 % hole, 36.842 % late, margin 28.05 ms, worst arrival 50.9 ms,
+          radio -69.2 dBm mean over -71 to -67, 386 Mbps over 120 samples
+  FINDING t10-p1: 37.358 % hole, 37.351 % late, margin 10.17 ms, worst arrival 69.8 ms,
+          radio -67.8 dBm mean over -70 to -66, 342 Mbps over 120 samples
+  FINDING t15-p1: 32.171 % hole, 32.164 % late, margin 14.92 ms, worst arrival 48.9 ms,
+          radio -68.9 dBm mean over -71 to -67, 362 Mbps over 120 samples
+  FINDING t20-p1: 21.550 % hole, 21.544 % late, margin 20.50 ms, worst arrival 45.3 ms,
+          radio -67.7 dBm mean over -71 to -65, 328 Mbps over 120 samples
+  FINDING t20-p2: 1.308 % hole, 1.308 % late, margin 22.21 ms, worst arrival 37.8 ms,
+          radio -68.4 dBm mean over -71 to -66, 444 Mbps over 120 samples
+  FINDING t15-p2: 1.129 % hole, 1.129 % late, margin 17.02 ms, worst arrival 17.3 ms,
+          radio -68.6 dBm mean over -70 to -66, 470 Mbps over 120 samples
+  FINDING t10-p2: 2.054 % hole, 2.054 % late, margin 11.48 ms, worst arrival 62.8 ms,
+          radio -68.0 dBm mean over -71 to -65, 484 Mbps over 120 samples
+  FINDING t5-p2: 2.562 % hole, 2.562 % late, margin 6.90 ms, worst arrival 87.1 ms,
+          radio -68.1 dBm mean over -71 to -66, 468 Mbps over 120 samples
+  FINDING t15-p3: 1.317 % hole, 1.316 % late, margin 17.42 ms, worst arrival 41.2 ms,
+          radio -67.3 dBm mean over -69 to -65, 439 Mbps over 120 samples
+  FINDING t20-p3: 0.758 % hole, 0.758 % late, margin 22.85 ms, worst arrival 23.1 ms,
+          radio -67.0 dBm mean over -71 to -65, 489 Mbps over 120 samples
+  FINDING t5-p3: 2.379 % hole, 2.379 % late, margin 7.25 ms, worst arrival 42.6 ms,
+          radio -67.1 dBm mean over -69 to -66, 514 Mbps over 120 samples
+  FINDING t10-p3: 1.750 % hole, 1.750 % late, margin 12.75 ms, worst arrival 51.5 ms,
+          radio -67.3 dBm mean over -69 to -65, 554 Mbps over 120 samples
+  FINDING the control at 20 ms behind a stalling relay lost 38.69 % of its
+          samples and put 38.68 % of its datagrams past their moment, against a floor of
+          10 % that the fault's duty cycle must produce
+  FINDING the 10 ms arms, identically configured and spread through the sweep, ran with median
+          margins of 10.17, 11.48, 12.75 ms - a spread of 2.57 ms against the 5 ms step
+          between adjacent targets - and holes of 37.358, 2.054, 1.750 %
+
+FAIL no target between 5 and 20 ms held continuity: the hole runs from 0.758 % to 37.358 % of samples expected across the sweep, so A8 has no answer on this link and the choice is owed rather than read off a ranking of failures. The tail is the term - the worst arrival in the sweep came 87 ms past its moment, 4.4 times the largest target under test, and no target this phase is allowed to consider is within reach of that

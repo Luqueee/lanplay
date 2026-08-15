@@ -1,0 +1,53 @@
+audio-e2e-receiver: producer scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+producer scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+receiver scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+every deadline granted yes
+rtp received 24007
+rtp lost 0 of 24007 expected
+rtp duplicate 0
+rtp reordered 0
+rtp late 5172
+arrival delay ms p50 -20.5 p95 25.9 p99 34.8 max 45.3 min -28.7
+frames played 18828
+plc frames 5172
+jitter occupancy ms p50 20.0 p95 25.0 p99 25.0 max 25.0
+jitter underruns 5172
+jitter overruns 0 dropping 0 frames
+decode us p50 8 p99 17
+render callbacks 22492
+render underruns 0 over 0 frames
+render overruns 0 over 0 frames
+continuity expected 5760000 played 4518720 unbroken no
+tone left 997.0 right 1997.0
+continuity hole 1241280 samples over 24000 frame periods
+worst window hole 129360 samples
+tone channels distinct yes
+tone resolution 2.00 hz over 24000 frames
+rtp off grid 0
+rtp oversize 0
+rtp foreign ssrc 0
+decode failures 0
+conceal us p50 6 p99 37
+producer interval us p50 5000 p99 5000 max 5004
+render interval us p50 5333 p99 5345 max 5363
+ring occupancy frames min 2080 p50 2208 max 2352 of 4096 primed to 496 after a 33.8 ms device start
+ring frames refused 0 consumed 5757952
+jitter target ms 20 ceiling ms 60 over 14 slots
+frame ms 5
+device Altavoces del MacBook Pro (named) at 48000 Hz 2 ch 32 bit float with a 256 frame io buffer
+bind 0.0.0.0:5014 ssrc 1470326376
+odd cycles 0
+measurements dropped 0
+span s 120.1 device span s 120.0
+window 0 s 10.0 rtp/s 200 lost 0 plc 525 played 1476 jitter underruns 525 callbacks 1876 underruns 0 overruns 0 expected 480240 played 354240 hole 126000
+window 1 s 10.0 rtp/s 200 lost 0 plc 417 played 1584 jitter underruns 417 callbacks 1876 underruns 0 overruns 0 expected 480240 played 380160 hole 100080
+window 2 s 10.0 rtp/s 200 lost 0 plc 485 played 1516 jitter underruns 485 callbacks 1876 underruns 0 overruns 0 expected 480240 played 363840 hole 116400
+window 3 s 10.0 rtp/s 200 lost 0 plc 195 played 1805 jitter underruns 195 callbacks 1875 underruns 0 overruns 0 expected 480000 played 433200 hole 46800
+window 4 s 10.0 rtp/s 200 lost 0 plc 313 played 1688 jitter underruns 313 callbacks 1876 underruns 0 overruns 0 expected 480240 played 405120 hole 75120
+window 5 s 10.0 rtp/s 200 lost 0 plc 398 played 1603 jitter underruns 398 callbacks 1876 underruns 0 overruns 0 expected 480240 played 384720 hole 95520
+window 6 s 10.0 rtp/s 199 lost 0 plc 391 played 1609 jitter underruns 391 callbacks 1875 underruns 0 overruns 0 expected 480000 played 386160 hole 93840
+window 7 s 10.0 rtp/s 201 lost 0 plc 458 played 1542 jitter underruns 458 callbacks 1875 underruns 0 overruns 0 expected 480000 played 370080 hole 109920
+window 8 s 10.0 rtp/s 200 lost 0 plc 480 played 1521 jitter underruns 480 callbacks 1876 underruns 0 overruns 0 expected 480240 played 365040 hole 115200
+window 9 s 10.0 rtp/s 199 lost 0 plc 539 played 1462 jitter underruns 539 callbacks 1876 underruns 0 overruns 0 expected 480240 played 350880 hole 129360
+window 10 s 10.0 rtp/s 201 lost 0 plc 487 played 1513 jitter underruns 487 callbacks 1875 underruns 0 overruns 0 expected 480000 played 363120 hole 116880
+window 11 s 9.9 rtp/s 200 lost 0 plc 483 played 1501 jitter underruns 483 callbacks 1860 underruns 0 overruns 0 expected 476160 played 360240 hole 115920

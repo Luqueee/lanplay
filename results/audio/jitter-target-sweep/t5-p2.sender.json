@@ -1,0 +1,189 @@
+{
+  "checks": [
+    {
+      "kind": "must_not_be_zero",
+      "name": "packets came off the endpoint",
+      "reads": "capture_packets",
+      "why": "every count and every percentile in this document is taken over these packets, so a run that collected none makes each of them an absence rather than a number, and loopback delivers nothing at all while the endpoint is idle"
+    },
+    {
+      "kind": "must_not_be_zero",
+      "name": "datagrams went onto the wire",
+      "reads": "datagrams_sent",
+      "why": "the receiving end's loss figure is a fraction of what this end sent, and a sender that sent nothing makes a receiver that received nothing look like a radio that lost everything"
+    },
+    {
+      "equals": "samples_captured",
+      "kind": "must_equal",
+      "name": "every captured sample was encoded",
+      "reads": "samples_encoded",
+      "why": "a 5 ms frame is 240 samples and the endpoint delivers exactly two frames' worth in every packet, so the split is exact or it is not a split; the two counts agreeing is the proof, and audio lost here cannot be told apart by a receiver from audio lost on the air"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "no packet left a residue",
+      "population": "capture_packets",
+      "reads": "split_residue_frames",
+      "why": "there is no accumulator on this path because A1 measured that there is never a residue, so a residue is a finding about the endpoint rather than a tolerance; the population is the packets, because no packets leave nothing over just as convincingly"
+    },
+    {
+      "equals": "frames_encoded",
+      "kind": "must_equal",
+      "name": "every encoded frame became a datagram",
+      "reads": "datagrams_sent",
+      "why": "one Opus frame is one datagram in this payload format, so the two counts are the same measurement taken at two boundaries, and a shortfall is a frame the socket refused rather than a frame the radio lost"
+    },
+    {
+      "equals": "timestamp_steps",
+      "kind": "must_equal",
+      "name": "the timestamp advanced by the frame's samples every time",
+      "reads": "timestamp_steps_exact",
+      "why": "the RTP timestamp is a sample counter, and one that drifted with this sender's scheduling would leave a receiver unable to tell a late packet from a packet describing a later moment"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "the socket refused nothing",
+      "population": "frames_encoded",
+      "reads": "send_failures",
+      "why": "a refused send is this host's own doing rather than the link's, and a run with any of them is measuring a machine that could not keep the socket fed; the population is the frames encoded, because nothing offered is never refused"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "no frames missing from the device position",
+      "population": "capture_frames",
+      "reads": "capture_gap_frames",
+      "why": "the device position of a packet must equal the previous position plus the previous frame count, so a gap is audio the engine could not hand over and its size is known exactly; the population is the frames captured, because a stream that delivered none has no holes in it"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "the device position never went backwards",
+      "population": "capture_packets",
+      "reads": "capture_rewinds",
+      "why": "a hole is audio that was lost and a rewind is a position stream that cannot be trusted at all, so they are counted apart and this one is not a tolerance"
+    },
+    {
+      "bound": 500.0,
+      "kind": "must_be_below",
+      "name": "encode p99 under a tenth of the frame",
+      "reads": "encode_p99_us",
+      "why": "a tenth of the 5 ms frame is 500 us, and an encoder under that cannot be the term that matters in a budget measured in whole milliseconds; p99 and not the mean, because a frame late once every hundred is a click a listener hears"
+    },
+    {
+      "kind": "must_be_within",
+      "name": "the endpoint carried the left channel's tone",
+      "reads": "tone_left_hz",
+      "target": 997.0,
+      "tolerance": 5.0,
+      "why": "a packet count and a datagram count agree just as happily when the host was playing nothing, and a receiver that reports no underruns while playing silence has carried nothing either; 997 Hz comes out of the captured samples themselves"
+    },
+    {
+      "kind": "must_be_within",
+      "name": "the endpoint carried the right channel's tone",
+      "reads": "tone_right_hz",
+      "target": 1997.0,
+      "tolerance": 5.0,
+      "why": "the two channels carry different frequencies so that channel order is provable rather than assumed, and a right channel reading 997 Hz is what a fold to mono and a channel read twice both look like"
+    }
+  ],
+  "declared": [
+    "loopback capture",
+    "opus encoder",
+    "rtp sender"
+  ],
+  "environment": {
+    "application": "OPUS_APPLICATION_RESTRICTED_LOWDELAY",
+    "bind": "0.0.0.0:52577",
+    "device_period_default_ms": 10.0,
+    "device_period_minimum_ms": 3.0,
+    "dtx": false,
+    "encoder_reports_bitrate_bps": 128000,
+    "end": "sender",
+    "endpoint": "LG ULTRAWIDE (NVIDIA High Definition Audio)",
+    "endpoint_buffer_frames": 1056,
+    "inband_fec": false,
+    "libopus": "libopus unknown",
+    "lookahead_samples": 120,
+    "mix_format": "48000 Hz 2 ch 32 bit float",
+    "scheduling": "MMCSS Pro Audio, thread priority 18",
+    "send_to": "192.168.1.108:5014",
+    "ssrc": 602950930,
+    "vbr_constrained": true,
+    "wakeup": "event"
+  },
+  "exercised": [
+    "loopback capture",
+    "opus encoder",
+    "rtp sender"
+  ],
+  "findings": [
+    "the endpoint delivered 480 frames per packet at p50 and the encoder took 240 of them per frame, so one packet became 2 datagrams of 81 bytes",
+    "148.8 kbps on the wire including RTP headers, at 200.01 datagrams a second",
+    "the sending thread ran as MMCSS Pro Audio, thread priority 18"
+  ],
+  "gate": "audio-e2e-gate",
+  "observations": {
+    "buffer_errors": 0,
+    "capture_frames": 7200480,
+    "capture_gap_frames": 0,
+    "capture_gaps": 0,
+    "capture_packets": 15001,
+    "capture_packets_per_s": 100.00359288956655,
+    "capture_rewinds": 0,
+    "datagram_bytes": 2790266,
+    "datagrams_sent": 30002,
+    "discontinuities_in_flight": 0,
+    "encode_failures": 0,
+    "encode_max_us": 456,
+    "encode_p50_us": 103,
+    "encode_p95_us": 202,
+    "encode_p99_us": 208,
+    "frames_encoded": 30002,
+    "frames_encoded_per_s": 200.0071857791331,
+    "packet_bytes_max": 116,
+    "packet_bytes_min": 81,
+    "packet_bytes_p50": 81,
+    "packet_bytes_p95": 81,
+    "packet_bytes_p99": 81,
+    "packet_frames_max": 480,
+    "packet_frames_min": 480,
+    "packet_frames_p50": 480,
+    "sample_accounting_disagreement": 0,
+    "samples_captured": 7200480,
+    "samples_dropped": 0,
+    "samples_encoded": 7200480,
+    "send_failures": 0,
+    "send_max_us": 268,
+    "send_p50_us": 16,
+    "send_p95_us": 42,
+    "send_p99_us": 51,
+    "silent_packets": 0,
+    "span_s": 150.0046105,
+    "split_residue_frames": 0,
+    "timestamp_steps": 30002,
+    "timestamp_steps_exact": 30002,
+    "tone_analysed_frames": 24000,
+    "tone_left_dbfs": -19.676197794605418,
+    "tone_left_hz": 997.0000000009998,
+    "tone_resolution_hz": 2,
+    "tone_right_dbfs": -19.676197797073712,
+    "tone_right_hz": 1997.0000000001812,
+    "unreadable_packets": 0,
+    "wakeup_max_us": 10278,
+    "wakeup_p50_us": 10000,
+    "wakeup_p99_us": 10058,
+    "wakeup_timeouts": 0,
+    "wire_kbps": 148.8096127552026
+  },
+  "run": {
+    "args": {
+      "bitrate_kbps": 128,
+      "frame_ms": 5,
+      "seconds": 150.0,
+      "send_to": "192.168.1.108:5014"
+    },
+    "arm": "t5-p2",
+    "commit": "7bf7221",
+    "span_s": 150.0046105,
+    "started_unix_ms": 1786826211284
+  }
+}

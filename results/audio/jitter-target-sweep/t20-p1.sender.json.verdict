@@ -1,0 +1,120 @@
+gate      audio-e2e-gate   arm t20-p1   span 150.0 s   commit 7bf7221
+started   1786825516932 unix ms
+args      bitrate_kbps 128, frame_ms 5, seconds 150.0, send_to 192.168.1.108:5014
+covers    loopback capture, opus encoder, rtp sender
+
+environment
+
+  application                              OPUS_APPLICATION_RESTRICTED_LOWDELAY
+  bind                                     0.0.0.0:63403
+  device_period_default_ms                 10.0
+  device_period_minimum_ms                 3.0
+  dtx                                      false
+  encoder_reports_bitrate_bps              128000
+  end                                      sender
+  endpoint                                 LG ULTRAWIDE (NVIDIA High Definition Audio)
+  endpoint_buffer_frames                   1056
+  inband_fec                               false
+  libopus                                  libopus unknown
+  lookahead_samples                        120
+  mix_format                               48000 Hz 2 ch 32 bit float
+  scheduling                               MMCSS Pro Audio, thread priority 18
+  send_to                                  192.168.1.108:5014
+  ssrc                                     1470326376
+  vbr_constrained                          true
+  wakeup                                   event
+
+observations
+
+  buffer_errors                            0
+  capture_frames                           7200480
+  capture_gap_frames                       0
+  capture_gaps                             0
+  capture_packets                          15001
+  capture_packets_per_s                    100.001
+  capture_rewinds                          0
+  datagram_bytes                           2790266
+  datagrams_sent                           30002
+  discontinuities_in_flight                0
+  encode_failures                          0
+  encode_max_us                            390
+  encode_p50_us                            102
+  encode_p95_us                            200
+  encode_p99_us                            212
+  frames_encoded                           30002
+  frames_encoded_per_s                     200.003
+  packet_bytes_max                         128
+  packet_bytes_min                         81
+  packet_bytes_p50                         81
+  packet_bytes_p95                         81
+  packet_bytes_p99                         81
+  packet_frames_max                        480
+  packet_frames_min                        480
+  packet_frames_p50                        480
+  sample_accounting_disagreement           0
+  samples_captured                         7200480
+  samples_dropped                          0
+  samples_encoded                          7200480
+  send_failures                            0
+  send_max_us                              316
+  send_p50_us                              16
+  send_p95_us                              43
+  send_p99_us                              56
+  silent_packets                           0
+  span_s                                   150.008
+  split_residue_frames                     0
+  timestamp_steps                          30002
+  timestamp_steps_exact                    30002
+  tone_analysed_frames                     24000
+  tone_left_dbfs                           -19.676
+  tone_left_hz                             997
+  tone_resolution_hz                       2
+  tone_right_dbfs                          -19.676
+  tone_right_hz                            1997
+  unreadable_packets                       0
+  wakeup_max_us                            10285
+  wakeup_p50_us                            10000
+  wakeup_p99_us                            10052
+  wakeup_timeouts                          0
+  wire_kbps                                148.806
+
+findings
+
+  FINDING the endpoint delivered 480 frames per packet at p50 and the encoder took 240 of them per frame, so one packet became 2 datagrams of 81 bytes
+  FINDING 148.8 kbps on the wire including RTP headers, at 200.00 datagrams a second
+  FINDING the sending thread ran as MMCSS Pro Audio, thread priority 18
+
+what must not be zero
+
+  PASS  packets came off the endpoint            15001
+        every count and every percentile in this document is taken over these packets, so a run that collected none makes each of them an absence rather than a number, and loopback delivers nothing at all while the endpoint is idle
+  PASS  datagrams went onto the wire             30002
+        the receiving end's loss figure is a fraction of what this end sent, and a sender that sent nothing makes a receiver that received nothing look like a radio that lost everything
+
+what must be zero
+
+  PASS  no packet left a residue                 0 over 15001 capture_packets
+        there is no accumulator on this path because A1 measured that there is never a residue, so a residue is a finding about the endpoint rather than a tolerance; the population is the packets, because no packets leave nothing over just as convincingly
+  PASS  the socket refused nothing               0 over 30002 frames_encoded
+        a refused send is this host's own doing rather than the link's, and a run with any of them is measuring a machine that could not keep the socket fed; the population is the frames encoded, because nothing offered is never refused
+  PASS  no frames missing from the device position 0 over 7200480 capture_frames
+        the device position of a packet must equal the previous position plus the previous frame count, so a gap is audio the engine could not hand over and its size is known exactly; the population is the frames captured, because a stream that delivered none has no holes in it
+  PASS  the device position never went backwards 0 over 15001 capture_packets
+        a hole is audio that was lost and a rewind is a position stream that cannot be trusted at all, so they are counted apart and this one is not a tolerance
+
+what else must hold
+
+  PASS  every captured sample was encoded        7200480 against 7200480 samples_captured
+        a 5 ms frame is 240 samples and the endpoint delivers exactly two frames' worth in every packet, so the split is exact or it is not a split; the two counts agreeing is the proof, and audio lost here cannot be told apart by a receiver from audio lost on the air
+  PASS  every encoded frame became a datagram    30002 against 30002 frames_encoded
+        one Opus frame is one datagram in this payload format, so the two counts are the same measurement taken at two boundaries, and a shortfall is a frame the socket refused rather than a frame the radio lost
+  PASS  the timestamp advanced by the frame's samples every time 30002 against 30002 timestamp_steps
+        the RTP timestamp is a sample counter, and one that drifted with this sender's scheduling would leave a receiver unable to tell a late packet from a packet describing a later moment
+  PASS  encode p99 under a tenth of the frame    212 against a bound of 500
+        a tenth of the 5 ms frame is 500 us, and an encoder under that cannot be the term that matters in a budget measured in whole milliseconds; p99 and not the mean, because a frame late once every hundred is a click a listener hears
+  PASS  the endpoint carried the left channel's tone 997 against 997 give or take 5
+        a packet count and a datagram count agree just as happily when the host was playing nothing, and a receiver that reports no underruns while playing silence has carried nothing either; 997 Hz comes out of the captured samples themselves
+  PASS  the endpoint carried the right channel's tone 1997 against 1997 give or take 5
+        the two channels carry different frequencies so that channel order is provable rather than assumed, and a right channel reading 997 Hz is what a fold to mono and a channel read twice both look like
+
+PASS 12 of 12 checks hold and every declared subsystem was exercised
