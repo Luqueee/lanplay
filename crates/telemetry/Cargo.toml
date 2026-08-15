@@ -1,5 +1,6 @@
 [package]
 name = "lanplay-telemetry"
+publish.workspace = true
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,3 +11,7 @@ lanplay-protocol = { workspace = true }
 crossbeam-queue = { workspace = true }
 hdrhistogram = { workspace = true }
 parking_lot = { workspace = true }
+
+# `THREAD_TIME_CONSTRAINT_POLICY` and the mach thread port it is set through.
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = { workspace = true }

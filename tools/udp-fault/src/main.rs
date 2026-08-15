@@ -27,10 +27,21 @@
 //!   udp-fault --forward <addr:port> [--listen 127.0.0.1:5106]
 //!             [--loss 1.0] [--duplicate 0.5] [--reorder 2.0]
 //!             [--stall-ms 50] [--stall-every-ms 5000] [--seed 1]
+//!
+//! The forwarding loop asks for a scheduling deadline, and the banner says which one it
+//! got. Being in the way is this process's job, but only by the amount it was told to
+//! be: a datagram it merely failed to get around to forwarding is delay nobody asked
+//! for, and downstream it is indistinguishable from the faults that were. Measured on
+//! the audio jitter gate with every thread in the probe itself already on a deadline, a
+//! clean arm - a relay told to break nothing - still reported two packets past their
+//! moment and two underruns at load average 20, and this loop was the only ordinary
+//! priority left on the path.
 
 use std::collections::VecDeque;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
+
+use lanplay_telemetry::ScheduledAs;
 
 /// What was done to the traffic, so a run's outcome can be attributed.
 #[derive(Default)]
@@ -160,9 +171,16 @@ fn main() {
     // Short enough that a held datagram is released close to when it is due,
     // long enough that the loop is not a spin. Nothing here is on the input
     // path: this process exists to be in the way.
+    const POLL: Duration = Duration::from_millis(2);
     socket
-        .set_read_timeout(Some(Duration::from_millis(2)))
+        .set_read_timeout(Some(POLL))
         .expect("timeout on a fresh socket");
+
+    // And that poll interval is the loop's period, so it is the period the deadline is
+    // asked for in. The policy is printed rather than assumed: a run relayed by a
+    // process the scheduler was leaving to one side is a run whose delays are partly
+    // this process's, and nothing else in the output would say so.
+    let scheduled_as = ScheduledAs::request(POLL.as_nanos() as u64);
 
     println!(
         "udp-fault: {listen} -> {forward}, loss {:.1}%, duplicate {:.1}%, \
@@ -174,6 +192,7 @@ fn main() {
         faults.stall.as_millis(),
         faults.stall_every.as_millis()
     );
+    println!("udp-fault: scheduled as {scheduled_as}");
 
     let mut rng = Rng(seed | 1);
     let mut client: Option<SocketAddr> = None;

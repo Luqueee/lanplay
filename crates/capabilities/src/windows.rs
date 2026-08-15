@@ -300,9 +300,60 @@ mod tests {
     }
 
     #[test]
-    fn the_machine_reports_a_primary_display() {
+    fn a_reported_display_is_described_plausibly() {
+        // Guarded rather than asserted, and for the reason the macOS side is
+        // already guarded. A hosted runner has no screen, and a Windows
+        // session without an interactive desktop reports no attached adapter
+        // either; neither is a defect in these Win32 calls, and the old
+        // assertion that the list is non-empty failed a suite on a machine
+        // that was never meant to satisfy it. That the host has a display is
+        // an environment claim, and `xtask gates` is where this project keeps
+        // those, reporting a requirement present, absent or unknown.
+        //
+        // What can be wrong here is the description of a display the probe
+        // does report, so that is what is asserted and it can still fail: two
+        // adapters both flagged primary, or none, is the primary-flag test
+        // reading the wrong bit; a mode below VGA is a `DEVMODEW` field read
+        // at the wrong offset, which is the failure the size assertions above
+        // cannot catch on their own because a wrong offset inside a
+        // right-sized struct still compiles.
         let displays = displays();
-        assert!(!displays.is_empty(), "no attached displays reported");
-        assert!(displays.iter().any(|display| display.primary));
+        if displays.is_empty() {
+            return;
+        }
+        let primary: Vec<&DisplayInfo> =
+            displays.iter().filter(|display| display.primary).collect();
+        assert_eq!(
+            primary.len(),
+            1,
+            "exactly one attached adapter is primary, not {}: {displays:?}",
+            primary.len()
+        );
+        let primary = primary[0];
+        assert!(!primary.id.is_empty(), "a display with no device name");
+        assert!(
+            primary.current.width >= 640 && primary.current.height >= 480,
+            "implausible mode: {:?}",
+            primary.current
+        );
+        // Zero is how `EnumDisplaySettingsW` says "the hardware's default
+        // rate" rather than a rate, so it is not a finding. Anything else has
+        // to be a rate a panel could run at, and has to be one the same
+        // adapter advertises at the same pixel size - the two come from
+        // separate calls, and a mode list that omits the mode currently in use
+        // means the enumeration is filtering on the wrong fields.
+        if primary.current.refresh_mhz != 0 {
+            assert!(
+                primary.current.refresh_mhz >= 24_000,
+                "implausible refresh: {:?}",
+                primary.current
+            );
+            assert!(
+                primary
+                    .available_refresh_mhz
+                    .contains(&primary.current.refresh_mhz),
+                "the current rate is missing from what the adapter advertises: {primary:?}"
+            );
+        }
     }
 }

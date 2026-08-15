@@ -57,9 +57,20 @@ license-files = []
 # transitive choice, and a hard failure would mean pinning dependencies for a reason that
 # has nothing to do with this project.
 multiple-versions = "warn"
+# A published crate depended on by a wildcard is a real hazard: any future version satisfies
+# it. A path dependency inside this workspace is not the same thing - none of these crates is
+# published and versioning them against each other would be ceremony - so paths are exempt
+# and everything else is still denied.
 wildcards = "deny"
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+# One git dependency, named rather than permitted as a class. NVENC has no crates.io binding
+# that tracks the SDK, and this one is pinned to a revision, which is the difference between
+# depending on a commit and depending on whatever a branch points at today. Allowing the URL
+# leaves `unknown-git = "deny"` doing its job for everything else.
+allow-git = ["https://github.com/legion-labs/nvenc-sys.git"]

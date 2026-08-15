@@ -82,7 +82,6 @@
 pub mod format;
 pub mod report;
 pub mod ring;
-pub mod schedule;
 
 #[cfg(target_os = "macos")]
 pub mod device;

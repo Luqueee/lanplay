@@ -103,8 +103,7 @@ prose.
       "name": "every frame accounted by device position",
       "kind": "must_be_zero",
       "reads": "position_gaps",
-      "value": 0,
-      "verdict": "pass",
+      "population": "packets",
       "why": "a device position advancing by other than the previous packet's frame count is a gap of a known size, which is stronger than counting packets"
     }
   ],
@@ -114,9 +113,13 @@ prose.
 }
 ```
 
-The evaluator is one program, tested like any other code in the workspace, and it is
-the only thing that decides a verdict. A probe reports observations; it does not
-decide.
+The evaluator is `xtask verdict <envelope>`, tested like any other code in the
+workspace, and it is the only thing that decides a verdict. A probe reports
+observations and states criteria; it does not decide. So a check carries no value and
+no verdict, and a document that states either is refused: a value restated beside the
+name of the observation it came from is a second copy that can disagree with the
+first, which is the shape of three of the defects above, and a verdict written by the
+measured party is not a verdict.
 
 `why` is mandatory on every check. A criterion whose reason cannot be written down is
 a criterion nobody can review, and four of the five structural defects above would
@@ -172,11 +175,16 @@ it takes, and what its negative control is. An agent that cannot reach the Windo
 filters on `requires`, and gets a correct answer in one read instead of eight.
 
 The `requires` vocabulary is small and physical: `windows-host`, `nvidia-nvenc`,
-`virtual-display`, `radio`, `mac-display`, `audio-output`, `audio-endpoint`,
-`human-attention`. That last one matters more than it looks: three gates in this project
-need somebody to put a window in the foreground or to keep their hands off the mouse,
-and an agent working unattended must be able to tell those apart from the rest
-mechanically.
+`virtual-display`, `radio`, `mac-display`, `mac-h264-decode`, `audio-output`,
+`audio-endpoint`, `human-attention`. Two of those are worth a sentence each.
+`human-attention` matters more than it looks: three gates in this project need somebody
+to put a window in the foreground or to keep their hands off the mouse, and an agent
+working unattended must be able to tell those apart from the rest mechanically.
+`mac-h264-decode` is here because it used to be a unit assertion, which made the claim
+that this machine decodes H.264 in hardware a claim about whatever machine ran the test
+suite - and a hosted runner has no GPU, so it failed there and proved nothing. As a
+requirement it is checked on the machine a gate is about to run on, and a machine nobody
+asked reads as unknown rather than as a failure.
 
 ### 5. Every gate ends what it starts
 
@@ -216,3 +224,10 @@ the shape. The rest migrated as they are next touched rather than in a campaign:
 harness that is working and understood is not worth destabilising for consistency, and
 the two families of defect above are found by writing new gates, not by rewriting old
 ones.
+
+The gate migrated to prove the shape is `tools/codec-gate.sh`, which needs no hardware
+beyond a Mac and runs in under a minute, so the whole loop is readable in one sitting:
+`audio-codec-probe --envelope` writes the document beside the keyed report it already
+printed, `xtask verdict` decides each arm, and the only arithmetic left in the shell is
+the cross-arm exchange rate, whose two terms come back out of the envelopes through the
+same parser. Copy that arrangement rather than inventing a second one.

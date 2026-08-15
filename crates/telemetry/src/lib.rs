@@ -31,6 +31,7 @@ mod clock;
 mod collector;
 mod memory;
 mod recorder;
+mod schedule;
 mod stage;
 mod stats;
 mod timeline;
@@ -40,6 +41,7 @@ pub use clock::{ClockDomain, Nanos, Timestamp, wait_until};
 pub use collector::{Reporter, Telemetry, TelemetryConfig};
 pub use memory::resident_bytes;
 pub use recorder::Recorder;
+pub use schedule::ScheduledAs;
 pub use stage::{STAGE_COUNT, Stage};
 pub use stats::{Counters, P99_SOAK_FRAMES, Percentiles, Snapshot, Window};
 pub use timeline::{

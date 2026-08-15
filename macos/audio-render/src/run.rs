@@ -40,6 +40,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use lanplay_audio_capture::{Percentiles, Samples};
+use lanplay_telemetry::ScheduledAs;
 use lanplay_tone_source::tone::{CONTRACT, Tone, ToneSpec};
 use objc2_core_audio::{
     AudioConvertHostTimeToNanos, AudioDeviceCreateIOProcID, AudioDeviceDestroyIOProcID,
@@ -50,7 +51,6 @@ use objc2_core_audio_types::{AudioBufferList, AudioTimeStamp};
 use crate::device::{self, Error};
 use crate::report::Report;
 use crate::ring::PcmRing;
-use crate::schedule::ScheduledAs;
 
 /// The level everything in this crate plays at.
 ///

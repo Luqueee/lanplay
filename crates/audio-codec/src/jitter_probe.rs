@@ -18,6 +18,32 @@
 //! the one it asked for, because a sink that cannot keep its own cadence is
 //! measuring itself.
 //!
+//! All three threads here ask the system for a deadline rather than for a priority, and
+//! the report says which policy each of them got. Without one, a clean loopback arm run
+//! while the machine was compiling something reported 658 packets past their moment and
+//! 658 underruns against a relay that had been told to break nothing. None of it was
+//! the buffer's. A thread that spends the last three milliseconds of every five
+//! spinning out its deadline is exactly the CPU-bound work a loaded scheduler sheds,
+//! and when the sink is shed for longer than the buffer's ceiling the buffer skips
+//! forward to recover the latency, the cursor lands ahead of a stream that was
+//! arriving perfectly well, and everything still in flight is counted late. A
+//! quality-of-service class was tried against this on the render path and left the
+//! failure unexplained; `THREAD_TIME_CONSTRAINT_POLICY` states the period the work
+//! actually has, and under it the sink held 5000 microseconds between pulls at both
+//! the median and the 99th percentile with the machine at load average 23.
+//!
+//! The receiving thread was expected not to need one, and the measurement said
+//! otherwise. The argument for leaving it alone is good as far as it goes: it keeps no
+//! schedule of its own, it blocks in `recv_from`, the kernel holds its datagrams while
+//! it is away, and what its absence adds is delivery jitter, which is the quantity the
+//! target exists to absorb. What the argument leaves out is that the target is the
+//! entire budget and it is ten milliseconds. With the sink and the sender promoted and
+//! the receiver left alone, a loopback run with no relay and no injected fault still
+//! reported thirteen packets past their moment at load average 23; with the receiver
+//! promoted too, the same run at load average 30 reported none at all. So it does have
+//! a period - one datagram per frame, which is the cadence the stream arrives at - and
+//! it asks in those terms.
+//!
 //! Both halves run in this process and the sender uses a socket of its own,
 //! bound to an ephemeral port rather than to the receiving one. That is what
 //! lets the whole thing run through `tools/udp-fault`: the relay decides
@@ -45,7 +71,7 @@ use std::time::Duration;
 
 use lanplay_audio_capture::analysis::hertz;
 use lanplay_audio_capture::{Percentiles, Samples, ToneReport, analyse};
-use lanplay_telemetry::{Nanos, Timestamp, wait_until};
+use lanplay_telemetry::{Nanos, ScheduledAs, Timestamp, wait_until};
 use lanplay_tone_source::tone::{CONTRACT, Tone};
 use lanplay_transport::{
     MAX_OPUS_PAYLOAD, MAX_UDP_PAYLOAD, OpusPacketizeError, OpusPacketizer, Ssrc, parse_opus_packet,
@@ -142,6 +168,12 @@ fn io(call: &'static str) -> impl FnOnce(io::Error) -> ProbeError {
     move |error| ProbeError::Io { call, error }
 }
 
+/// The frame period: the cadence the sender emits at, the receiver takes delivery
+/// at and the sink pulls at, and so the period all three deadlines are stated in.
+fn frame_period(config: &CodecConfig) -> Nanos {
+    Nanos(u64::from(config.frame.millis()) * 1_000_000)
+}
+
 /// What the sink consumed, and what it cost.
 #[derive(Debug)]
 pub struct SinkReport {
@@ -159,6 +191,9 @@ pub struct SinkReport {
     pub tone: ToneReport,
     /// Set when the stream never started, so a report of nothing says why.
     pub never_started: bool,
+    /// What the system granted the sink thread, which decides whether the rest
+    /// of this report describes the buffer or describes the scheduler.
+    pub scheduled_as: ScheduledAs,
 }
 
 /// What the sending half put on the wire.
@@ -166,6 +201,10 @@ pub struct SinkReport {
 pub struct SendReport {
     pub packets: u64,
     pub send_failures: u64,
+    /// And what it granted the sender, for the same reason from the other end:
+    /// a sender that missed its own cadence delivers audio late, and late audio
+    /// is indistinguishable in the counters from a network that delayed it.
+    pub scheduled_as: ScheduledAs,
 }
 
 #[derive(Debug)]
@@ -179,6 +218,10 @@ pub struct Measurement {
     pub slots: usize,
     pub send: SendReport,
     pub counts: Counts,
+    /// What the receiving thread was granted. It sits here rather than in a
+    /// report of its own because the receiver counts nothing - the buffer does
+    /// its accounting - but it has a deadline, so it has this.
+    pub receiver_scheduled_as: ScheduledAs,
     pub sink: SinkReport,
 }
 
@@ -193,6 +236,17 @@ impl Measurement {
         let right = hertz(self.sink.tone.right);
         (left - CONTRACT.left_hz).abs() <= TONE_TOLERANCE_HZ
             && (right - CONTRACT.right_hz).abs() <= TONE_TOLERANCE_HZ
+    }
+
+    /// Whether every thread that paces got the deadline it asked for.
+    ///
+    /// Reported rather than made a defect. A refusal does not make the counters
+    /// wrong, it makes them a statement about the scheduler as well as about the
+    /// buffer, and the reader who has to know that is the harness above this one.
+    pub fn deadlines_were_granted(&self) -> bool {
+        self.sink.scheduled_as.is_real_time()
+            && self.send.scheduled_as.is_real_time()
+            && self.receiver_scheduled_as.is_real_time()
     }
 
     /// A reason the run's numbers cannot be believed.
@@ -343,11 +397,12 @@ pub fn run(options: Options) -> Result<Measurement, ProbeError> {
     // An SSRC of its own, drawn independently of the video stream's, so a
     // capture holding both can never attribute an audio packet to the picture.
     let ssrc = Ssrc(random_u32());
+    let period = frame_period(&config);
 
     thread::scope(|scope| {
         let receiver = {
             let shared = Arc::clone(&shared);
-            scope.spawn(move || receive(&receiving, &shared, ssrc))
+            scope.spawn(move || receive(&receiving, &shared, ssrc, period))
         };
         let sink = {
             let shared = Arc::clone(&shared);
@@ -355,9 +410,26 @@ pub fn run(options: Options) -> Result<Measurement, ProbeError> {
             scope.spawn(move || drain(&shared, config, packets))
         };
 
-        let send = transmit(&sending, options.send_to, &config, ssrc, packets);
-        shared.sent_all.store(true, Ordering::Relaxed);
+        // The sender gets a thread rather than running on the caller's, because it asks
+        // for a scheduling deadline and the caller outlives the run: a thread left under
+        // a time-constraint policy while it formats a report holds a reservation on the
+        // machine that nothing needs.
+        let sender = {
+            let shared = Arc::clone(&shared);
+            let sending = &sending;
+            let config = &config;
+            scope.spawn(move || {
+                let report = transmit(sending, options.send_to, config, ssrc, packets);
+                // Whatever the outcome. A send that failed halfway is still a stream
+                // that has stopped, and the sink has to be told so it can finish.
+                shared.sent_all.store(true, Ordering::Relaxed);
+                report
+            })
+        };
 
+        let send = sender
+            .join()
+            .expect("the sender returns its failures instead of panicking");
         let sink = sink
             .join()
             .expect("the sink reports its own failures instead of panicking");
@@ -367,7 +439,7 @@ pub fn run(options: Options) -> Result<Measurement, ProbeError> {
         // from one that never arrives, and stopping here would merge them.
         thread::sleep(DRAIN_GRACE);
         shared.stop.store(true, Ordering::Relaxed);
-        receiver
+        let receiver_scheduled_as = receiver
             .join()
             .expect("the receive thread reports its own failures instead of panicking");
 
@@ -380,6 +452,7 @@ pub fn run(options: Options) -> Result<Measurement, ProbeError> {
             slots,
             send: send?,
             counts: shared.buffer.lock().counts(),
+            receiver_scheduled_as,
             sink,
         })
     })
@@ -393,6 +466,11 @@ pub fn run(options: Options) -> Result<Measurement, ProbeError> {
 /// run is built around. None of it reaches the timestamps, which count samples
 /// and would be identical if the pacing were terrible — which is exactly the
 /// property the receiving end depends on to derive a deadline.
+///
+/// The absolute schedule is why this thread asks for a deadline before it sends
+/// anything. It stands in for a machine whose audio clock is running whatever
+/// this one is doing, and a frame it emits late arrives late, is discarded past
+/// its moment and is counted against a network that did nothing wrong.
 fn transmit(
     socket: &UdpSocket,
     target: SocketAddr,
@@ -406,12 +484,13 @@ fn transmit(
     let mut pcm = vec![0f32; config.frame_interleaved()];
     let samples = config.frame_samples() as u32;
 
-    let period = Nanos(u64::from(config.frame.millis()) * 1_000_000);
-    let started = Timestamp::now();
+    let period = frame_period(config);
     let mut report = SendReport {
         packets: 0,
         send_failures: 0,
+        scheduled_as: ScheduledAs::request(period.get()),
     };
+    let started = Timestamp::now();
 
     for index in 0..packets {
         wait_until(started.add(Nanos(period.get() * index)));
@@ -433,7 +512,20 @@ fn transmit(
 /// a packet is in the packet; when the frame it carries is due is the buffer's
 /// arithmetic, from the timestamp, and the arrival instant is passed on only so
 /// that the very first packet can anchor the stream.
-fn receive(socket: &UdpSocket, shared: &Shared, expect: Ssrc) {
+///
+/// It asks for a deadline all the same, and the reasoning that said it would not
+/// need one was wrong. The argument was that a receiver keeps no schedule: it
+/// blocks in `recv_from`, the kernel holds its datagrams while it is away, and
+/// the delay it adds is delivery jitter, which is what the target absorbs. What
+/// that argument leaves out is that the target is the whole budget and it is ten
+/// milliseconds. With the sink and the sender on deadlines and this thread left
+/// at ordinary priority, a loopback run with no relay in it and no fault injected
+/// reported thirteen packets past their moment at load average 23; with this
+/// thread promoted too, the same run at load average 30 reported none. So it has
+/// a period after all - one datagram per frame, the cadence the stream arrives at
+/// - and it is asked for in those terms.
+fn receive(socket: &UdpSocket, shared: &Shared, expect: Ssrc, period: Nanos) -> ScheduledAs {
+    let scheduled_as = ScheduledAs::request(period.get());
     let mut datagram = [0u8; MAX_UDP_PAYLOAD];
     loop {
         let length = match socket.recv_from(&mut datagram) {
@@ -444,7 +536,7 @@ fn receive(socket: &UdpSocket, shared: &Shared, expect: Ssrc) {
                     io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
                 );
                 if !timed_out || shared.stop.load(Ordering::Relaxed) {
-                    return;
+                    return scheduled_as;
                 }
                 continue;
             }
@@ -482,7 +574,12 @@ fn receive(socket: &UdpSocket, shared: &Shared, expect: Ssrc) {
 /// than in the sender: the cursor advances one frame per pull, so a sink whose
 /// schedule drifted would move every deadline in the stream with it and the
 /// buffer would be absorbing the sink's own jitter instead of the network's.
+///
+/// Which is why the deadline is asked for here, before the stream has started
+/// and while there is still nothing to be late for. The period is the frame
+/// period, because that is the cycle a pull has to keep.
 fn drain(shared: &Shared, config: &CodecConfig, packets: u64) -> SinkReport {
+    let period = frame_period(config);
     let mut report = SinkReport {
         occupancy_us: None,
         interval_us: None,
@@ -491,6 +588,7 @@ fn drain(shared: &Shared, config: &CodecConfig, packets: u64) -> SinkReport {
         decode_failures: 0,
         tone: ToneReport::empty(),
         never_started: false,
+        scheduled_as: ScheduledAs::request(period.get()),
     };
 
     let mut decoder = match OpusDecoder::new(*config) {
@@ -506,7 +604,6 @@ fn drain(shared: &Shared, config: &CodecConfig, packets: u64) -> SinkReport {
         return report;
     };
 
-    let period = Nanos(u64::from(config.frame.millis()) * 1_000_000);
     let frame_us = u64::from(config.frame.millis()) * 1_000;
     let format = decoded_format(config);
     // Sized and allocated once, so filling it never puts a reallocation between
@@ -641,6 +738,17 @@ impl fmt::Display for Measurement {
             "target ms {}",
             self.target.as_millis_f64().round() as u64
         )?;
+        // Ahead of every counter below, because the counters mean one thing under a
+        // deadline and another without one, and a reader who takes the numbers before
+        // reading this has already been misled.
+        writeln!(f, "sink scheduled as {}", self.sink.scheduled_as)?;
+        writeln!(f, "sender scheduled as {}", self.send.scheduled_as)?;
+        writeln!(f, "receiver scheduled as {}", self.receiver_scheduled_as)?;
+        writeln!(
+            f,
+            "every deadline granted {}",
+            yes_no(self.deadlines_were_granted())
+        )?;
         writeln!(f, "packets received {}", counts.received)?;
         writeln!(f, "packets late {}", counts.late)?;
         writeln!(f, "packets duplicate {}", counts.duplicate)?;
@@ -743,8 +851,10 @@ mod tests {
             send: SendReport {
                 packets: 1_000,
                 send_failures: 0,
+                scheduled_as: granted(),
             },
             counts,
+            receiver_scheduled_as: granted(),
             sink: SinkReport {
                 occupancy_us: None,
                 interval_us: None,
@@ -753,7 +863,18 @@ mod tests {
                 decode_failures,
                 tone,
                 never_started: false,
+                scheduled_as: granted(),
             },
+        }
+    }
+
+    /// The deadline these fixtures are written as having been granted. A run that was
+    /// refused one is a different report, and the test that cares says so itself.
+    fn granted() -> ScheduledAs {
+        ScheduledAs::TimeConstraint {
+            period_ns: 5_000_000,
+            computation_ns: 625_000,
+            constraint_ns: 2_500_000,
         }
     }
 
@@ -864,11 +985,18 @@ mod tests {
             ..Counts::default()
         };
         let printed = measurement(counts, contract_tone(), 0).to_string();
-        let keyed: Vec<&str> = printed.lines().take(15).collect();
+        let keyed: Vec<&str> = printed.lines().take(19).collect();
         assert_eq!(
             keyed,
             vec![
                 "target ms 10",
+                "sink scheduled as time constraint, period 5.000 ms computation 0.625 ms \
+                 constraint 2.500 ms",
+                "sender scheduled as time constraint, period 5.000 ms computation 0.625 ms \
+                 constraint 2.500 ms",
+                "receiver scheduled as time constraint, period 5.000 ms computation 0.625 ms \
+                 constraint 2.500 ms",
+                "every deadline granted yes",
                 "packets received 1000",
                 "packets late 4",
                 "packets duplicate 2",
@@ -885,5 +1013,22 @@ mod tests {
                 "tone channels distinct yes",
             ]
         );
+    }
+
+    #[test]
+    fn a_run_that_was_refused_its_deadline_says_so_where_the_numbers_are_read() {
+        // The whole reason the policy is in the report. A run taken at ordinary priority
+        // measures the scheduler as much as the buffer, and nothing else in these lines
+        // would let a reader tell the two apart afterwards.
+        let mut run = measurement(healthy(), contract_tone(), 0);
+        run.receiver_scheduled_as =
+            ScheduledAs::Default("thread_policy_set returned 46".to_owned());
+        let printed = run.to_string();
+        assert!(
+            printed
+                .contains("receiver scheduled as default priority: thread_policy_set returned 46"),
+            "{printed}"
+        );
+        assert!(printed.contains("every deadline granted no"), "{printed}");
     }
 }

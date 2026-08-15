@@ -1,5 +1,6 @@
 [package]
 name = "lanplay-mouse-mover"
+publish.workspace = true
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

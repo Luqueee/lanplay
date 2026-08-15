@@ -20,6 +20,12 @@
 //! measurement taken under a policy nobody granted is a measurement of something else,
 //! and this project has spent enough of its time on instruments that reported a number
 //! from a state they had not checked.
+//!
+//! This lives beside the clock rather than in the crate that first needed it because a
+//! deadline is a clock concern and because the policy has to be stated in the units the
+//! scheduler counts in - the same `mach_timebase_info` reading [`crate::Timestamp`]
+//! already depends on. Two readings of one immutable system property in one crate is the
+//! kind of duplication that later disagrees.
 
 use std::fmt;
 
@@ -27,6 +33,7 @@ use std::fmt;
 ///
 /// Kept as a value rather than a boolean because the report has to say which of the two
 /// a run was measured under, and because a refusal carries the reason it was refused.
+#[derive(Clone, Debug)]
 pub enum ScheduledAs {
     /// A real deadline: a period, a computation budget inside it, and a constraint.
     TimeConstraint {
@@ -78,14 +85,10 @@ impl ScheduledAs {
         let computation_ns = period_ns / 8;
         let constraint_ns = period_ns / 2;
 
-        let Some(timebase) = MachTimebase::read() else {
-            return ScheduledAs::Default("mach_timebase_info failed".to_owned());
-        };
-
         let mut policy = libc::thread_time_constraint_policy {
-            period: timebase.ticks(period_ns),
-            computation: timebase.ticks(computation_ns),
-            constraint: timebase.ticks(constraint_ns),
+            period: crate::clock::scheduler_ticks(period_ns),
+            computation: crate::clock::scheduler_ticks(computation_ns),
+            constraint: crate::clock::scheduler_ticks(constraint_ns),
             // Preemptible on purpose. A non-preemptible thread that misbehaves takes the
             // machine with it, and no measurement here is worth that risk.
             preemptible: 1,
@@ -115,57 +118,12 @@ impl ScheduledAs {
     }
 
     /// Off macOS there is no policy to ask for, and pretending otherwise would make the
-    /// report describe a machine this is not running on.
+    /// report describe a machine this is not running on. Nothing in this project runs an
+    /// audio path on Windows yet, so a Windows equivalent here would be untested code
+    /// standing where a plain refusal tells the truth.
     #[cfg(not(target_os = "macos"))]
     pub fn request(_period_ns: u64) -> ScheduledAs {
-        ScheduledAs::Default("not macOS".to_owned())
-    }
-}
-
-/// The ratio between nanoseconds and the units the scheduler counts in.
-///
-/// Read rather than assumed: the two are equal on the Intel Macs this project started on
-/// and are not on Apple silicon, and a policy stated in the wrong units asks for a period
-/// off by a factor of forty.
-#[cfg(target_os = "macos")]
-struct MachTimebase {
-    numer: u64,
-    denom: u64,
-}
-
-#[cfg(target_os = "macos")]
-impl MachTimebase {
-    fn read() -> Option<MachTimebase> {
-        #[repr(C)]
-        #[derive(Default)]
-        struct Info {
-            numer: u32,
-            denom: u32,
-        }
-
-        unsafe extern "C" {
-            fn mach_timebase_info(info: *mut Info) -> i32;
-        }
-
-        let mut info = Info::default();
-        // SAFETY: a valid, correctly sized out-parameter, and the call has no other
-        // effect.
-        let status = unsafe { mach_timebase_info(&mut info) };
-        if status != 0 || info.numer == 0 || info.denom == 0 {
-            return None;
-        }
-        Some(MachTimebase {
-            numer: u64::from(info.numer),
-            denom: u64::from(info.denom),
-        })
-    }
-
-    /// Nanoseconds as scheduler ticks. Saturating, because a period wider than a `u32`
-    /// of ticks is not a period any audio device has and clamping is better than
-    /// wrapping into a deadline of microseconds.
-    fn ticks(&self, nanos: u64) -> u32 {
-        let ticks = nanos.saturating_mul(self.denom) / self.numer;
-        u32::try_from(ticks).unwrap_or(u32::MAX)
+        ScheduledAs::Default(format!("no deadline policy on {}", std::env::consts::OS))
     }
 }
 

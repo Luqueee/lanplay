@@ -1,5 +1,6 @@
 [package]
 name = "lanplay-udp-fault"
+publish.workspace = true
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,3 +11,4 @@ name = "udp-fault"
 path = "src/main.rs"
 
 [dependencies]
+lanplay-telemetry = { workspace = true }

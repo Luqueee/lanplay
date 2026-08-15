@@ -310,6 +310,7 @@ dependencies = [
  "lanplay-transport",
  "opus-head-sys",
  "parking_lot",
+ "serde_json",
  "sha2",
 ]
 
@@ -319,8 +320,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "lanplay-audio-capture",
+ "lanplay-telemetry",
  "lanplay-tone-source",
- "libc",
  "objc2-core-audio",
  "objc2-core-audio-types",
  "objc2-core-foundation",
@@ -562,6 +563,7 @@ dependencies = [
  "crossbeam-queue",
  "hdrhistogram",
  "lanplay-protocol",
+ "libc",
  "parking_lot",
 ]
 
@@ -592,6 +594,9 @@ dependencies = [
 [[package]]
 name = "lanplay-udp-fault"
 version = "0.1.0"
+dependencies = [
+ "lanplay-telemetry",
+]
 
 [[package]]
 name = "lanplay-video-core"
@@ -1262,6 +1267,8 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "lanplay-capabilities",
+ "lanplay-protocol",
  "serde",
  "serde_json",
  "sha2",

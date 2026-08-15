@@ -79,6 +79,7 @@
 pub mod config;
 pub mod decoder;
 pub mod encoder;
+pub mod envelope;
 pub mod error;
 mod ffi;
 pub mod jitter;

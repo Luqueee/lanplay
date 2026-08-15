@@ -1,9 +1,13 @@
 //! What this machine, and the lab host, can satisfy right now.
 //!
-//! Everything here shells out, so nothing here is testable on an arbitrary
-//! machine; the parsing of what the probes said is separated out for exactly
-//! that reason and is tested. The verdicts built on top of this live in
-//! `gates`, where they can be exercised with the host switched off.
+//! Almost everything here shells out, so almost nothing here is testable on an
+//! arbitrary machine; the parsing of what the probes said is separated out for
+//! exactly that reason and is tested. The exception is the hardware-decode
+//! question, which is a library call into `lanplay-capabilities` rather than a
+//! child process, because the client's preflight asks VideoToolbox the same
+//! thing and two copies of one query are two chances to disagree. The verdicts
+//! built on top of this live in `gates`, where they can be exercised with the
+//! host switched off.
 //!
 //! Two rules run through all of it. Nothing may hang: a listing that blocks
 //! for half a minute on a host that is not there is a listing nobody runs, so
@@ -16,6 +20,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::process::{Command, Output, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
+
+use lanplay_protocol::VideoCodec;
 
 use crate::gates::{Environment, Satisfaction};
 
@@ -97,6 +103,9 @@ pub fn detect(host: &str, wanted: &BTreeSet<&str>) -> Environment {
     }
     if wanted.contains("mac-display") {
         found.insert("mac-display", mac_display());
+    }
+    if wanted.contains("mac-h264-decode") {
+        found.insert("mac-h264-decode", mac_h264_decode());
     }
     if wanted.contains("audio-output") {
         found.insert("audio-output", audio_output());
@@ -188,6 +197,51 @@ fn mac_display() -> Satisfaction {
             "no display offers {HIGH_REFRESH_HZ:.0} Hz or better"
         )),
         Err(why) => Satisfaction::Unknown(why),
+    }
+}
+
+/// The claim the whole video phase rests on: a run against a machine that fell
+/// back to software decode is a run measuring something nobody asked about, and
+/// nothing downstream would say so. It is detected here rather than asserted in
+/// a unit test because a machine without the hardware has not failed anything -
+/// it is a machine nobody put the question to, which is what a hosted runner
+/// is - and the honest answers to that are `Absent` and `Unknown`, neither of
+/// which a test can express.
+///
+/// The only probe here that starts no child process, so the only one with no
+/// deadline to enforce: it is a library call, and it cannot outlast the
+/// VideoToolbox query inside it.
+fn mac_h264_decode() -> Satisfaction {
+    if !lanplay_capabilities::client_probes_supported() {
+        // Not `Absent`. Decoder discovery is implemented for macOS, so any
+        // other build has not looked rather than looked and found nothing, and
+        // the two must not print the same.
+        return Satisfaction::Unknown(
+            "hardware-decode discovery is implemented for macOS only".to_string(),
+        );
+    }
+    judge_decoders(&lanplay_capabilities::client().hardware_decode)
+}
+
+/// Two absences, stated apart because they mean different things. An empty list
+/// is a machine with no hardware decoder at all, which is ordinary on anything
+/// that is not a Mac with a working GPU. A list that holds other codecs and not
+/// H.264 is a machine whose decoder answered three times and left out the one
+/// every gate here encodes, and that is a finding rather than a configuration.
+fn judge_decoders(codecs: &[VideoCodec]) -> Satisfaction {
+    let named = codecs
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    if codecs.contains(&VideoCodec::H264) {
+        Satisfaction::Present(format!("VideoToolbox decodes {named} in hardware"))
+    } else if codecs.is_empty() {
+        Satisfaction::Absent("VideoToolbox reports no hardware decoder".to_string())
+    } else {
+        Satisfaction::Absent(format!(
+            "VideoToolbox decodes {named} in hardware but not H.264"
+        ))
     }
 }
 
@@ -498,6 +552,29 @@ mod tests {
             parse_audio_outputs(speakers).expect("readable").as_deref(),
             Some("1 output device(s), Speakers by default")
         );
+    }
+
+    #[test]
+    fn a_decoder_that_leaves_out_h264_is_a_finding_and_no_decoder_is_not() {
+        // The distinction the video gates rest on. A machine with nothing is a
+        // machine nobody asked, and it reads as absent so that a gate is
+        // excluded and says why; a machine that decodes HEVC in hardware and
+        // not H.264 is absent too, but for a reason worth reading twice, and
+        // the two must not print the same sentence.
+        let nothing = judge_decoders(&[]);
+        assert_eq!(nothing.state(), "absent");
+        assert!(nothing.why().contains("no hardware decoder"), "{nothing:?}");
+
+        let wrong_codec = judge_decoders(&[VideoCodec::Hevc, VideoCodec::Av1]);
+        assert_eq!(wrong_codec.state(), "absent");
+        assert!(
+            wrong_codec.why().contains("but not H.264"),
+            "an unexpected decoder set has to name itself: {wrong_codec:?}"
+        );
+
+        let usable = judge_decoders(&[VideoCodec::H264, VideoCodec::Hevc]);
+        assert_eq!(usable.state(), "present");
+        assert!(usable.why().contains("H.264"), "{usable:?}");
     }
 
     #[test]

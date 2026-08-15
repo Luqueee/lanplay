@@ -12,6 +12,11 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { workspace = true }
+# The hardware-decode requirement is answered by the same probe the client's
+# own preflight uses. Two copies of one VideoToolbox query are two chances to
+# disagree about what it said.
+lanplay-capabilities = { workspace = true }
+lanplay-protocol = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

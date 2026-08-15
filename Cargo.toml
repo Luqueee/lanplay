@@ -32,6 +32,11 @@ members = [
 ]
 
 [workspace.package]
+# Nothing here is a library anybody should depend on: it is two halves of a streaming system
+# and the harnesses that measure it. Declared rather than merely intended, because cargo
+# refuses to publish a crate that says so, and because a crate that does not say so is a
+# public crate whose internal path dependencies are wildcards nobody can pin.
+publish = false
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"

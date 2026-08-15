@@ -1,5 +1,6 @@
 [package]
 name = "lanplay-video-core"
+publish.workspace = true
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,5 +1,6 @@
 [package]
 name = "lanplay-audio-render"
+publish.workspace = true
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,13 +11,13 @@ name = "audio-render-probe"
 path = "src/bin/probe.rs"
 
 [dependencies]
-libc = { workspace = true }
 # `Samples` and `Percentiles` come from the capture crate rather than being
 # written again here. Both are plain arithmetic, tested off Windows, and
 # `Samples` is already fixed-capacity for exactly the reason this crate needs:
 # it is recorded into from a callback that must not allocate.
 lanplay-audio-capture = { workspace = true }
 lanplay-tone-source = { workspace = true }
+lanplay-telemetry = { workspace = true }
 clap = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]

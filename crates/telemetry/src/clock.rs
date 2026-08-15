@@ -9,6 +9,11 @@
 
 use core::fmt;
 
+/// The timebase is read once for the whole crate, so [`crate::ScheduledAs`] states its
+/// period in scheduler ticks from the same reading every timestamp comes from.
+#[cfg(target_os = "macos")]
+pub(crate) use platform::scheduler_ticks;
+
 /// Which clock a [`Timestamp`] was read from.
 ///
 /// Two machines' monotonic clocks share no epoch, so subtracting across them
@@ -247,6 +252,23 @@ mod platform {
             // hours on Apple Silicon, where the timebase is not 1:1.
             ((u128::from(ticks) * u128::from(numer)) / u128::from(denom)) as u64
         }
+    }
+
+    /// Nanoseconds as the units the scheduler counts a time-constraint policy in.
+    ///
+    /// The same reading [`now_nanos`] runs on, which is why it lives here: the two are
+    /// equal on the Intel Macs this project started on and are not on Apple silicon, so
+    /// a policy stated in the wrong units asks for a period off by a factor of forty,
+    /// and a second reading of the same immutable property is a second thing to keep
+    /// right.
+    ///
+    /// Saturating, because a period wider than a `u32` of ticks is not a period any
+    /// audio device has and clamping beats wrapping into a deadline of microseconds.
+    #[inline]
+    pub fn scheduler_ticks(nanos: u64) -> u32 {
+        let (numer, denom) = *TIMEBASE;
+        let ticks = nanos.saturating_mul(denom) / numer;
+        u32::try_from(ticks).unwrap_or(u32::MAX)
     }
 }
 

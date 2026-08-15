@@ -16,6 +16,12 @@
 #   radio             traffic has to cross the air between two machines; sending to
 #                     this machine's own address does not, the kernel short-circuits it
 #   mac-display       an unoccluded window on a 120 Hz panel, so the display link runs
+#   mac-h264-decode   VideoToolbox on this Mac answers yes for H.264 in hardware, without
+#                     which a video run measures software decode and reports it as though
+#                     it were the pipeline. This was a unit assertion once, which made it
+#                     a claim about whatever machine happened to run the test suite; here
+#                     it is a claim about the machine a gate is about to run on, and a
+#                     machine nobody asked reads as unknown rather than as a failure
 #   audio-endpoint    an active render endpoint on the host
 #   audio-output      an output device on the Mac, and something audible comes out
 #   human-attention   a person has to hold a window in the foreground, keep their
@@ -111,7 +117,7 @@ notes = "five minutes because a twenty second run called the broken arrangement 
 script = "tools/e2e-gate.sh"
 proves = "capture to NVENC to RTP to VideoToolbox to Metal, with delivery and presentation accounted separately"
 phase = "video"
-requires = ["windows-host", "nvidia-nvenc", "virtual-display", "lab-source", "radio", "mac-display"]
+requires = ["windows-host", "nvidia-nvenc", "virtual-display", "lab-source", "radio", "mac-display", "mac-h264-decode"]
 minutes = 2
 negative_control = "the fixture parameter set: a decoder configured from anything but the encoder's own parameter sets rejects real slices, so that arm must fail"
 notes = "REQUIRE_CLEAN_DISPLAY=0 makes it a link experiment and its presentation figures then mean nothing; LINK_ONLY=1 drops the renderer entirely"
@@ -120,7 +126,7 @@ notes = "REQUIRE_CLEAN_DISPLAY=0 makes it a link experiment and its presentation
 script = "tools/phase-sign.sh"
 proves = "which way a known shift moves the phase between a source's frame and the viewer's refresh"
 phase = "video"
-requires = ["windows-host", "virtual-display", "lab-source", "radio", "mac-display"]
+requires = ["windows-host", "virtual-display", "lab-source", "radio", "mac-display", "mac-h264-decode"]
 minutes = 2
 negative_control = "a run where the shift never reached the producer: the step is absent and the gate refuses instead of reading the drift as a direction"
 notes = "finds the step in the series rather than comparing the ends of a run, because the drift sweeps a period every few hundred seconds"
@@ -129,7 +135,7 @@ notes = "finds the step in the series rather than comparing the ends of a run, b
 script = "tools/phase-lottery.sh"
 proves = "whether the presentation phase is drawn afresh per session or is one free-running clock"
 phase = "video"
-requires = ["windows-host", "nvidia-nvenc", "virtual-display", "lab-source", "radio", "mac-display"]
+requires = ["windows-host", "nvidia-nvenc", "virtual-display", "lab-source", "radio", "mac-display", "mac-h264-decode"]
 minutes = 8
 negative_control = "not applicable: both outcomes are answers, and the harness reports which rather than passing or failing"
 notes = "needs several sessions and refuses a run too short to sample the phase"
@@ -138,7 +144,7 @@ notes = "needs several sessions and refuses a run too short to sample the phase"
 script = "tools/wifi-matrix.sh"
 proves = "which channel and width the link should use, ranked"
 phase = "video"
-requires = ["windows-host", "radio"]
+requires = ["windows-host", "radio", "mac-h264-decode"]
 minutes = 20
 negative_control = "none yet"
 
@@ -146,7 +152,7 @@ negative_control = "none yet"
 script = "tools/bitrate-sweep.sh"
 proves = "where bitrate starts costing delivery rather than quality"
 phase = "video"
-requires = ["windows-host", "nvidia-nvenc", "virtual-display", "lab-source", "radio", "mac-display"]
+requires = ["windows-host", "nvidia-nvenc", "virtual-display", "lab-source", "radio", "mac-display", "mac-h264-decode"]
 minutes = 25
 negative_control = "none yet"
 
@@ -154,7 +160,7 @@ negative_control = "none yet"
 script = "tools/mtu-sweep.sh"
 proves = "the datagram size the link carries best"
 phase = "video"
-requires = ["windows-host", "nvidia-nvenc", "virtual-display", "lab-source", "radio", "mac-display"]
+requires = ["windows-host", "nvidia-nvenc", "virtual-display", "lab-source", "radio", "mac-display", "mac-h264-decode"]
 minutes = 20
 negative_control = "none yet"
 
@@ -162,7 +168,7 @@ negative_control = "none yet"
 script = "tools/qos-sweep.sh"
 proves = "whether a service class changes anything this radio does"
 phase = "video"
-requires = ["windows-host", "radio"]
+requires = ["windows-host", "radio", "mac-h264-decode"]
 minutes = 15
 negative_control = "none yet"
 
@@ -170,7 +176,7 @@ negative_control = "none yet"
 script = "tools/start-gate.sh"
 proves = "the session reaches first picture within its budget from cold"
 phase = "video"
-requires = ["windows-host", "nvidia-nvenc", "virtual-display", "lab-source", "radio", "mac-display"]
+requires = ["windows-host", "nvidia-nvenc", "virtual-display", "lab-source", "radio", "mac-display", "mac-h264-decode"]
 minutes = 3
 negative_control = "none yet"
 

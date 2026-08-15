@@ -1,19 +1,24 @@
 //! Repository automation that is too long-winded to keep in a shell script.
 //!
-//! Two things live here. `gate-1c` is the clean display baseline: it drives a
+//! Three things live here. `gate-1c` is the clean display baseline: it drives a
 //! Windows sender over SSH into the macOS client on this machine, and its
 //! whole reason to exist is to refuse to report a number it cannot trust.
 //! `gates` answers the question that costs the most time when working
 //! unattended - which harnesses can run right now - out of `tools/gates.toml`
 //! and out of what the machine can be seen to have, rather than out of
-//! somebody rereading eighteen shell scripts.
+//! somebody rereading eighteen shell scripts. `verdict` reads the envelope a
+//! probe emitted and decides, so that no harness parses another program's
+//! prose ever again.
 
+mod envelope;
 mod environment;
 mod gates;
 mod preflight;
 mod report;
 mod run;
+mod verdict;
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
@@ -46,6 +51,8 @@ enum Command {
     Gate1c(Box<Gate1c>),
     /// What every harness proves, what it needs, and what can run right now.
     Gates(GatesArgs),
+    /// Decide one gate run from the envelope its probe emitted.
+    Verdict(VerdictArgs),
 }
 
 #[derive(Args)]
@@ -64,6 +71,18 @@ pub struct GatesArgs {
     /// SSH destination of the lab host.
     #[arg(long, default_value = "windows")]
     pub host: String,
+}
+
+#[derive(Args)]
+pub struct VerdictArgs {
+    /// The JSON document one arm of one gate produced.
+    pub envelope: PathBuf,
+    /// State one observation and decide nothing. A harness that has to compute
+    /// a figure across two arms needs the numbers out of both, and every read
+    /// of an envelope goes through the one parser that refuses a name it cannot
+    /// find rather than through a shell that would print an empty string.
+    #[arg(long, value_name = "NAME")]
+    pub observation: Option<String>,
 }
 
 #[derive(Args)]
@@ -111,6 +130,23 @@ fn main() -> ExitCode {
                 ExitCode::from(2)
             }
         },
+        Command::Verdict(args) => match decide(&args) {
+            Ok((text, passed)) => {
+                print!("{text}");
+                if passed {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::from(1)
+                }
+            }
+            // Two, and not one, because a document that could not be read is
+            // the absence of a result and a harness that treated it as a
+            // failure would report a criterion nobody tested.
+            Err(Abort(why)) => {
+                eprintln!("verdict: {why}");
+                ExitCode::from(2)
+            }
+        },
     }
 }
 
@@ -130,4 +166,22 @@ fn list_gates(args: &GatesArgs) -> Result<String, Abort> {
     } else {
         gates::human(&index, &selection, detected.as_ref())
     })
+}
+
+/// Reading one envelope, and either deciding it or stating one of its numbers.
+/// Stating a number is not a verdict, so it prints the number alone and says
+/// nothing about the run.
+fn decide(args: &VerdictArgs) -> Result<(String, bool), Abort> {
+    let envelope = envelope::Envelope::load(&args.envelope)?;
+    if let Some(name) = &args.observation {
+        let value = envelope.observation(name).ok_or_else(|| {
+            Abort::new(format!(
+                "{} reports no observation named {name}, and a harness computing a figure from a \
+                 name that is not there is the defect this envelope exists to retire",
+                args.envelope.display()
+            ))
+        })?;
+        return Ok((format!("{value}\n"), true));
+    }
+    Ok(verdict::report(&envelope))
 }
