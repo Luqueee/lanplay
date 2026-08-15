@@ -1,0 +1,9 @@
+tone-source: LG ULTRAWIDE (NVIDIA High Definition Audio) mixes at 48000 Hz 2 ch 32 bit float, device period 10.000 ms default, 3.000 ms minimum; buffer 1056 frames
+tone-source: playing, first buffer of 480 frames filled
+endpoint: LG ULTRAWIDE (NVIDIA High Definition Audio)
+mix format: 48000 Hz 2 ch 32 bit float
+channel mask: 0x00000003 (front left, front right)
+buffers filled: 68002
+frames rendered: 32641536
+underruns: 0
+span seconds: 680.031

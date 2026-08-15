@@ -25,10 +25,10 @@ use objc2_core_audio::{
     AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectID,
     AudioObjectPropertyAddress, AudioObjectSetPropertyData, kAudioDevicePropertyBufferFrameSize,
     kAudioDevicePropertyBufferFrameSizeRange, kAudioDevicePropertyStreams,
-    kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyElementMain,
-    kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeOutput,
-    kAudioObjectSystemObject, kAudioObjectUnknown, kAudioStreamPropertyPhysicalFormat,
-    kAudioStreamPropertyVirtualFormat,
+    kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyDevices,
+    kAudioObjectPropertyElementMain, kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal,
+    kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject, kAudioObjectUnknown,
+    kAudioStreamPropertyPhysicalFormat, kAudioStreamPropertyVirtualFormat,
 };
 use objc2_core_audio_types::{
     AudioStreamBasicDescription, AudioValueRange, kAudioFormatFlagIsFloat,
@@ -197,9 +197,11 @@ fn property_list<T: Copy + Default>(
 
 /// The device the system is currently sending audio to.
 ///
-/// Deliberately the default rather than a device chosen by name: the phase is
-/// about what this machine does, and a probe that had to be told which endpoint
-/// to use would be reporting the operator's opinion.
+/// The A5 probe wants exactly this and not a device chosen by name: its subject
+/// is what this machine does with no operator in the loop, and a probe that had
+/// to be told which endpoint to use would be reporting an opinion. A gate
+/// carrying a stream of a fixed format wants the opposite, and takes
+/// [`output_device`] instead.
 pub fn default_output_device() -> Result<AudioObjectID, Error> {
     let device: AudioObjectID = property(
         "AudioObjectGetPropertyData(kAudioHardwarePropertyDefaultOutputDevice)",
@@ -213,6 +215,102 @@ pub fn default_output_device() -> Result<AudioObjectID, Error> {
         ));
     }
     Ok(device)
+}
+
+/// How a run arrived at the device it rendered through.
+///
+/// Recorded beside every figure a run produces, because the two answers fail in
+/// different places and a reader cannot tell them apart afterwards. A named
+/// device that is not here refuses before the socket is bound; an inherited one
+/// is whatever the system happened to be pointing at, which on a machine with
+/// Bluetooth headphones that reconnect on their own is a different device from
+/// one run to the next.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Chosen {
+    Named,
+    Inherited,
+}
+
+impl fmt::Display for Chosen {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Chosen::Named => f.write_str("named"),
+            Chosen::Inherited => f.write_str("inherited from the system default"),
+        }
+    }
+}
+
+/// Every device on this machine that can play, with the name the HAL gives it.
+///
+/// An input-only device has no output stream and is left out: it cannot be
+/// rendered through, and offering it in a refusal's list of alternatives would
+/// send the reader to a device that would refuse for a second reason.
+///
+/// A device that will not answer its own name or stream list fails the whole
+/// enumeration rather than being skipped. Skipping would turn a HAL in a state
+/// nobody checked into a shorter list, and the two ways that goes wrong are
+/// both bad: a named device that was merely unreadable comes back as one that
+/// does not exist, and a refusal offers alternatives it did not really survey.
+pub fn output_devices() -> Result<Vec<(AudioObjectID, String)>, Error> {
+    let devices: Vec<AudioObjectID> = property_list(
+        "AudioObjectGetPropertyDataSize(kAudioHardwarePropertyDevices)",
+        kAudioObjectSystemObject as AudioObjectID,
+        kAudioHardwarePropertyDevices,
+        kAudioObjectPropertyScopeGlobal,
+    )?;
+    let mut playable = Vec::with_capacity(devices.len());
+    for device in devices {
+        if output_streams(device)?.is_empty() {
+            continue;
+        }
+        playable.push((device, device_name(device)?));
+    }
+    Ok(playable)
+}
+
+/// The device to render through: the one named, or the system default when
+/// nothing was named.
+pub fn output_device(named: Option<&str>) -> Result<(AudioObjectID, Chosen), Error> {
+    match named {
+        None => Ok((default_output_device()?, Chosen::Inherited)),
+        Some(wanted) => Ok((match_named(&output_devices()?, wanted)?, Chosen::Named)),
+    }
+}
+
+/// Picks the device a name asks for, and refuses every other outcome.
+///
+/// Separated from the enumeration so that the refusals can be exercised without
+/// a HAL: they are the whole point of naming a device, and a fallback hiding in
+/// here would put back the failure that naming one removes.
+fn match_named(devices: &[(AudioObjectID, String)], wanted: &str) -> Result<AudioObjectID, Error> {
+    let mut matched = devices.iter().filter(|(_, name)| name == wanted);
+    match (matched.next(), matched.next()) {
+        (Some((device, _)), None) => Ok(*device),
+        // Two endpoints of the same model answer to one name, and a run that
+        // took the first would be reporting a figure about whichever of them
+        // the HAL happened to list first.
+        (Some(_), Some(_)) => Err(Error::Unsupported(format!(
+            "more than one output device here is named {wanted:?}, so the name does not say which \
+             one this run would measure"
+        ))),
+        (None, _) => Err(Error::Unsupported(format!(
+            "no output device here is named {wanted:?}; this machine offers {}. Falling back to \
+             the default would render through a device nobody named, which is the failure naming \
+             one exists to prevent",
+            available(devices)
+        ))),
+    }
+}
+
+fn available(devices: &[(AudioObjectID, String)]) -> String {
+    if devices.is_empty() {
+        return "nothing that can play".to_string();
+    }
+    devices
+        .iter()
+        .map(|(_, name)| format!("{name:?}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub fn device_name(device: AudioObjectID) -> Result<String, Error> {
@@ -440,6 +538,55 @@ mod tests {
         let error = decode(&description).expect_err("ac-3 is not pcm");
         assert!(
             error.to_string().contains("'ac-3' rather than linear PCM"),
+            "{error}"
+        );
+    }
+
+    fn devices() -> Vec<(AudioObjectID, String)> {
+        vec![
+            (61, "ULT WEAR".to_string()),
+            (73, "Altavoces del MacBook Pro".to_string()),
+            (91, "BlackHole 2ch".to_string()),
+        ]
+    }
+
+    #[test]
+    fn a_named_device_is_the_one_rendered_through() {
+        assert_eq!(
+            match_named(&devices(), "Altavoces del MacBook Pro").expect("this machine has it"),
+            73
+        );
+    }
+
+    /// The refusal has to carry the alternatives, because the reader of it is
+    /// somebody who has just mistyped a name and has no other way to learn
+    /// what this machine calls its endpoints.
+    #[test]
+    fn a_name_no_device_answers_to_is_refused_with_what_is_here() {
+        let error = match_named(&devices(), "MacBook Pro Speakers").expect_err("not on this Mac");
+        let said = error.to_string();
+        assert!(said.contains("\"MacBook Pro Speakers\""), "{said}");
+        for (_, name) in devices() {
+            assert!(said.contains(&name), "{said}");
+        }
+    }
+
+    #[test]
+    fn a_name_two_devices_answer_to_is_refused_rather_than_resolved() {
+        let mut pair = devices();
+        pair.push((104, "ULT WEAR".to_string()));
+        let error = match_named(&pair, "ULT WEAR").expect_err("ambiguous");
+        assert!(
+            error.to_string().contains("more than one output device"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_machine_with_nothing_that_plays_says_so_rather_than_listing_nothing() {
+        let error = match_named(&[], "anything").expect_err("no devices");
+        assert!(
+            error.to_string().contains("nothing that can play"),
             "{error}"
         );
     }

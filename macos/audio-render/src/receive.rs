@@ -113,6 +113,12 @@ const MINIMUM_NAP: Duration = Duration::from_micros(250);
 #[derive(Clone, Debug)]
 pub struct ReceiveOptions {
     pub bind: SocketAddr,
+    /// Which output device to render through, by the name CoreAudio gives it,
+    /// or the system default when nothing is named. A gate names one: the
+    /// default is a system-wide setting that changes when a pair of headphones
+    /// reconnects, and a ten-minute measurement that depends on it discovers so
+    /// after it has started.
+    pub device: Option<String>,
     /// Seconds of audio to account for, counted from the first datagram rather
     /// than from process start. A window that opened before the stream existed
     /// would spend its first seconds measuring the silence before the run, and
@@ -188,8 +194,20 @@ fn io(call: &'static str) -> impl FnOnce(io::Error) -> ReceiveError {
 #[derive(Clone, Copy, Default, Debug)]
 pub struct Loss {
     base: Option<SequenceNumber>,
-    /// Distance from `base` to the furthest sequence number seen, so a stream
-    /// crossing the sixteen-bit wrap is still one interval.
+    /// The furthest sequence number seen, carried into a space wider than sixteen bits.
+    ///
+    /// A sixteen-bit distance can only say where a packet sits within half the sequence
+    /// space, so `distance_from` turns negative once the stream is more than 32767 packets
+    /// past `base` and a span taken from it saturates at 32768. At the wire's 200 packets a
+    /// second that is 163.8 seconds: every sixty-second arm was right and every ten-minute
+    /// arm reported 32768 expected against the 120000 it actually sent. Two runs on two
+    /// different radios printing the same denominator to the digit is what gave it away.
+    ///
+    /// Counting the wraps is what RFC 3550 does for exactly this, and the count belongs here
+    /// rather than at the call site because a receiver that has to remember to widen a
+    /// number it was handed will one day forget.
+    cycles: u64,
+    highest: Option<SequenceNumber>,
     span: u64,
     unique: u64,
 }
@@ -198,14 +216,23 @@ impl Loss {
     /// Records one arrival that was not a duplicate.
     pub fn arrived(&mut self, sequence: SequenceNumber) {
         self.unique += 1;
-        let Some(base) = self.base else {
+        let (Some(base), Some(highest)) = (self.base, self.highest) else {
             self.base = Some(sequence);
+            self.highest = Some(sequence);
             self.span = 1;
             return;
         };
-        let from_base = sequence.distance_from(base);
-        if from_base >= 0 {
-            self.span = self.span.max(from_base as u64 + 1);
+        // Forward of the furthest seen: advance, and count a wrap when the raw number went
+        // backwards while the distance says forward. A reordered packet is behind the
+        // furthest and moves nothing, which is what keeps a late arrival from inventing a
+        // cycle.
+        let step = sequence.distance_from(highest);
+        if step > 0 {
+            if sequence.0 < highest.0 {
+                self.cycles += u64::from(u16::MAX) + 1;
+            }
+            self.highest = Some(sequence);
+            self.span = (self.cycles + u64::from(sequence.0)).saturating_sub(u64::from(base.0)) + 1;
         }
     }
 
@@ -321,6 +348,10 @@ pub struct Producer {
 #[derive(Debug)]
 pub struct Render {
     pub device: String,
+    /// Named or inherited. Beside the name because a figure whose device
+    /// nobody can identify is not reproducible, and the reader who has to know
+    /// which of the two it was is the one comparing this run against another.
+    pub chosen: device::Chosen,
     pub format: OutputFormat,
     pub buffer_frames: u32,
     pub ring_frames: usize,
@@ -483,19 +514,24 @@ impl Shared {
 pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
     let config = options.config;
 
-    let device = device::default_output_device()?;
+    let (device, chosen) = device::output_device(options.device.as_deref())?;
     let name = device::device_name(device)?;
+    // The name alone is not enough in a refusal. The whole reason a run refuses
+    // for a format is usually that it inherited an endpoint nobody chose, and a
+    // message that says only which device it was leaves its reader to work out
+    // where the device came from.
+    let attributed = format!("{name} ({chosen})");
     let streams = device::output_streams(device)?;
     let stream = match streams.as_slice() {
         [] => {
             return Err(ReceiveError::Mismatch(format!(
-                "{name} has no output stream, so there is nothing to render into"
+                "{attributed} has no output stream, so there is nothing to render into"
             )));
         }
         [single] => *single,
         many => {
             return Err(ReceiveError::Mismatch(format!(
-                "{name} has {} output streams; this receiver feeds a single-stream device",
+                "{attributed} has {} output streams; this receiver feeds a single-stream device",
                 many.len()
             )));
         }
@@ -505,14 +541,15 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
     let buffer_frames = device::buffer_frame_size(device)?;
     if buffer_frames == 0 {
         return Err(ReceiveError::Mismatch(format!(
-            "{name} reports an IO buffer of no frames, so no cycle would ever ask for audio"
+            "{attributed} reports an IO buffer of no frames, so no cycle would ever ask for audio"
         )));
     }
 
     let format = device::virtual_format(stream)?;
     if !format.is_writable() {
         return Err(ReceiveError::Mismatch(format!(
-            "{name} mixes at {format}; this receiver writes 32-bit float and will not convert"
+            "{attributed} mixes at {format}; this receiver writes 32-bit float and will not \
+             convert"
         )));
     }
     // Refused rather than resampled. A converter here would sit on the one path
@@ -522,7 +559,7 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
     // machine where that is untrue is a finding to state and not to paper over.
     if format.sample_rate != config.sample_rate || format.channels != config.channels {
         return Err(ReceiveError::Mismatch(format!(
-            "{name} mixes at {format} and the stream is {} Hz {} ch; this receiver will not \
+            "{attributed} mixes at {format} and the stream is {} Hz {} ch; this receiver will not \
              resample, because a converter on this path would make every figure below a \
              statement about the converter",
             config.sample_rate, config.channels
@@ -714,6 +751,7 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
         producer,
         render: Render {
             device: name,
+            chosen,
             format,
             buffer_frames,
             ring_frames,
@@ -1244,6 +1282,48 @@ mod tests {
             loss.arrived(SequenceNumber(number));
         }
         assert_eq!(loss.expected(), 4);
+        assert_eq!(loss.lost(), 0);
+    }
+
+    /// The ten-minute run, which the four-packet test above passed without covering.
+    ///
+    /// A span of 120000 packets is what six hundred seconds at the wire's 200 a second comes
+    /// to, and it crosses the sixteen-bit space nearly twice. The short test crosses the wrap
+    /// too, and passes, because four packets never leave the half of the space a signed
+    /// sixteen-bit distance can describe - which is why it stood beside a counter that
+    /// saturated at 32768 for two committed ten-minute runs without objecting.
+    #[test]
+    fn a_ten_minute_span_is_not_capped_at_half_the_sequence_space() {
+        let mut loss = Loss::default();
+        let packets: u64 = 120_000;
+        for step in 0..packets {
+            loss.arrived(SequenceNumber(((step + 40_000) % 65_536) as u16));
+        }
+        assert_eq!(
+            loss.expected(),
+            packets,
+            "a span longer than half the sequence space must still be its own length"
+        );
+        assert_eq!(loss.unique(), packets);
+        assert_eq!(loss.lost(), 0);
+    }
+
+    /// A packet behind the furthest seen must not be read as a wrap.
+    ///
+    /// Reordering is the case that separates counting cycles from guessing them: 65535
+    /// arriving after 1 has gone past is a late packet, and a counter that added a cycle for
+    /// it would claim the stream had run another 65536 packets in the gap.
+    #[test]
+    fn a_reordered_packet_across_the_wrap_invents_no_cycle() {
+        let mut loss = Loss::default();
+        for number in [65_533u16, 65_534, 0, 1, 65_535] {
+            loss.arrived(SequenceNumber(number));
+        }
+        assert_eq!(
+            loss.expected(),
+            5,
+            "65533 to 1 inclusive, and 65535 was late"
+        );
         assert_eq!(loss.lost(), 0);
     }
 

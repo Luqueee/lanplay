@@ -35,6 +35,17 @@ struct Args {
     #[arg(long, default_value = "0.0.0.0:5012")]
     bind: SocketAddr,
 
+    /// Which output device to render through, by the name CoreAudio gives it.
+    /// Absent means whatever the system default is when the run starts, which
+    /// is how the A5 probe and anyone running this by hand work.
+    ///
+    /// A gate names one. The default is a system-wide setting that a pair of
+    /// headphones reconnecting changes without anybody touching it, and a run
+    /// that inherits it finds out that the endpoint mixes at 44100 Hz half a
+    /// minute after the measurement started rather than before it.
+    #[arg(long, value_name = "NAME")]
+    device: Option<String>,
+
     /// Seconds of audio to account for, counted from the first datagram rather
     /// than from process start. The plan asks for 60 first and then 600.
     #[arg(long, default_value_t = 60.0)]
@@ -126,6 +137,7 @@ fn main() -> ExitCode {
     let started = SystemTime::now();
     let receipt = match receive(ReceiveOptions {
         bind: args.bind,
+        device: args.device.clone(),
         seconds: args.seconds,
         config: CodecConfig::contract(frame, CodecConfig::DEFAULT_BITRATE_BPS),
         target: Nanos::from_millis(args.target_ms),
@@ -140,11 +152,18 @@ fn main() -> ExitCode {
             // A run that never heard the stream is told apart from a machine
             // that could not serve it at all, because the two send their reader
             // to opposite ends of the lab.
-            return ExitCode::from(if error.to_string().starts_with("nothing arrived") {
-                3
-            } else {
-                2
-            });
+            let nothing_arrived = error.to_string().starts_with("nothing arrived");
+            // Said only where the reader has a lever, which is a refusal about
+            // the endpoint rather than about the stream. Seventeen minutes of a
+            // measurement went into a message that named the device and not the
+            // fact that nothing had chosen it.
+            if !nothing_arrived && args.device.is_none() {
+                eprintln!(
+                    "audio-e2e-receiver: nothing named a device, so this run took the system \
+                     default; --device names one and refuses before a run rather than during it"
+                );
+            }
+            return ExitCode::from(if nothing_arrived { 3 } else { 2 });
         }
     };
 

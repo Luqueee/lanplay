@@ -365,6 +365,11 @@ pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Optio
         },
         "environment": {
             "device": render.device,
+            // Beside the name rather than instead of it: a run that inherited
+            // its device measured whatever the system was pointing at, which is
+            // a different provenance from one that asked for this endpoint by
+            // name, and no reader can recover that from the name alone.
+            "device_chosen": render.chosen.to_string(),
             "sample_rate_hz": render.format.sample_rate,
             "channels": render.format.channels,
             "io_buffer_frames": render.buffer_frames,
@@ -576,8 +581,8 @@ impl fmt::Display for Receipt {
         writeln!(f, "frame ms {}", self.config.frame.millis())?;
         writeln!(
             f,
-            "device {} at {} with a {} frame io buffer",
-            render.device, render.format, render.buffer_frames
+            "device {} ({}) at {} with a {} frame io buffer",
+            render.device, render.chosen, render.format, render.buffer_frames
         )?;
         writeln!(
             f,

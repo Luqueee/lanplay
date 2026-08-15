@@ -93,6 +93,23 @@ PORT=5012
 RELAY_PORT=5013
 FRAME_MS=5
 TARGET_MS=10
+# The output device this end renders through, named rather than inherited.
+#
+# The receiver refuses a device that does not mix at 48000 Hz stereo, because a converter
+# on this path would make every figure below a statement about the converter. Naming the
+# device is what makes that refusal useful. Inheriting whatever CoreAudio reports as the
+# system default made a ten-minute measurement depend on a setting nobody here sets: the
+# default on this Mac is a pair of Bluetooth headphones that mix at 44100 Hz and reconnect
+# on their own, and a run that had waited for the radio to recover was refused thirty-seven
+# seconds after it started. Named, the same machine is refused before the sender is
+# launched, and the result says which endpoint the figures came from - which a figure
+# nobody can attribute to a device is not reproducible without.
+#
+# The built-in output is the 48 kHz device on this Mac, under the name the A5 render gate
+# recorded in results/audio/render/. Overridable because another machine calls it
+# something else - one running in English calls it "MacBook Pro Speakers" - and a name no
+# device answers to is refused with the available ones listed rather than falling back.
+DEVICE="${AUDIO_OUTPUT_DEVICE:-Altavoces del MacBook Pro}"
 # The seed the negative control's faults come from. Stated here and printed with the arm,
 # because a fault nobody can reproduce turns a failure into a rumour.
 SEED=20250815
@@ -211,6 +228,7 @@ cat "$OUT/preflight.txt"
 LOCAL_IP="$(ipconfig getifaddr en0 || true)"
 [ -n "$LOCAL_IP" ] || refuse "en0 has no address, so there is nothing for the host to send to"
 echo "radio     host -> en0 $LOCAL_IP:$PORT"
+echo "device    rendering through $DEVICE"
 
 # ---- both ends built where they run -----------------------------------------
 
@@ -338,13 +356,13 @@ run_arm() {
     # them waiting for the scheduled task to reach the desktop, and its window has to end
     # inside the sender's run whichever way that goes.
     local code=0
-    "$RECEIVER" --bind "0.0.0.0:$PORT" --seconds "$seconds" --arm "$arm" \
+    "$RECEIVER" --bind "0.0.0.0:$PORT" --seconds "$seconds" --arm "$arm" --device "$DEVICE" \
         --frame-ms "$FRAME_MS" --target-ms "$TARGET_MS" --first-packet-wait 30 \
         --envelope "$OUT/$arm.receiver.json" ${COMMIT_ARGS[@]+"${COMMIT_ARGS[@]}"} \
         >"$OUT/$arm.receiver.out" 2>&1 || code=$?
     case "$code" in
         0) ;;
-        2) refuse "the receiver could not serve the output device, so this end was in no position to play anything; its report is in $OUT/$arm.receiver.out" ;;
+        2) refuse "the receiver could not serve $DEVICE, so this end was in no position to play anything; its report is in $OUT/$arm.receiver.out" ;;
         3) refuse "no datagram arrived in thirty seconds, so the sender never reached the air and this arm measured a path with nothing on it; its report is in $OUT/$arm.receiver.out" ;;
         *) echo "arm       $arm: the receiver exited $code and its report is in $OUT/$arm.receiver.out" ;;
     esac

@@ -310,9 +310,34 @@ fn refresh_hz(mode: &str) -> Option<f64> {
     digits.parse().ok()
 }
 
+/// The stream every audio gate here carries. Stated as two numbers rather than
+/// taken from `lanplay-audio-codec`, because that crate vendors libopus in C
+/// and xtask is built on machines with no cmake to build it with.
+const CONTRACT_HZ: u64 = 48_000;
+const CONTRACT_CHANNELS: u64 = 2;
+
 /// An entry with a non-zero `coreaudio_device_output` is a device that can
 /// play; the input-only microphones in the same list cannot, and a gate that
-/// wants something audible needs the former.
+/// wants something audible needs the former. The same field carries how many
+/// channels it plays, and `coreaudio_device_srate` the rate it mixes at.
+///
+/// The default device's format is stated and not only its name, because the
+/// receiver that renders a gate's audio refuses a device that cannot carry the
+/// stream, and a listing that said only that output devices exist was true of a
+/// machine whose default was a pair of 44100 Hz headphones - which is a run
+/// that refuses thirty-seven seconds in rather than a requirement that reads as
+/// unmet before it starts.
+///
+/// It remains present with the caveat in the sentence rather than becoming
+/// absent, and that is a judgement about what this requirement names. It names
+/// an output device on this Mac, and a default mixing at 44100 Hz is one: it
+/// plays. Neither gate that requires it is stopped by that rate either - the
+/// A5 render probe generates its tone at whatever rate the device mixes at, and
+/// A6 now names its own device instead of inheriting one - so marking it absent
+/// would block two gates over a system-wide setting neither of them reads,
+/// which is how a suite shrinks without anybody deciding it should. What the
+/// reader needs is the format in front of them before they start, and that is
+/// what this sentence gives them.
 fn parse_audio_outputs(json: &str) -> Result<Option<String>, String> {
     let document: serde_json::Value =
         serde_json::from_str(json).map_err(|err| format!("unreadable audio report: {err}"))?;
@@ -326,13 +351,18 @@ fn parse_audio_outputs(json: &str) -> Result<Option<String>, String> {
             continue;
         };
         for device in devices {
-            if device["coreaudio_device_output"].as_u64().unwrap_or(0) == 0 {
+            let channels = device["coreaudio_device_output"].as_u64().unwrap_or(0);
+            if channels == 0 {
                 continue;
             }
             count += 1;
             let name = device["_name"].as_str().unwrap_or("an output device");
             if device["coreaudio_default_audio_output_device"] == "spaudio_yes" {
-                default = Some(name.to_string());
+                default = Some((
+                    name.to_string(),
+                    device["coreaudio_device_srate"].as_u64(),
+                    channels,
+                ));
             }
         }
     }
@@ -340,9 +370,33 @@ fn parse_audio_outputs(json: &str) -> Result<Option<String>, String> {
         return Ok(None);
     }
     Ok(Some(match default {
-        Some(name) => format!("{count} output device(s), {name} by default"),
+        Some((name, rate, channels)) => format!(
+            "{count} output device(s), {name} by default {}",
+            mixes(rate, channels)
+        ),
         None => format!("{count} output device(s), none of them the default"),
     }))
+}
+
+/// What the default mixes at, and whether that is the stream a gate would send
+/// it. A device that did not state its rate is said to have not stated it: the
+/// alternative is to assume the contract and report a machine as ready on the
+/// strength of a field nobody read.
+fn mixes(rate: Option<u64>, channels: u64) -> String {
+    match rate {
+        Some(rate) if rate == CONTRACT_HZ && channels == CONTRACT_CHANNELS => {
+            format!("at {rate} Hz {channels} ch")
+        }
+        Some(rate) => format!(
+            "at {rate} Hz {channels} ch, which cannot carry the {CONTRACT_HZ} Hz \
+             {CONTRACT_CHANNELS} ch stream without a converter this project refuses; a gate that \
+             names its own device is not held up by it"
+        ),
+        None => format!(
+            "which did not state the rate it mixes at, so whether it can carry the {CONTRACT_HZ} \
+             Hz {CONTRACT_CHANNELS} ch stream is not answered here"
+        ),
+    }
 }
 
 /// Cores a cadence measurement needs to itself.
@@ -624,12 +678,49 @@ mod tests {
 
         let speakers = r#"{"SPAudioDataType":[{"_items":[
             {"_name":"Microphone","coreaudio_device_input":1},
-            {"_name":"Speakers","coreaudio_device_output":2,
+            {"_name":"Speakers","coreaudio_device_output":2,"coreaudio_device_srate":48000,
              "coreaudio_default_audio_output_device":"spaudio_yes"}]}]}"#;
         assert_eq!(
             parse_audio_outputs(speakers).expect("readable").as_deref(),
-            Some("1 output device(s), Speakers by default")
+            Some("1 output device(s), Speakers by default at 48000 Hz 2 ch")
         );
+    }
+
+    /// The listing this whole probe exists for. A6 spent thirty-seven seconds
+    /// of a run discovering that the default mixed at 44100 Hz, having read a
+    /// line that said only how many output devices there were.
+    #[test]
+    fn a_default_that_cannot_carry_the_stream_says_so_and_still_counts_as_present() {
+        let headphones = r#"{"SPAudioDataType":[{"_items":[
+            {"_name":"ULT WEAR","coreaudio_device_output":2,"coreaudio_device_srate":44100,
+             "coreaudio_default_audio_output_device":"spaudio_yes"},
+            {"_name":"Speakers","coreaudio_device_output":2,"coreaudio_device_srate":48000}]}]}"#;
+        let found = parse_audio_outputs(headphones)
+            .expect("readable")
+            .expect("two devices that play");
+        assert!(
+            found.starts_with("2 output device(s), ULT WEAR by default"),
+            "{found}"
+        );
+        assert!(found.contains("44100 Hz 2 ch"), "{found}");
+        assert!(
+            found.contains("cannot carry the 48000 Hz 2 ch stream"),
+            "{found}"
+        );
+        // Present, because a gate naming its own device renders through the
+        // other one and is not held up by what the system happens to point at.
+        assert!(found.contains("names its own device"), "{found}");
+    }
+
+    #[test]
+    fn a_default_that_did_not_state_its_rate_is_not_assumed_to_be_the_contract() {
+        let quiet = r#"{"SPAudioDataType":[{"_items":[
+            {"_name":"Odd Interface","coreaudio_device_output":2,
+             "coreaudio_default_audio_output_device":"spaudio_yes"}]}]}"#;
+        let found = parse_audio_outputs(quiet)
+            .expect("readable")
+            .expect("one device that plays");
+        assert!(found.contains("did not state the rate"), "{found}");
     }
 
     #[test]
