@@ -40,6 +40,7 @@ fn the_decoded_audio_is_the_contract_tone() {
             frame,
             seconds: SECONDS,
             bitrate_kbps: 128,
+            swap_tone_channels: false,
         })
         .expect("run");
 
@@ -86,6 +87,7 @@ fn every_frame_submitted_comes_back() {
             frame,
             seconds: SECONDS,
             bitrate_kbps: 128,
+            swap_tone_channels: false,
         })
         .expect("run");
 

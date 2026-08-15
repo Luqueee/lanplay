@@ -47,6 +47,16 @@ struct Args {
     /// than an absent one.
     #[arg(long, value_name = "HASH")]
     commit: Option<String>,
+
+    /// Feed the encoder the contract tone with its two channels exchanged.
+    ///
+    /// The gate's negative control. The run is otherwise identical and the
+    /// document it writes states the same criteria, so the two frequency
+    /// criteria must disagree with it and the rest must not: an arm that also
+    /// lost its packets or its sample count would be evidence about the
+    /// harness rather than about the criteria.
+    #[arg(long)]
+    swap_tone_channels: bool,
 }
 
 fn main() -> ExitCode {
@@ -65,6 +75,7 @@ fn main() -> ExitCode {
         frame,
         seconds: args.seconds,
         bitrate_kbps: args.bitrate_kbps,
+        swap_tone_channels: args.swap_tone_channels,
     };
     // The wall clock says when, and the monotonic clock says how long. Taking
     // the span from two readings of the wall clock would fold anything that

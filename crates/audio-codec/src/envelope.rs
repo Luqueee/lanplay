@@ -227,9 +227,24 @@ pub fn document(
                 "frame_ms": frame_ms,
                 "seconds": options.seconds,
                 "bitrate_kbps": options.bitrate_kbps,
+                // Stated on every arm rather than only on the one that sets
+                // it, because a reader of a clean document is entitled to see
+                // that the tone went in the way the criteria below expect it
+                // to come out, and an argument that appears only when it is
+                // true is an argument nobody notices is missing.
+                "swap_tone_channels": options.swap_tone_channels,
             },
             "commit": commit,
-            "arm": format!("{frame_ms} ms frames"),
+            // The arm names the control in the line `xtask verdict` prints at
+            // the top of its block, so that a document read on its own says
+            // what it is. A negative control whose report is indistinguishable
+            // from a measuring arm's invites somebody to quote its failure as
+            // the gate's.
+            "arm": if options.swap_tone_channels {
+                format!("{frame_ms} ms frames, the two contract tones exchanged: the negative control")
+            } else {
+                format!("{frame_ms} ms frames")
+            },
         },
         "environment": {
             "libopus": measurement.libopus,
@@ -321,13 +336,18 @@ mod tests {
             frame: FrameDuration::Ms5,
             seconds: 10.0,
             bitrate_kbps: 128,
+            swap_tone_channels: false,
         }
     }
 
     fn parsed(measurement: &Measurement) -> Value {
+        parsed_arm(measurement, options())
+    }
+
+    fn parsed_arm(measurement: &Measurement, options: Options) -> Value {
         let text = document(
             measurement,
-            options(),
+            options,
             UNIX_EPOCH + Duration::from_millis(1_755_212_345_678),
             10.0,
             Some("abc1234"),
@@ -401,6 +421,34 @@ mod tests {
         assert_eq!(document["run"]["commit"], "abc1234");
         assert_eq!(document["declared"], json!(DECLARED));
         assert_eq!(document["exercised"], json!(DECLARED));
+    }
+
+    /// The whole worth of the negative control is that it is judged against
+    /// the criteria the measuring arms are judged against. A document whose
+    /// targets followed its own exchanged tone would pass, and a control that
+    /// passes is a control that tested nothing - which is the debt this arm
+    /// was written to clear, not to restate in a subtler form.
+    #[test]
+    fn the_control_arm_states_the_same_targets_and_says_which_arm_it_is() {
+        let document = parsed_arm(
+            &measurement(),
+            Options {
+                swap_tone_channels: true,
+                ..options()
+            },
+        );
+
+        let targets: Vec<f64> = document["checks"]
+            .as_array()
+            .expect("checks are a list")
+            .iter()
+            .filter_map(|check| check["target"].as_f64())
+            .collect();
+        assert_eq!(targets, vec![CONTRACT.left_hz, CONTRACT.right_hz]);
+
+        let arm = document["run"]["arm"].as_str().expect("an arm is named");
+        assert!(arm.contains("negative control"), "the arm reads {arm}");
+        assert_eq!(document["run"]["args"]["swap_tone_channels"], true);
     }
 
     /// The bound is derived from the frame rather than stated once, because the

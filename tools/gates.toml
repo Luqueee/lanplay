@@ -80,8 +80,8 @@ proves = "WASAPI loopback delivers a known format and cadence with every frame a
 phase = "A1"
 requires = ["windows-host", "audio-endpoint"]
 minutes = 2
-negative_control = "none yet: with tone-source stopped the capture sees silence, which the gate refuses on the silent-packet count, but that arm is not wired as a control"
-notes = "the tone carries a different frequency per channel so channel order and content are provable, which a frame count cannot do"
+negative_control = "the silent-endpoint arm: the endpoint held open by a render stream of zeros, which delivers its whole cadence and no audio, so the samples are the only thing that can catch it. Measured, 1001 packets and 480480 frames of 480000 nominal over ten seconds, no position gap, no discontinuity in flight, 0 silent packets and the probe exiting 0 - the criteria firing are the tone frequencies and the channel distinctness, over a full population. Stopping the tone was tried first and refused as the control: an idle endpoint delivers 0 packets and 0 frames, which is the report a capture started in session 0 gives and the report a probe that never started gives, and an arm that produces nothing certifies whatever it was pointed at"
+notes = "the tone carries a different frequency per channel so channel order and content are provable, which a frame count cannot do. WASAPI leaves the silent flag clear on a buffer full of zeros, since the flag is the engine declaring its buffer undefined rather than a statement about content, so the silent-packet count cannot stand in for the tone detector"
 
 [gates.codec-gate]
 script = "tools/codec-gate.sh"
@@ -89,7 +89,7 @@ proves = "Opus round-trips the tone with the sample count exact, and what a 5 ms
 phase = "A2"
 requires = []
 minutes = 1
-negative_control = "none yet: an arm at a frame duration Opus does not permit is refused by the probe, which is a different thing from a gate arm"
+negative_control = "the exchanged arm: the 5 ms arm with the two contract tones swapped before the encoder, which the two criteria naming a frequency per channel must refuse. The exchange is the smallest perturbation that reaches a criterion - same spectrum, same level, same frame count - so the other four checks hold and the arm is evidence about those two rather than about a path that broke. Rejected: a frame duration Opus does not permit, refused by the probe before a document exists; a truncated packet, which makes the arm emit nothing; a mono decoder against a stereo encoder, which fires the sample-count criterion but aliases 997 Hz onto 1994 Hz, inside the right channel's tolerance of 1997"
 notes = "runs entirely on the Mac; libopus vendors C so nothing here cross-checks for Windows"
 
 [gates.audio-rtp-gate]

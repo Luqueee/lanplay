@@ -30,7 +30,7 @@ use lanplay_audio_capture::format::{
     MixFormat, RawExtensible, RawWaveFormat, SUBTYPE_IEEE_FLOAT, WAVE_FORMAT_EXTENSIBLE,
 };
 use lanplay_audio_capture::{Percentiles, Samples, ToneReport, analyse};
-use lanplay_tone_source::tone::{CONTRACT, Tone};
+use lanplay_tone_source::tone::{CONTRACT, Tone, ToneSpec};
 
 use crate::config::{CodecConfig, FrameDuration};
 use crate::decoder::OpusDecoder;
@@ -61,6 +61,17 @@ pub struct Options {
     pub frame: FrameDuration,
     pub seconds: f64,
     pub bitrate_kbps: u32,
+    /// Exchange the two contract tones before they reach the encoder.
+    ///
+    /// This is the gate's negative control, and it lives in the probe rather
+    /// than in the harness because the criteria it has to disagree with are
+    /// stated against the decoded audio, which never leaves this process.
+    /// Everything else about the run is held still - the same two frequencies
+    /// at the same level, the same frame duration, the same bitrate target -
+    /// so the counts, the percentiles and the byte figures land where a clean
+    /// arm puts them and only a criterion naming a frequency per channel can
+    /// tell the two arms apart.
+    pub swap_tone_channels: bool,
 }
 
 /// What one run amounted to.
@@ -116,7 +127,24 @@ pub fn run(options: Options) -> Result<Measurement, CodecError> {
     // The generator's contract is the codec's: 48000 Hz stereo. Nothing here
     // reconciles the two, because there is nothing to reconcile and code that
     // could reconcile them would be a resampler this phase must not contain.
-    let mut tone = Tone::new(CONTRACT);
+    //
+    // Exchanging the two frequencies is the one perturbation the control arm
+    // makes, and it is chosen for how little else it disturbs: the spectrum,
+    // the level and the sample count are what they were, so an arm that comes
+    // back with the tones the other way round has run the encoder, the decoder
+    // and the detector correctly and disagreed only with the criteria that
+    // name a frequency per channel. A control that broke the codec instead
+    // would fire those same criteria while leaving nobody able to say whether
+    // they had read a swap or a decoder returning noise.
+    let mut tone = Tone::new(if options.swap_tone_channels {
+        ToneSpec {
+            left_hz: CONTRACT.right_hz,
+            right_hz: CONTRACT.left_hz,
+            ..CONTRACT
+        }
+    } else {
+        CONTRACT
+    });
 
     let mut pcm = vec![0f32; config.frame_interleaved()];
     let mut encode_us = Samples::with_capacity(packets as usize);
@@ -383,6 +411,7 @@ mod tests {
             frame: FrameDuration::Ms10,
             seconds: 0.001,
             bitrate_kbps: 128,
+            swap_tone_channels: false,
         })
         .expect_err("48 frames is not a 480 frame frame");
         assert_eq!(
@@ -392,5 +421,52 @@ mod tests {
                 frame_samples: 480,
             }
         );
+    }
+
+    /// What the gate's negative control rests on. The arm has to disagree with
+    /// the two criteria that name a frequency per channel and with nothing
+    /// else, so both halves are asserted here: the tones come back exchanged,
+    /// and the sample count does not move. An arm that also lost frames would
+    /// fail the gate for a reason that says nothing about whether channel
+    /// order is provable.
+    #[test]
+    fn exchanging_the_contract_tones_moves_the_frequencies_and_nothing_else() {
+        // A second is a comfortable margin over the 0.6 s the detector needs
+        // to skip the encoder's ramp and fill its window.
+        let arm = |swapped| {
+            run(Options {
+                frame: FrameDuration::Ms5,
+                seconds: 1.0,
+                bitrate_kbps: 128,
+                swap_tone_channels: swapped,
+            })
+            .expect("a second of the contract tone encodes")
+        };
+
+        let clean = arm(false);
+        let control = arm(true);
+
+        // The gate's own tolerance, which is two bins of the 2 Hz window and a
+        // margin, and two hundredths of the gap the two tones are apart.
+        let near = |measured: Option<lanplay_audio_capture::Tone>, expected: f64| {
+            let tone = measured.expect("the detector found a tone");
+            assert!(
+                (tone.frequency - expected).abs() < 5.0,
+                "{} Hz where {expected} Hz was expected",
+                tone.frequency,
+            );
+        };
+        near(clean.tone.left, CONTRACT.left_hz);
+        near(clean.tone.right, CONTRACT.right_hz);
+        near(control.tone.left, CONTRACT.right_hz);
+        near(control.tone.right, CONTRACT.left_hz);
+
+        // The half that makes the control evidence rather than noise: the same
+        // packets, and every submitted frame back, in both arms.
+        assert_eq!(control.packets, clean.packets);
+        for measured in [&clean, &control] {
+            assert_eq!(measured.frames_submitted, measured.frames_returned);
+            assert!(measured.frames_submitted > 0);
+        }
     }
 }
