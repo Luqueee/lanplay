@@ -99,7 +99,7 @@ phase = "A3"
 requires = []
 optional_requires = ["windows-host", "radio"]
 minutes = 1
-negative_control = "none yet"
+negative_control = "the broken arm: the same loopback path relayed through udp-fault at seed 20250815, which must produce loss, duplicates and reordering this gate reads as failures. Wired with one probe first, sending from the socket it received on, which udp-fault reads as the reply direction: 2000 of 2000 lost and the control passed on the harness being broken rather than on the criteria firing"
 notes = "the radio arm needs a second endpoint and declares itself unavailable rather than sending to this machine's own address, which the kernel puts on loopback"
 
 [gates.jitter-gate]

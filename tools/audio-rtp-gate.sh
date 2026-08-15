@@ -80,6 +80,39 @@ fi
     --seconds "$SECONDS_TO_RUN" --frame-ms 5 >"$OUT/loopback.out" 2>&1 || true
 echo "arm       loopback done"
 sleep 1
+# The negative control, and it belongs on the loopback arm rather than the radio one.
+# Loopback is where this gate calls a lost packet, a duplicate or a reordering a defect
+# in the code, because there is no wire to blame; a criterion stated that strongly has
+# to be shown capable of firing, and until now it never had been. udp-fault relays the
+# same path with a seed, so the arm is reproducible and its faults are known rather
+# than hoped for.
+#
+# Two probes, not one. udp-fault decides which way a datagram is going by comparing its
+# source against --forward, so a probe that sends from the socket it also receives on
+# looks like the reply direction and every datagram goes nowhere. Wired that way first,
+# this control reported 2000 lost of 2000 and passed - a control that fires because the
+# harness is broken proves nothing about the criteria it is there to exercise.
+FAULT="$REPO/target/release/udp-fault"
+SEED=20250815
+if [ -x "$FAULT" ]; then
+    "$FAULT" --listen "0.0.0.0:$((PORT + 3))" --forward "127.0.0.1:$((PORT + 2))" \
+        --loss 2.0 --duplicate 1.0 --reorder 1.0 --reorder-hold-ms 8 --seed "$SEED" \
+        >"$OUT/broken.relay" 2>&1 &
+    relay=$!
+    trap 'kill "$relay" 2>/dev/null || true' EXIT INT TERM
+    "$PROBE" --bind "0.0.0.0:$((PORT + 2))" --receive-only \
+        --seconds "$((SECONDS_TO_RUN + 5))" >"$OUT/broken.out" 2>&1 &
+    receiver=$!
+    sleep 0.5
+    "$PROBE" --bind "0.0.0.0:$((PORT + 4))" --send-to "127.0.0.1:$((PORT + 3))" \
+        --seconds "$SECONDS_TO_RUN" --frame-ms 5 >"$OUT/broken.sender.out" 2>&1 || true
+    wait "$receiver" 2>/dev/null || true
+    kill "$relay" 2>/dev/null || true
+    echo "arm       broken done (seed $SEED)"
+    sleep 1
+else
+    echo "control   udp-fault is not built, so the loopback criteria are unproven this run"
+fi
 
 if [ "$RADIO" = yes ]; then
     # The radio arm needs two machines. The receiver runs on the host, in the
@@ -106,11 +139,14 @@ if [ "$RADIO" = yes ]; then
     echo "arm       radio done"
 fi
 
-python3 - "$OUT" <<'PY'
+python3 - "$OUT" "$SEED" <<'PY'
 import re
 import sys
 
 out = sys.argv[1]
+# Passed in rather than restated here, so the number in the verdict is the number the
+# relay was given and cannot drift from it.
+SEED = sys.argv[2]
 LEFT_HZ, RIGHT_HZ = 997.0, 1997.0
 TONE_TOLERANCE_HZ = 5.0
 MTU = 1200
@@ -121,11 +157,14 @@ def arm(name):
         body = open(f"{out}/{name}.out").read()
     except OSError:
         return None
-    # The radio arm is two processes on two machines, so what was sent is only known
-    # to the sender and what arrived is only known to the receiver. Reading both from
-    # one report would be reading one machine's opinion of the other's socket.
+    # An arm whose sender and receiver are separate processes knows what was sent only
+    # to the sender and what arrived only to the receiver, so each is read from its own
+    # report. Reading both from one would be reading one socket's opinion of another.
+    # The radio arm is two machines; the control arm is two processes here, because
+    # udp-fault can only tell the directions apart if they use different sockets.
+    senders = {"radio": "sender.out", "broken": "broken.sender.out"}
     try:
-        sent_body = open(f"{out}/sender.out").read() if name == "radio" else body
+        sent_body = open(f"{out}/{senders[name]}").read() if name in senders else body
     except OSError:
         sent_body = body
 
@@ -158,6 +197,11 @@ arms = [a for a in (arm("loopback"), arm("radio")) if a]
 # gate that had tested it, and the whole point of this phase's plan is that loss gets
 # measured before anything is built to hide it.
 radio_ran = any(a["name"] == "radio" for a in arms)
+
+# The control is judged apart from the two measuring arms, because its expectation is
+# the opposite of theirs: it passes by being caught. Folding it into the loop below
+# would have the gate fail on the arm that is supposed to break.
+control = arm("broken")
 
 print("\nthe stream\n")
 for a in arms:
@@ -253,6 +297,39 @@ if not radio_ran:
         "stream's arithmetic and the loopback path were tested. The figure this phase "
         "owes is a second endpoint's, and A6 is where it arrives."
     )
+
+# What the control has to show is that the loopback criteria fire, so it is judged
+# against those criteria and not against a threshold of its own. An arm relayed through
+# seeded loss, duplication and reordering that this gate reads as clean means the
+# instrument cannot see the faults it claims to forbid, and every clean loopback arm it
+# has ever passed meant nothing.
+if control is None:
+    findings.append(
+        "the loopback criteria are UNPROVEN this run: no control arm ran, so a clean "
+        "loopback figure is a figure nobody has shown this gate capable of failing"
+    )
+elif control["sent"] is None or int(control["sent"]) == 0:
+    failures.append(
+        "the control sent nothing, so it tested the criteria with an empty stream"
+    )
+else:
+    caught = []
+    if int(control["sent"]) - int(control["received"]) != 0:
+        caught.append(f"{int(control['sent']) - int(control['received'])} lost")
+    if int(control["duplicates"]):
+        caught.append(f"{control['duplicates']} duplicated")
+    if int(control["reordered"]):
+        caught.append(f"{control['reordered']} reordered")
+    if caught:
+        findings.append(
+            f"the control broke the loopback path on purpose and this gate saw it: "
+            f"{', '.join(caught)} of {control['sent']} at seed {SEED}"
+        )
+    else:
+        failures.append(
+            "the control injected loss, duplicates and reordering and this gate read the "
+            "arm as clean, so its loopback criteria cannot fail and prove nothing"
+        )
 
 print()
 for finding in findings:
