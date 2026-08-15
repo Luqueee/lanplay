@@ -1,0 +1,28 @@
+mode receive only on 0.0.0.0:5008
+ssrc edb21df7
+payload type 111
+packets sent 0
+packets received 3000
+bytes on the wire 0
+timestamp delta exact 2999 of 2999
+sequence gaps 0 totalling 0
+reordered 0
+duplicates 0
+payload verified not applicable across machines, the tone stands in
+largest datagram 127
+send us p50 0 p95 0 p99 0 max 0
+arrival interval us p50 4986 p95 5936 p99 7437 max 37915
+tone left 997.0 right 1997.0
+packets lost unknown here, the sender is another machine; the sequence total above is what this end can see
+payload comparison needs one process holding both halves, and this run holds one
+frames decoded 3000 decode failures 0
+datagrams refused: not rtp 0 wrong type 0 empty 0 foreign ssrc 0
+bytes received 279080
+effective kbps 148.8
+frame ms 5
+frame samples per channel 240
+tone is the contract yes
+tone channels distinct yes
+tone resolution 2.00 hz over 24000 frames
+ended on silence yes
+receive error none

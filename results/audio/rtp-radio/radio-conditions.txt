@@ -1,0 +1,5 @@
+              PHY Mode: 802.11ax
+              Channel: 36 (5GHz, 80MHz)
+              Signal / Noise: -71 dBm / -94 dBm
+              Transmit Rate: 432
+              MCS Index: 4

@@ -1,0 +1,21 @@
+results   /tmp/audio-rtp-gate/20260815-183751
+radio     en0 192.168.1.108 -> host 192.168.1.70:5008
+built     probe on the host too
+arm       loopback done
+receiver  listening on the host
+arm       radio done
+
+the stream
+
+  loopback  ssrc 3d345fbf  pt 111  sent 3000  received 3000  largest 127 B
+            timestamp deltas exact 2999 of 2999   gaps 0   reordered 0  duplicates 0   payload verified 3000 of 3000
+            decoded tone 997.0 / 1997.0 Hz
+  radio     ssrc edb21df7  pt 111  sent 3000  received 3000  largest 127 B
+            timestamp deltas exact 2999 of 2999   gaps 0   reordered 0  duplicates 0   payload verified ? of ?
+            decoded tone 997.0 / 1997.0 Hz
+
+FINDING payload bytes are unverifiable across two machines; the tone stands in
+FINDING the radio lost 0 of 3000 packets, 0.000 %, and reordered 0 with 0 duplicates
+
+PASS one Opus frame is one datagram, the timestamp counts samples exactly, loopback
+     is lossless, and what the radio loses is now a number instead of an assumption

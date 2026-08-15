@@ -1,0 +1,30 @@
+mode send and receive 0.0.0.0:5008 to 127.0.0.1:5008
+ssrc 3d345fbf
+payload type 111
+packets sent 3000
+packets received 3000
+bytes on the wire 279080
+timestamp delta exact 2999 of 2999
+sequence gaps 0 totalling 0
+reordered 0
+duplicates 0
+payload verified 3000 of 3000
+largest datagram 127
+send us p50 18 p95 43 p99 66 max 229
+arrival interval us p50 5000 p95 5049 p99 5105 max 16911
+tone left 997.0 right 1997.0
+packets lost 0 of 3000 at 0.000 %
+payload mismatched 0 unverifiable 0
+frames decoded 3000 decode failures 0
+datagrams refused: not rtp 0 wrong type 0 empty 0 foreign ssrc 0
+send failures 0
+largest datagram sent 127
+bytes received 279080
+effective kbps 148.8
+frame ms 5
+frame samples per channel 240
+tone is the contract yes
+tone channels distinct yes
+tone resolution 2.00 hz over 24000 frames
+ended on silence no
+receive error none

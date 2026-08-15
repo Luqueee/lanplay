@@ -1,0 +1,31 @@
+mode send and receive 0.0.0.0:5009 to 192.168.1.70:5008
+ssrc edb21df7
+payload type 111
+packets sent 3000
+packets received 0
+bytes on the wire 279080
+timestamp delta exact 0 of 0
+sequence gaps 0 totalling 0
+reordered 0
+duplicates 0
+payload verified 0 of 0
+largest datagram 0
+send us p50 39 p95 97 p99 155 max 959
+arrival interval us p50 0 p95 0 p99 0 max 0
+tone left 0.0 right 0.0
+packets lost 3000 of 3000 at 100.000 %
+payload mismatched 0 unverifiable 0
+frames decoded 0 decode failures 0
+datagrams refused: not rtp 0 wrong type 0 empty 0 foreign ssrc 0
+send failures 0
+largest datagram sent 127
+bytes received 0
+effective kbps 148.8
+frame ms 5
+frame samples per channel 240
+tone is the contract no
+tone channels distinct no
+tone resolution 0.00 hz over 0 frames
+ended on silence no
+receive error none
+audio-rtp-probe: packets were sent and none came back
