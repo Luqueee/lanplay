@@ -83,6 +83,34 @@ First measure, correct nothing. Ten minutes, and compute occupancy slope per min
 underruns per minute, overruns per minute. Expect the buffer to drain or fill completely
 inside that window; if it does not, the estimate above is wrong and that is the finding.
 
+### What A6's ten-minute run already answered, and what it cannot
+
+The prediction did not materialise, which is the outcome this section asked to be told about.
+Over A6's 600 s clean arm, in sixty ten-second windows recorded in
+`results/audio/e2e/clean-600s.receiver.out`: **zero buffer overruns, zero device underruns,
+and a continuity hole that does not grow.** Per minute the hole reads 107760, 108720, 104640,
+100080, 120960, 135840, 96240, 82080, 76080, 97200 samples - a least-squares slope of **-2624
+samples per minute** against a mean of 102960, which is noise around a flat line and if
+anything a slight decline.
+
+The reason is worth more than the number, because it says A7 cannot be measured on this link
+at all. The hole is lateness: 4290 frames arrived past their moment over the ten minutes and
+were discarded, and 4290 x 240 samples is exactly the 1029600 the hole came to. Discarding a
+late frame sheds backlog, so **the lateness is itself a drift correction**, continuously
+dumping the very accumulation drift would build. Drift fills the buffer and lateness empties
+it, and while both are present neither can be read.
+
+So A7 needs a link whose tail does not produce lateness - the same condition A6's exit
+criterion is waiting on - and not a longer run.
+
+**One instrument gap to close first.** The per-window row carries rtp/s, lost, plc, played,
+jitter underruns, callbacks, underruns, overruns, expected, played and hole. It does not carry
+occupancy, which is the one quantity this section asks for per minute. Only the run-wide
+aggregate exists - p50 15.0, p95 20.0, p99 20.0, max 25.0 ms against a 30 ms ceiling - and a
+p50 higher than the 60 s arm's 10.0 cannot be told apart from growth within a run without the
+per-window figure. Add occupancy to `WindowRow` before A7 runs, or A7's first number will be
+two runs compared instead of one run measured.
+
 Only then rate matching, and only if the measurement demands it: occupancy above target
 means consume infinitesimally faster, below means slower, at parts per million and slowly
 enough to be inaudible. Never by dropping a packet - that is a click every few seconds in
