@@ -1,0 +1,30 @@
+udp-fault: 0.0.0.0:5013 -> 127.0.0.1:5012, loss 0.0%, duplicate 0.0%, reorder 0.0% held 8 ms, stall 400 ms every 2000 ms, seed 20250815
+udp-fault: scheduled as time constraint, period 2.000 ms computation 0.250 ms constraint 1.000 ms
+    5s  seen     416  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls    2  holding 0
+   10s  seen    1416  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls    4  holding 0
+   15s  seen    2416  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls    7  holding 0
+   20s  seen    3416  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls    9  holding 0
+   25s  seen    4417  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   12  holding 0
+   30s  seen    5418  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   14  holding 0
+   35s  seen    6418  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   17  holding 0
+   40s  seen    7418  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   19  holding 0
+   45s  seen    8418  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   22  holding 0
+   50s  seen    9418  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   24  holding 0
+   55s  seen   10418  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   27  holding 0
+   60s  seen   11418  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   29  holding 0
+   65s  seen   12418  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   32  holding 0
+   70s  seen   13418  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   34  holding 0
+   75s  seen   14420  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   37  holding 0
+   80s  seen   15420  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   39  holding 0
+   85s  seen   16420  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   42  holding 0
+   90s  seen   17420  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   44  holding 0
+   95s  seen   18420  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   47  holding 0
+  100s  seen   19421  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   49  holding 0
+  105s  seen   20421  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   52  holding 0
+  110s  seen   21422  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   54  holding 0
+  115s  seen   22422  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   57  holding 0
+  120s  seen   23422  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   59  holding 0
+  125s  seen   24002  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   62  holding 0
+  130s  seen   24002  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   64  holding 0
+  135s  seen   24002  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   67  holding 0
+  140s  seen   24002  dropped      0 (0.00%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   69  holding 0

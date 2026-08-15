@@ -1,0 +1,101 @@
+audio-e2e-receiver: producer scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+producer scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+receiver scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+every deadline granted yes
+rtp received 120007
+rtp lost 0 of 120007 expected
+rtp duplicate 0
+rtp reordered 0
+rtp late 2499
+arrival delay ms p50 -17.7 p95 -10.2 p99 10.8 max 232.8 min -27.4
+frames played 117501
+plc frames 2499
+jitter occupancy ms p50 15.0 p95 20.0 p99 25.0 max 25.0
+jitter underruns 2499
+jitter overruns 1 dropping 5 frames
+decode us p50 9 p99 21
+render callbacks 112493
+render underruns 0 over 0 frames
+render overruns 0 over 0 frames
+continuity expected 28801200 played 28200240 unbroken no
+tone left 997.0 right 1997.0
+continuity hole 600960 samples over 120005 frame periods
+worst window hole 145200 samples
+tone channels distinct yes
+tone resolution 2.00 hz over 24000 frames
+rtp off grid 0
+rtp oversize 0
+rtp foreign ssrc 0
+decode failures 0
+conceal us p50 7 p99 39
+producer interval us p50 5000 p99 5000 max 5001
+render interval us p50 5333 p99 5344 max 5368
+ring occupancy frames min 1856 p50 2064 max 2272 of 4096 primed to 496 after a 32.4 ms device start
+ring frames refused 0 consumed 28798208
+jitter target ms 10 ceiling ms 30 over 8 slots
+frame ms 5
+device Altavoces del MacBook Pro (named) at 48000 Hz 2 ch 32 bit float with a 256 frame io buffer
+bind 0.0.0.0:5012 ssrc 3112381807
+odd cycles 0
+measurements dropped 0
+span s 600.0 device span s 600.0
+window 0 s 10.0 rtp/s 200 lost 0 plc 34 played 1967 jitter underruns 34 callbacks 1876 underruns 0 overruns 0 expected 480240 played 472080 hole 8160
+window 1 s 10.0 rtp/s 200 lost 0 plc 35 played 1965 jitter underruns 35 callbacks 1875 underruns 0 overruns 0 expected 480000 played 471600 hole 8400
+window 2 s 10.0 rtp/s 200 lost 0 plc 34 played 1967 jitter underruns 34 callbacks 1876 underruns 0 overruns 0 expected 480240 played 472080 hole 8160
+window 3 s 10.0 rtp/s 200 lost 0 plc 36 played 1964 jitter underruns 36 callbacks 1876 underruns 0 overruns 0 expected 480000 played 471360 hole 8640
+window 4 s 10.0 rtp/s 200 lost 0 plc 24 played 1977 jitter underruns 24 callbacks 1875 underruns 0 overruns 0 expected 480240 played 474480 hole 5760
+window 5 s 10.0 rtp/s 200 lost 0 plc 34 played 1966 jitter underruns 34 callbacks 1875 underruns 0 overruns 0 expected 480000 played 471840 hole 8160
+window 6 s 10.0 rtp/s 200 lost 0 plc 37 played 1964 jitter underruns 37 callbacks 1876 underruns 0 overruns 0 expected 480240 played 471360 hole 8880
+window 7 s 10.0 rtp/s 200 lost 0 plc 23 played 1977 jitter underruns 23 callbacks 1876 underruns 0 overruns 0 expected 480000 played 474480 hole 5520
+window 8 s 10.0 rtp/s 200 lost 0 plc 30 played 1972 jitter underruns 30 callbacks 1876 underruns 0 overruns 0 expected 480480 played 473280 hole 7200
+window 9 s 10.0 rtp/s 200 lost 0 plc 28 played 1972 jitter underruns 28 callbacks 1875 underruns 0 overruns 0 expected 480000 played 473280 hole 6720
+window 10 s 10.0 rtp/s 200 lost 0 plc 25 played 1976 jitter underruns 25 callbacks 1876 underruns 0 overruns 0 expected 480240 played 474240 hole 6000
+window 11 s 10.0 rtp/s 200 lost 0 plc 30 played 1970 jitter underruns 30 callbacks 1875 underruns 0 overruns 0 expected 480000 played 472800 hole 7200
+window 12 s 10.0 rtp/s 200 lost 0 plc 605 played 1396 jitter underruns 605 callbacks 1876 underruns 0 overruns 0 expected 480240 played 335040 hole 145200
+window 13 s 10.0 rtp/s 200 lost 0 plc 84 played 1917 jitter underruns 84 callbacks 1876 underruns 0 overruns 0 expected 480240 played 460080 hole 20160
+window 14 s 10.0 rtp/s 200 lost 0 plc 44 played 1957 jitter underruns 44 callbacks 1876 underruns 0 overruns 0 expected 480240 played 469680 hole 10560
+window 15 s 10.0 rtp/s 200 lost 0 plc 31 played 1969 jitter underruns 31 callbacks 1875 underruns 0 overruns 0 expected 480000 played 472560 hole 7440
+window 16 s 10.0 rtp/s 200 lost 0 plc 20 played 1981 jitter underruns 20 callbacks 1876 underruns 0 overruns 0 expected 480240 played 475440 hole 4800
+window 17 s 10.0 rtp/s 200 lost 0 plc 37 played 1964 jitter underruns 37 callbacks 1876 underruns 0 overruns 0 expected 480240 played 471360 hole 8880
+window 18 s 10.0 rtp/s 200 lost 0 plc 22 played 1979 jitter underruns 22 callbacks 1876 underruns 0 overruns 0 expected 480240 played 474960 hole 5280
+window 19 s 10.0 rtp/s 200 lost 0 plc 24 played 1976 jitter underruns 24 callbacks 1875 underruns 0 overruns 0 expected 480000 played 474240 hole 5760
+window 20 s 10.0 rtp/s 200 lost 0 plc 20 played 1981 jitter underruns 20 callbacks 1876 underruns 0 overruns 0 expected 480240 played 475440 hole 4800
+window 21 s 10.0 rtp/s 200 lost 0 plc 19 played 1982 jitter underruns 19 callbacks 1876 underruns 0 overruns 0 expected 480240 played 475680 hole 4560
+window 22 s 10.0 rtp/s 200 lost 0 plc 23 played 1978 jitter underruns 23 callbacks 1876 underruns 0 overruns 0 expected 480240 played 474720 hole 5520
+window 23 s 10.0 rtp/s 200 lost 0 plc 31 played 1970 jitter underruns 31 callbacks 1876 underruns 0 overruns 0 expected 480240 played 472800 hole 7440
+window 24 s 10.0 rtp/s 200 lost 0 plc 26 played 1975 jitter underruns 26 callbacks 1876 underruns 0 overruns 0 expected 480240 played 474000 hole 6240
+window 25 s 10.0 rtp/s 200 lost 0 plc 24 played 1977 jitter underruns 24 callbacks 1876 underruns 0 overruns 0 expected 480240 played 474480 hole 5760
+window 26 s 10.0 rtp/s 201 lost 0 plc 29 played 1972 jitter underruns 29 callbacks 1875 underruns 0 overruns 0 expected 480240 played 473280 hole 6960
+window 27 s 10.0 rtp/s 200 lost 0 plc 25 played 1976 jitter underruns 25 callbacks 1876 underruns 0 overruns 0 expected 480240 played 474240 hole 6000
+window 28 s 10.0 rtp/s 200 lost 0 plc 30 played 1970 jitter underruns 30 callbacks 1875 underruns 0 overruns 0 expected 480000 played 472800 hole 7200
+window 29 s 10.0 rtp/s 200 lost 0 plc 32 played 1969 jitter underruns 32 callbacks 1876 underruns 0 overruns 0 expected 480240 played 472560 hole 7680
+window 30 s 10.0 rtp/s 200 lost 0 plc 23 played 1978 jitter underruns 23 callbacks 1876 underruns 0 overruns 0 expected 480240 played 474720 hole 5520
+window 31 s 10.0 rtp/s 199 lost 0 plc 21 played 1979 jitter underruns 21 callbacks 1876 underruns 0 overruns 0 expected 480000 played 474960 hole 5040
+window 32 s 10.0 rtp/s 201 lost 0 plc 29 played 1972 jitter underruns 29 callbacks 1875 underruns 0 overruns 0 expected 480240 played 473280 hole 6960
+window 33 s 10.0 rtp/s 200 lost 0 plc 364 played 1636 jitter underruns 364 callbacks 1875 underruns 0 overruns 0 expected 480000 played 392640 hole 87360
+window 34 s 10.0 rtp/s 200 lost 0 plc 25 played 1975 jitter underruns 25 callbacks 1876 underruns 0 overruns 0 expected 480000 played 474000 hole 6000
+window 35 s 10.0 rtp/s 200 lost 0 plc 15 played 1986 jitter underruns 15 callbacks 1875 underruns 0 overruns 0 expected 480240 played 476640 hole 3600
+window 36 s 10.0 rtp/s 200 lost 0 plc 26 played 1974 jitter underruns 26 callbacks 1876 underruns 0 overruns 0 expected 480000 played 473760 hole 6240
+window 37 s 10.0 rtp/s 200 lost 0 plc 20 played 1981 jitter underruns 20 callbacks 1876 underruns 0 overruns 0 expected 480240 played 475440 hole 4800
+window 38 s 10.0 rtp/s 200 lost 0 plc 19 played 1982 jitter underruns 19 callbacks 1875 underruns 0 overruns 0 expected 480240 played 475680 hole 4560
+window 39 s 10.0 rtp/s 200 lost 0 plc 23 played 1978 jitter underruns 23 callbacks 1876 underruns 0 overruns 0 expected 480240 played 474720 hole 5520
+window 40 s 10.0 rtp/s 200 lost 0 plc 26 played 1974 jitter underruns 26 callbacks 1875 underruns 0 overruns 0 expected 480000 played 473760 hole 6240
+window 41 s 10.0 rtp/s 200 lost 0 plc 32 played 1969 jitter underruns 32 callbacks 1876 underruns 0 overruns 0 expected 480240 played 472560 hole 7680
+window 42 s 10.0 rtp/s 200 lost 0 plc 28 played 1973 jitter underruns 28 callbacks 1876 underruns 0 overruns 0 expected 480240 played 473520 hole 6720
+window 43 s 10.0 rtp/s 200 lost 0 plc 17 played 1983 jitter underruns 17 callbacks 1875 underruns 0 overruns 0 expected 480000 played 475920 hole 4080
+window 44 s 10.0 rtp/s 201 lost 0 plc 26 played 1975 jitter underruns 26 callbacks 1876 underruns 0 overruns 0 expected 480240 played 474000 hole 6240
+window 45 s 10.0 rtp/s 200 lost 0 plc 22 played 1978 jitter underruns 22 callbacks 1875 underruns 0 overruns 0 expected 480000 played 474720 hole 5280
+window 46 s 10.0 rtp/s 200 lost 0 plc 27 played 1973 jitter underruns 27 callbacks 1875 underruns 0 overruns 0 expected 480000 played 473520 hole 6480
+window 47 s 10.0 rtp/s 200 lost 0 plc 14 played 1987 jitter underruns 14 callbacks 1876 underruns 0 overruns 0 expected 480240 played 476880 hole 3360
+window 48 s 10.0 rtp/s 200 lost 0 plc 25 played 1976 jitter underruns 25 callbacks 1876 underruns 0 overruns 0 expected 480240 played 474240 hole 6000
+window 49 s 10.0 rtp/s 200 lost 0 plc 24 played 1976 jitter underruns 24 callbacks 1875 underruns 0 overruns 0 expected 480000 played 474240 hole 5760
+window 50 s 10.0 rtp/s 200 lost 0 plc 27 played 1974 jitter underruns 27 callbacks 1876 underruns 0 overruns 0 expected 480240 played 473760 hole 6480
+window 51 s 10.0 rtp/s 200 lost 0 plc 20 played 1981 jitter underruns 20 callbacks 1876 underruns 0 overruns 0 expected 480240 played 475440 hole 4800
+window 52 s 10.0 rtp/s 200 lost 0 plc 18 played 1983 jitter underruns 18 callbacks 1876 underruns 0 overruns 0 expected 480240 played 475920 hole 4320
+window 53 s 10.0 rtp/s 200 lost 0 plc 15 played 1986 jitter underruns 15 callbacks 1875 underruns 0 overruns 0 expected 480240 played 476640 hole 3600
+window 54 s 10.0 rtp/s 200 lost 0 plc 19 played 1981 jitter underruns 19 callbacks 1876 underruns 0 overruns 0 expected 480000 played 475440 hole 4560
+window 55 s 10.0 rtp/s 200 lost 0 plc 21 played 1980 jitter underruns 21 callbacks 1875 underruns 0 overruns 0 expected 480240 played 475200 hole 5040
+window 56 s 10.0 rtp/s 201 lost 0 plc 16 played 1984 jitter underruns 16 callbacks 1876 underruns 0 overruns 0 expected 480000 played 476160 hole 3840
+window 57 s 10.0 rtp/s 200 lost 0 plc 23 played 1978 jitter underruns 23 callbacks 1876 underruns 0 overruns 0 expected 480240 played 474720 hole 5520
+window 58 s 10.0 rtp/s 200 lost 0 plc 22 played 1978 jitter underruns 22 callbacks 1875 underruns 0 overruns 0 expected 480000 played 474720 hole 5280
+window 59 s 9.8 rtp/s 200 lost 0 plc 16 played 1936 jitter underruns 16 callbacks 1830 underruns 0 overruns 0 expected 468480 played 464640 hole 3840
