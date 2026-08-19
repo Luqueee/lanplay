@@ -107,6 +107,14 @@ pub fn document(
     observe("silent_packets", totals.silent_packets as f64);
     observe("timestamp_steps", counts.timestamp_steps as f64);
     observe("timestamp_steps_exact", counts.timestamp_steps_exact as f64);
+
+    // A6.1's half of the pair audit, and one integer rather than a mechanism.
+    // The receiving end can partition a run into the two frames of a captured
+    // packet from the timestamps alone, and cannot tell which of the two is the
+    // first without knowing where this stream's counter started. Nothing derived
+    // and no clock read: the number is the packetiser's seed, and the join at the
+    // far end is `(anchor - base) mod 480`.
+    observe("rtp_base", f64::from(measurement.rtp_base.0));
     observe("encode_failures", counts.encode_failures as f64);
     observe("send_failures", counts.send_failures as f64);
     observe("buffer_errors", measurement.buffer_errors as f64);
@@ -114,6 +122,25 @@ pub fn document(
     observe(
         "samples_dropped",
         measurement.carried.samples_dropped as f64,
+    );
+
+    // A7.1's half of the clock audit, and absent rather than zero when the run
+    // had too few readings to state a rate. A criterion reading an absent
+    // observation is a refusal in `xtask verdict`, which is what this end wants:
+    // 0.000 ppm is what a perfect clock looks like and a run that measured no
+    // clock at all must not be able to print it.
+    if let Some(rate) = measurement.source_rate() {
+        observe("source_ppm", rate.fitted_ppm);
+        observe("source_ppm_endpoints", rate.endpoints_ppm);
+        observe("source_ppm_error", rate.error_ppm);
+        observe("source_rate_readings", rate.readings as f64);
+        observe("source_rate_span_s", rate.seconds);
+        observe("source_position_samples", rate.samples);
+        observe("source_counter_scatter_samples", rate.scatter_samples);
+    }
+    observe(
+        "source_counter_stalls",
+        measurement.carried.drift.stalled() as f64,
     );
 
     // A percentile over no samples is not zero, it is absent, and a zero here
@@ -378,18 +405,33 @@ pub fn document(
 mod tests {
     use std::time::Duration;
 
-    use lanplay_audio_capture::accounting::{Percentiles, Totals};
+    use lanplay_audio_capture::accounting::{Drift, Percentiles, Totals};
     use lanplay_audio_capture::analysis::ToneReport;
     use lanplay_audio_capture::format::{MixFormat, SUBTYPE_IEEE_FLOAT, SampleKind};
     use lanplay_audio_capture::goertzel::Tone;
     use lanplay_audio_capture::report::Wakeup;
     use lanplay_audio_capture::scheduling::{PRO_AUDIO, Scheduling};
-    use lanplay_transport::Ssrc;
+    use lanplay_transport::{RtpTimestamp, Ssrc};
 
     use super::*;
     use crate::config::CodecConfig;
     use crate::e2e_sender::{Carried, Counts, FRAME};
     use crate::encoder::EncoderSettings;
+
+    /// Sixty seconds of a device running slow, packet by packet.
+    ///
+    /// Generated rather than left empty, because an empty drift makes the rate
+    /// observations absent and a test over a document with no rate in it cannot
+    /// tell a correct emitter from one that never wrote the lines.
+    fn drifted(ppm: f64) -> Drift {
+        let mut drift = Drift::new(48_000.0);
+        let rate = 48_000.0 * (1.0 + ppm / 1e6);
+        for packet in 0..6_000u64 {
+            let position = packet * 480;
+            drift.record(position as f64, (position as f64 / rate * 1e9) as u64);
+        }
+        drift
+    }
 
     /// A fixture rather than a run of the sender, so that what these tests
     /// defend is the document's shape rather than whatever this machine's
@@ -434,6 +476,7 @@ mod tests {
             bind: "0.0.0.0:52001".parse().expect("a literal address"),
             send_to: "192.168.1.108:5012".parse().expect("a literal address"),
             ssrc: Ssrc(0x1234_5678),
+            rtp_base: RtpTimestamp(0x0BAD_0000),
             carried: Carried {
                 totals: Totals {
                     packets: 6_000,
@@ -442,6 +485,7 @@ mod tests {
                     discontinuities: 1,
                     ..Totals::default()
                 },
+                drift: drifted(-15.0),
                 counts: Counts {
                     frames_encoded: 12_000,
                     datagrams_sent: 12_000,

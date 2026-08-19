@@ -88,6 +88,7 @@
 
 pub mod format;
 pub mod occupancy;
+pub mod pairs;
 pub mod report;
 pub mod ring;
 

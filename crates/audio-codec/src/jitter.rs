@@ -363,6 +363,27 @@ impl JitterBuffer {
         self.anchor.map(|anchor| anchor.playout)
     }
 
+    /// Where the stream's sample counter met this machine's clock, in the
+    /// stream's own ticks.
+    ///
+    /// Exposed beside [`JitterBuffer::playout_start`], which is the same anchor
+    /// seen from the other clock, because a caller that wants to say which frame
+    /// of a captured packet a position belongs to needs the tick and not the
+    /// instant: the two frames of a packet differ by a frame's samples and by
+    /// nothing a clock can see.
+    pub fn anchor_rtp(&self) -> Option<RtpTimestamp> {
+        self.anchor.map(|anchor| anchor.rtp)
+    }
+
+    /// The position the next pull will serve.
+    ///
+    /// Read before a pull rather than after it, because [`JitterBuffer::pull`]
+    /// advances the cursor as it returns, so the position an underrun happened
+    /// at is the value this had beforehand.
+    pub fn cursor(&self) -> RtpTimestamp {
+        self.cursor
+    }
+
     /// Whether every frame the buffer has ever seen has now been played,
     /// concealed or discarded.
     ///

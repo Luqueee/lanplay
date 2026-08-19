@@ -301,7 +301,10 @@ unsafe fn capture(request: &Request) -> Result<Captured, CaptureError> {
             TimerResolution(1)
         });
 
-        let mut account = Accounting::new();
+        // The endpoint's own claimed rate, so the drift below is a deviation
+        // from what this device says it does rather than from what 48 kHz audio
+        // usually is.
+        let mut account = Accounting::new(f64::from(format.sample_rate));
         let mut wakeup_timeouts = 0u64;
         let mut buffer_errors = 0u64;
         let mut first_buffer_error: Option<String> = None;

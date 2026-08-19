@@ -24,12 +24,12 @@ use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use lanplay_audio_capture::{Percentiles, Samples};
+use lanplay_audio_capture::{Drift, Percentiles, Rate, Samples};
 use objc2_core_audio::{
     AudioConvertHostTimeToNanos, AudioDeviceCreateIOProcID, AudioDeviceDestroyIOProcID,
     AudioDeviceIOProcID, AudioDeviceStart, AudioDeviceStop, AudioObjectID,
 };
-use objc2_core_audio_types::{AudioBufferList, AudioTimeStamp};
+use objc2_core_audio_types::{AudioBufferList, AudioTimeStamp, AudioTimeStampFlags};
 
 use crate::device::Error;
 use crate::ring::PcmRing;
@@ -41,6 +41,15 @@ use crate::ring::PcmRing;
 pub struct RenderState {
     ring: Arc<PcmRing>,
     channels: usize,
+    /// Nanoseconds in one tick of the host clock, read out of the HAL once
+    /// before the device started.
+    ///
+    /// The ratio is one on this machine and 1/24 on others, and which it is has
+    /// to come out of the API rather than out of an assumption. Held here so
+    /// that the callback turns a cycle's host time into seconds with a multiply
+    /// instead of a call into CoreAudio: the call is safe on a real-time thread,
+    /// but a conversion that can be hoisted out of a deadline should be.
+    nanos_per_tick: f64,
     /// Published with a release store at the end of every cycle, and the only
     /// thing a reader needs to acquire: everything the callback wrote into
     /// [`RenderState::trace`] before that store is visible after it.
@@ -82,6 +91,21 @@ struct Trace {
     callbacks: u64,
     first_host_time: u64,
     last_host_time: u64,
+    /// The device's rate, from the `mSampleTime` and `mHostTime` the HAL reports
+    /// for the same cycle.
+    ///
+    /// A7.1's Mac half, and it measures what the device physically consumed
+    /// rather than the rate it advertises. Anchored on the first cycle's own
+    /// host time so that what reaches [`Drift`] is an elapsed interval and never
+    /// an absolute reading of a clock whose epoch is this machine's last boot.
+    drift: Drift,
+    /// Cycles whose timestamp did not carry both a sample time and a host time.
+    ///
+    /// The HAL states which of a timestamp's representations it filled in, and a
+    /// cycle missing either is a cycle whose rate cannot be read. Counted and
+    /// left out, because reading an absent `mSampleTime` as zero would put a
+    /// rewind of the whole run into the fit.
+    invalid_timestamps: u64,
 }
 
 /// What the device did, read out once the IOProc is gone.
@@ -99,18 +123,37 @@ pub struct Rendered {
     /// subtracts two readings of one clock rather than comparing two clocks.
     pub first_host_time: u64,
     pub frames_in_span: u64,
+    /// The device's rate against nominal, or nothing when too few cycles carried
+    /// a timestamp to state one.
+    pub sink_rate: Option<Rate>,
+    /// Cycles left out of that rate because the HAL did not fill both the sample
+    /// time and the host time in.
+    pub invalid_timestamps: u64,
     /// Measurements a full store had nowhere to put. Non-zero means every
     /// distribution above describes a prefix of the run.
     pub samples_dropped: u64,
 }
 
 impl RenderState {
-    /// `store` is how many cycles each distribution has room for. Sized by the
-    /// caller before the device starts, because the callback cannot allocate.
-    pub fn new(ring: Arc<PcmRing>, channels: usize, store: usize) -> RenderState {
+    /// `store` is how many cycles each distribution has room for, and
+    /// `nominal_hz` the rate the device advertises, which the drift below is a
+    /// deviation from. Both sized and read by the caller before the device
+    /// starts, because the callback cannot allocate and should not call.
+    pub fn new(
+        ring: Arc<PcmRing>,
+        channels: usize,
+        store: usize,
+        nominal_hz: f64,
+    ) -> RenderState {
+        // A billion ticks rather than one, because the conversion is integer and
+        // a ratio of one twenty-fourth asked about a single tick quantises to
+        // zero.
+        // SAFETY: a pure arithmetic conversion with no pointers in it.
+        let nanos_per_tick = unsafe { AudioConvertHostTimeToNanos(1_000_000_000) } as f64 / 1e9;
         RenderState {
             ring,
             channels,
+            nanos_per_tick,
             callbacks: AtomicU64::new(0),
             odd_cycles: AtomicU64::new(0),
             trace: UnsafeCell::new(Trace {
@@ -122,6 +165,8 @@ impl RenderState {
                 callbacks: 0,
                 first_host_time: 0,
                 last_host_time: 0,
+                drift: Drift::new(nominal_hz),
+                invalid_timestamps: 0,
             }),
         }
     }
@@ -158,6 +203,8 @@ impl RenderState {
             span_seconds,
             first_host_time: trace.first_host_time,
             frames_in_span: trace.frames_in_span,
+            sink_rate: trace.drift.rate(),
+            invalid_timestamps: trace.invalid_timestamps,
             samples_dropped,
         }
     }
@@ -297,7 +344,8 @@ unsafe extern "C-unwind" fn render(
     trace.frames.record(frames as u64);
     trace.occupancy.record(occupancy as u64);
     // SAFETY: `now` is the timestamp the HAL passed for this cycle.
-    let host_time = unsafe { now.as_ref().mHostTime };
+    let stamp = unsafe { now.as_ref() };
+    let host_time = stamp.mHostTime;
     if trace.callbacks == 0 {
         trace.first_host_time = host_time;
     } else if host_time > trace.last_host_time {
@@ -307,6 +355,27 @@ unsafe extern "C-unwind" fn render(
         // The cycle that just ended is the one whose frames the span now
         // covers; this cycle's own frames belong to the next interval.
         trace.frames_in_span += trace.last_frames;
+    }
+    // What the device physically consumed against when it consumed it, which is
+    // the rate A7.1 asks for rather than the rate the device advertises. Both
+    // halves of the pair come out of this one timestamp, so nothing here is
+    // subtracted from a reading taken anywhere else, and the elapsed interval is
+    // taken in the HAL's own ticks before being scaled, so the full resolution of
+    // a counter whose absolute value is meaningless survives.
+    //
+    // Both fields or neither. A cycle the HAL did not fill both in for is a
+    // cycle whose rate cannot be read, and reading an absent `mSampleTime` as
+    // zero would put a rewind of the whole run into the fit.
+    if stamp
+        .mFlags
+        .contains(AudioTimeStampFlags::SampleHostTimeValid)
+    {
+        let elapsed = host_time.saturating_sub(trace.first_host_time) as f64;
+        trace
+            .drift
+            .record(stamp.mSampleTime, (elapsed * state.nanos_per_tick) as u64);
+    } else {
+        trace.invalid_timestamps += 1;
     }
     trace.last_frames = frames as u64;
     trace.last_host_time = host_time;

@@ -1,0 +1,56 @@
+A7.1, the clock rate audit. The conditions every figure in this directory was
+taken under, filed beside the numbers because a rate quoted without them is a
+number somebody will later compare against a run taken on a different radio.
+
+The preflight before the arm, replayable from preflight-window.csv at 1000 ms:
+
+  PASS  +1.30 dB projected over 1500 s against a 3.0 dB budget, channel 100 at
+        80 MHz, rate's halves within a factor of 1.00
+  window  signal median -58 dBm, -60 to -57, sd 0.58, noise -94 dBm
+          negotiated rate median 648 Mbps, 137 to 720
+          movement +0.052 +-0.092 dB/min, scatter 0.58 dB about it
+          120 rows of 120 due, 100.0 per cent
+
+1500 seconds and not 1200, because the gate ran 90 + 90 + 1200 consecutively and
+the projection has to span what is about to happen rather than the longest single
+arm inside it.
+
+A first attempt at this window was refused rather than reported, and the reason is
+a harness defect worth recording. radio-preflight.sh's EXIT trap runs
+`pkill -f target/release/radio-sample`, which cannot tell its own sampler from a
+sibling's, so a concurrent preflight finishing 50 seconds into this one killed it
+and the gate correctly refused with `radio-sample exited 143` instead of reporting
+a partial window. audio-e2e-gate.sh already avoids exactly this on the host by
+ending scheduled tasks by name rather than by image; the same reasoning has not
+been applied to the sampler on this side. Reported and not fixed: A7.1 changes no
+behaviour, and a preflight is not a thing to edit between two arms of one
+measurement.
+
+The gate's own readings, taken before the first arm and after the last and never
+inside one:
+
+  before  -58 dBm signal, -94 dBm noise, 612 Mbps, channel 100 at 80 MHz
+  after   -63 dBm signal, -94 dBm noise, 576 Mbps, channel 100 at 80 MHz
+
+Five decibels across the twenty-eight minutes the whole gate spans, against a
+budget of three, and where inside those minutes it moved is not knowable from two
+readings. That is a real limitation and it is stated rather than smoothed. What it
+touches and what it does not is worth separating. It cannot move either rate: a
+crystal's frequency does not depend on an association, the two rate figures carry
+standard errors of 0.0001 and 0.0000 ppm, and the 90 s arm and the 1200 s arm
+agree to 0.18 ppm on the source and 0.02 on the sink. It cannot move the samples
+invariant, which closed to the sample on every arm. What it does touch is the
+lateness, and the lateness is the noise floor of the growth measurement: a frame
+concealed at its moment and counted late when its datagram turns up leaves the
+concealed and late counters apart by however many frames are in flight, at 240
+samples each. So a degrading link widens the error bar on the growth without
+biasing it, and the +-75 samples quoted for the observed growth already contains
+whatever those five decibels did.
+
+loopback-control.receiver.out is the same receiver driven by audio-rtp-probe over
+127.0.0.1 with no radio and no host at all. It is here because it is the only
+population in which the samples invariant can be checked against a source with no
+lateness in it: 0 late, 0 lost, 0 concealed, and `buffer growth 2752 samples held
+2752 residual 0`. A run whose discards are all zero proves the identity's easy
+half; the 1200 s arm, with 14985 late frames and a ceiling overrun of five, proves
+the half that matters.

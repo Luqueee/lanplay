@@ -163,7 +163,12 @@ pub fn run(options: Options) -> Result<Report, Error> {
         (options.seconds * f64::from(format.sample_rate) / f64::from(buffer_frames)) as usize;
     let store = expected_cycles + expected_cycles / 4 + 1_024;
 
-    let state = Box::new(RenderState::new(Arc::clone(&ring), channels, store));
+    let state = Box::new(RenderState::new(
+        Arc::clone(&ring),
+        channels,
+        store,
+        f64::from(format.sample_rate),
+    ));
 
     let spec = ToneSpec {
         sample_rate: format.sample_rate,
@@ -289,6 +294,8 @@ pub fn run(options: Options) -> Result<Report, Error> {
         left_hz: spec.left_hz,
         right_hz: spec.right_hz,
         samples_dropped: rendered.samples_dropped,
+        sink_rate: rendered.sink_rate,
+        invalid_timestamps: rendered.invalid_timestamps,
     })
 }
 

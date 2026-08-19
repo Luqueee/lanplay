@@ -41,12 +41,14 @@
 use core::fmt;
 use std::net::{SocketAddr, UdpSocket};
 
-use lanplay_audio_capture::accounting::{Accounting, Packet, Percentiles, Samples, Totals};
+use lanplay_audio_capture::accounting::{
+    Accounting, Drift, Packet, Percentiles, Rate, Samples, Totals,
+};
 use lanplay_audio_capture::analysis::{ToneReport, analyse, hertz};
 use lanplay_audio_capture::format::{MixFormat, SampleKind};
 use lanplay_audio_capture::report::Wakeup;
 use lanplay_audio_capture::scheduling::Scheduling;
-use lanplay_transport::{OpusPacketizeError, OpusPacketizer, Ssrc, random_u32};
+use lanplay_transport::{OpusPacketizeError, OpusPacketizer, RtpTimestamp, Ssrc, random_u32};
 
 use crate::config::{CodecConfig, FrameDuration};
 use crate::encoder::{EncoderSettings, OpusEncoder};
@@ -214,6 +216,16 @@ pub struct Counts {
 #[derive(Clone, Debug)]
 pub struct Carried {
     pub totals: Totals,
+    /// The endpoint's own rate, from the device position and the performance
+    /// counter every packet carries together.
+    ///
+    /// The sender's half of A7.1, and it is the whole of what this end can say
+    /// about drift: a rate is measurable on one machine against that machine's
+    /// own monotonic clock, and nothing here is ever compared with a reading
+    /// taken on the Mac. What the two ends' figures are worth together is the
+    /// samples-produced against samples-consumed invariant, which is counted in
+    /// samples at the far end and needs no clock at all.
+    pub drift: Drift,
     pub counts: Counts,
     pub packet_frames: Option<Percentiles>,
     pub encode_us: Option<Percentiles>,
@@ -243,6 +255,16 @@ pub struct Carrier<'a> {
     frame_samples: u32,
     encoder: OpusEncoder,
     packetizer: OpusPacketizer,
+    /// The sample counter the packetiser started at, kept because the counter
+    /// itself moves and this value is the run's identity rather than its state.
+    ///
+    /// It is the one thing a receiver cannot work out for itself. RFC 3550
+    /// requires the timestamp to start at a random value, so the far end sees
+    /// consecutive frames stepping by a frame's samples and can partition them
+    /// into the two residue classes a 480-frame packet produces, but not tell
+    /// which class is a packet's first frame. This is that bit, and it is a bare
+    /// integer: no clock is read to obtain it and none is crossed by using it.
+    rtp_base: RtpTimestamp,
     account: Accounting,
     /// One frame of zeroes, reused for every frame of every silent packet.
     ///
@@ -292,6 +314,15 @@ impl<'a> Carrier<'a> {
 
         let frame_interleaved = config.frame_interleaved();
         let capacity = expected_frames + 1_024;
+        // An SSRC of its own, drawn independently of the video stream's, so that
+        // a capture holding both can never attribute an audio packet to the
+        // picture.
+        let packetizer = OpusPacketizer::new(Ssrc(random_u32()));
+        // Read before a datagram has moved it, because the packetiser's counter
+        // is the only place the base exists: a value taken after the first send
+        // would be the second frame's timestamp and would label the two residue
+        // classes the wrong way round for the whole run.
+        let rtp_base = packetizer.next_timestamp();
         Ok(Carrier {
             socket,
             target,
@@ -299,11 +330,12 @@ impl<'a> Carrier<'a> {
             frame_interleaved,
             frame_samples: config.frame_samples() as u32,
             encoder: OpusEncoder::new(config)?,
-            // An SSRC of its own, drawn independently of the video stream's, so
-            // that a capture holding both can never attribute an audio packet
-            // to the picture.
-            packetizer: OpusPacketizer::new(Ssrc(random_u32())),
-            account: Accounting::new(),
+            packetizer,
+            rtp_base,
+            // The endpoint's own rate, which the check above has already agreed
+            // with the codec's, so the drift it accumulates is a deviation from
+            // what this device claims rather than from a constant written here.
+            account: Accounting::new(f64::from(format.sample_rate)),
             silence: vec![0f32; frame_interleaved],
             packet_frames: Samples::with_capacity(capacity),
             encode_us: Samples::with_capacity(capacity),
@@ -318,6 +350,15 @@ impl<'a> Carrier<'a> {
 
     pub fn ssrc(&self) -> Ssrc {
         self.packetizer.ssrc()
+    }
+
+    /// The sample counter this run's first datagram carried.
+    ///
+    /// The far end needs it to say which of a captured packet's two frames a
+    /// datagram held, and it needs it from here because nothing on the wire says
+    /// so: the timestamps fix the pairing and the random base hides the phase.
+    pub fn rtp_base(&self) -> RtpTimestamp {
+        self.rtp_base
     }
 
     /// What the encoder says it is doing, read out of the encoder rather than
@@ -439,6 +480,7 @@ impl<'a> Carrier<'a> {
             + self.packet_bytes.dropped();
         Carried {
             totals: self.account.totals(),
+            drift: self.account.drift(),
             counts: self.counts,
             packet_frames: self.packet_frames.percentiles(),
             encode_us: self.encode_us.percentiles(),
@@ -497,6 +539,17 @@ pub struct Measurement {
     pub bind: SocketAddr,
     pub send_to: SocketAddr,
     pub ssrc: Ssrc,
+    /// The RTP timestamp the run's first datagram carried, which is by
+    /// construction the first Opus frame of the first captured packet.
+    ///
+    /// Stated because it is the only thing the receiving end cannot derive: a
+    /// 480-frame packet becomes two datagrams 240 ticks apart, so the far end can
+    /// partition a whole run into the two residue classes modulo 480 from the
+    /// timestamps alone, and RFC 3550's random base then leaves it unable to say
+    /// which class is a packet's first frame. That is one bit and it is the sign
+    /// of A6.1's answer. Deciding it from arrival order instead would be reading
+    /// the conclusion off the measurement.
+    pub rtp_base: RtpTimestamp,
     pub carried: Carried,
     /// Packets `GetBuffer` refused, and what it said the first time.
     pub buffer_errors: u64,
@@ -525,6 +578,18 @@ impl Measurement {
     /// twice and disagrees about once.
     pub fn sample_disagreement(&self) -> u64 {
         self.samples_captured().abs_diff(self.samples_encoded())
+    }
+
+    /// The capture endpoint's rate against nominal, or nothing when too few
+    /// packets arrived to state one.
+    ///
+    /// A1 read this endpoint at -15 ppm and A7.1 exists because that figure and
+    /// this Mac's +5 ppm together predict a buffer that empties, while the one
+    /// that was measured filled. So it is derived from the run rather than
+    /// carried forward: the whole point is to find out whether the old figure
+    /// survives.
+    pub fn source_rate(&self) -> Option<Rate> {
+        self.carried.drift.rate()
     }
 
     pub fn capture_packets_per_s(&self) -> f64 {
@@ -583,6 +648,7 @@ impl fmt::Display for Measurement {
         writeln!(f, "mix format {}", self.format)?;
         writeln!(f, "sending to {} from {}", self.send_to, self.bind)?;
         writeln!(f, "ssrc {}", self.ssrc.0)?;
+        writeln!(f, "rtp base {}", self.rtp_base.0)?;
         writeln!(f, "span {:.3} s", self.span_s)?;
 
         writeln!(f, "capture packets {}", totals.packets)?;
@@ -632,6 +698,38 @@ impl fmt::Display for Measurement {
             totals.discontinuities_in_flight()
         )?;
         writeln!(f, "silent packets {}", totals.silent_packets)?;
+        // The endpoint's own rate, from the same position stream the gaps and
+        // rewinds above are counted in. Absent rather than zero when too few
+        // packets arrived to state one: 0.000 ppm is exactly what a correct
+        // clock looks like, and printing it for a run that measured nothing is
+        // the shape of report this project has read as success five times.
+        match self.source_rate() {
+            Some(rate) => {
+                writeln!(
+                    f,
+                    "source ppm {:+.3} error {:.3} over {} readings and {:.3} s",
+                    rate.fitted_ppm, rate.error_ppm, rate.readings, rate.seconds
+                )?;
+                writeln!(f, "source ppm endpoints {:+.3}", rate.endpoints_ppm)?;
+                writeln!(f, "source position samples {:.0}", rate.samples)?;
+                writeln!(
+                    f,
+                    "source counter scatter {:.2} samples estimates agree {}",
+                    rate.scatter_samples,
+                    yes_no(rate.estimates_agree())
+                )?;
+            }
+            None => writeln!(
+                f,
+                "source ppm unavailable over {} readings",
+                self.carried.drift.readings()
+            )?,
+        }
+        writeln!(
+            f,
+            "source counter stalls {}",
+            self.carried.drift.stalled()
+        )?;
         writeln!(
             f,
             "timestamp steps {} exact {}",
@@ -737,6 +835,7 @@ pub fn run(options: &Options) -> Result<Measurement, SenderError> {
     let expected_frames = (options.seconds / FRAME.seconds()).ceil() as usize * 4;
     let mut carrier = Carrier::new(&socket, options.send_to, config, format, expected_frames)?;
     let ssrc = carrier.ssrc();
+    let rtp_base = carrier.rtp_base();
 
     let mut wakeup_intervals = Samples::with_capacity(expected_frames + 1_024);
     let mut wakeup_timeouts = 0u64;
@@ -798,6 +897,7 @@ pub fn run(options: &Options) -> Result<Measurement, SenderError> {
         bind: socket.local_addr().map_err(io("local_addr"))?,
         send_to: options.send_to,
         ssrc,
+        rtp_base,
         carried: carrier.finish(),
         buffer_errors,
         first_buffer_error,

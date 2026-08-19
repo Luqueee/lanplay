@@ -1,0 +1,140 @@
+A7.1, the clock rate audit. What the three measurements came to, and the
+arithmetic that connects them, so that none of it has to be reconstructed from
+the two envelopes beside this file.
+
+The run is clean-1200s in this directory, taken by
+`tools/audio-e2e-gate.sh 90 1200`. The 90 s arm is here too, and
+loopback-control.receiver.out is the same receiver driven over 127.0.0.1 with no
+radio and no host, which is where the samples identity was checked against a
+source with no lateness in it.
+
+  source_ppm  -15.0769 +-0.0001   endpoints -15.0663   125999 readings, 1259.999 s
+  sink_ppm     +5.1545 +-0.00003  endpoints  +5.1451   224993 readings, 1199.951 s
+  difference  -20.2314 ppm
+
+source_ppm is the capture device's position against the performance counter
+`IAudioCaptureClient::GetBuffer` reports for the same frame, on the host and
+against the host's own monotonic clock. sink_ppm is `mSampleTime` against
+`mHostTime` from one CoreAudio IO cycle's timestamp, on this Mac and against this
+Mac's own monotonic clock. Neither figure has ever been subtracted from a reading
+taken on the other machine. Both carry a least-squares standard error over every
+reading rather than an endpoint difference alone, because an endpoints-only
+estimate carries the timestamp noise of exactly two readings and there is no way
+to know from two readings what that noise is. It turned out to be 0.31 samples on
+the host counter and 0.37 on the host clock here, which is why the errors are
+thousandths of a ppm; had it been a millisecond the same window would have
+resolved nothing.
+
+  observed growth   +238 +-75 samples over 1199.950 s
+  predicted growth  -1165 samples
+  gap               +1403 +-75 samples = +24.37 +-1.30 ppm, 18.8 sigma
+
+They do not close and they disagree in sign. The prediction says the buffers empty
+by twenty-four milliseconds of audio; they filled by five.
+
+The observed figure is a least-squares line through 120 window snapshots of what
+the two buffers held, on a time axis that is the cumulative count of producer
+pulls times 5 ms - 239990 periods, every one of them a wait on
+`mach_continuous_time` - rather than on summed printed spans, so the axis is an
+exact integer count of this Mac's own periods. The run total alone cannot be used
+for this: a single snapshot carries about 236 samples of sawtooth, because
+`produced` steps by 240 and `consumed` by 256, and the jump distribution across
+the run is made of nothing but multiples of those two - 0, 224, 240, 256, 272,
+480, 512, 720, 736, 960, 1200.
+
+That scatter is what sets the arm length, and it is the whole of the defence for
+1200 seconds:
+
+    300 s    30 windows   growth +- 149 samples   3-sigma floor 31.1 ppm
+    600 s    60 windows   growth +- 106 samples   3-sigma floor 11.0 ppm
+    900 s    90 windows   growth +-  86 samples   3-sigma floor  6.0 ppm
+   1200 s   120 windows   growth +-  75 samples   3-sigma floor  3.9 ppm
+   1800 s   180 windows   growth +-  61 samples   3-sigma floor  2.1 ppm
+
+At five minutes the floor is above the twenty ppm under discussion, so the
+measurement would have been unable to see its own subject. The 90 s arm proves
+that rather than assuming it: its growth is -297 +-482 samples, which contains
+the -88 the rates predict and contains zero as well. The two rate figures, by
+contrast, resolve in seconds - the tone probe read the output device at +5.229
++-0.004 ppm in sixty seconds - so the rates and the growth demand very different
+windows and the growth is what binds.
+
+The identity closed to the sample on every arm, which is what says nothing is
+missing from the accounting rather than merely unnoticed:
+
+  loopback control, 60 s   buffer growth 2752 samples held 2752 residual 0
+  clean-90s                buffer growth 2048 samples held 2048 residual 0
+  clean-1200s              buffer growth 3232 samples held 3232 residual 0
+
+`growth` is eight counters - produced, concealed, lost, late, off grid, oversize,
+ceiling discards, decode failures, ring refusals, consumed - and `held` is two
+occupancy reads taken after the device stopped. They share no input, so a
+disagreement between them would be a term nobody had named. On the long arm the
+discards are 3597600 samples against 3596400 concealed, and both are four hundred
+times the growth being measured, which is why a version of this arithmetic that
+left the late frames out would have been wrong by two orders of magnitude and
+inverted in sign.
+
+Where the gap is not. Late 14985 and concealed 14985 are exactly equal, so those
+terms cancel to the sample and the only net discard in the run is the ceiling's
+5 frames, 1200 samples - close enough to the 1403 gap to be worth excluding
+rather than assuming away. It is excluded three ways. The event lies outside the
+fitted windows: cursor travel inside them is 239990 frames against 239990 pulls,
+zero skips, while the run total is 240005 against 240000. The fit is a line and
+not a step: residual means are +2.0 and -2.0 samples across the two halves and
+the half-to-half difference in what was held is +115 samples against the +119 the
+trend predicts. And the largest single move in the series, +1200 at window 110,
+has the wrong sign for a ceiling event, since a skip drains.
+
+Where the gap is. The thread that drains the jitter buffer is paced by neither
+audio clock. It pulled exactly 240000 times in exactly 1200 s of
+`mach_continuous_time`, on an absolute schedule from the playout anchor, so the
+jitter buffer's balance is the host device's rate expressed in THIS machine's
+seconds against nominal, and the ring's balance is nominal against the output
+device's rate. Only the second of those is `sink_ppm`. The first requires
+converting host performance-counter seconds into mach seconds, and that
+conversion is exactly what no measurement taken on one machine can make. So
+
+  the two monotonic clocks differ by      -24.367 +-1.297 ppm
+  host audio clock in this Mac's seconds   +9.290 ppm, not -15.077
+  this Mac's output clock                  +5.155 ppm
+  net fill                                 +4.135 ppm
+
+and the buffer fills. Split into the two buffers that predicts +535 samples of
+jitter growth and -297 of ring drain, summing to the +238 observed.
+
+The corroboration that survives is the occupancy staircase, and it is
+independent because it comes from a histogram of frame counts rather than from any
+of the counters above. Its p50 went 0.0, 5.0, 10.0, 15.0 ms with three steps at
+windows 15, 56 and 96 - 405 s per 5 ms step, +12.35 ppm, against the +9.29 the
+invariant predicts for that buffer alone, agreeing inside the one frame the
+instrument is quantised to. Three steps rather than A6's one, which is what makes
+this staircase carry a rate where that one carried none.
+
+The corroboration that does not survive, recorded because it was offered before it
+was checked: the arrival delay's p50 moved from -10.9 ms on the 90 s arm to -36.3
+on the 1200 s one, which looks like drift and cannot be used as one. The deadline
+is anchored on the first admitted packet's own arrival plus the target, so a first
+packet that turned up in a bad moment shifts every delay in the run by a constant
+and permanently; twenty-five milliseconds of anchor offset reproduces the whole
+difference with no drift at all. It corroborates the sign and nothing else, and
+separating the two would need a per-window arrival delay, which is not recorded.
+
+What both established rows came to. The host endpoint was -15 ppm in A1 and reads
+-15.0769 +-0.0001 here. This Mac's output was +5 ppm in A5 and reads +5.1545
++-0.00003, with A5's own render.out corroborating at `measured frames per second
+48000.26` and a tone probe taken for this audit reading 48000.25 by that method
+and +5.229 +-0.004 ppm by the new one. Neither row is contradicted. What is
+contradicted is subtracting them: the difference of two rates taken on two
+machines' monotonic clocks is not the rate at which a buffer between them moves,
+and the quantity a rate matcher would have to null is the host's audio clock
+against this machine's timebase, which is +9.290 ppm and is not measurable on
+either machine alone. It is measurable the way it was measured here, from samples
+produced against samples consumed, and that is the instrument any correction
+should be driven from.
+
+Between the two arms the source moved +0.182 ppm and the sink +0.015 ppm, both far
+outside their standard errors, so a crystal's figure is a reading and not a
+constant: the sender ran 150 s on the short arm and 1260 s on the long one, and a
+warm oscillator is not a cold one. Any correction has to track rather than be
+calibrated once.

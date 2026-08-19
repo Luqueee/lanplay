@@ -77,7 +77,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use lanplay_audio_capture::{Percentiles, Samples, ToneReport, analyse};
+use lanplay_audio_capture::{Percentiles, Rate, Samples, ToneReport, analyse};
 use lanplay_audio_codec::config::CodecConfig;
 use lanplay_audio_codec::decoder::OpusDecoder;
 use lanplay_audio_codec::error::CodecError;
@@ -93,6 +93,7 @@ use parking_lot::Mutex;
 use crate::device::{self, Error as DeviceError};
 use crate::format::OutputFormat;
 use crate::occupancy::WindowOccupancy;
+use crate::pairs::{CLASSES, PairReport, PairTiming, class_of};
 use crate::ring::PcmRing;
 use crate::stream::{RenderState, Stream};
 
@@ -322,6 +323,96 @@ impl Continuity {
     }
 }
 
+/// Samples produced against samples consumed, which is A7.1's third measurement
+/// and the only one of the three that crosses no clock at all.
+///
+/// The RTP timestamps state what the source produced, in the source's own
+/// samples. The ring's read cursor states what the sink consumed, in the sink's
+/// own frames. Their difference is a count of audio and not an interval of
+/// anybody's time, so it is the arbiter over the two rate figures rather than a
+/// third opinion beside them: each of those is a rate against one machine's
+/// monotonic clock, and the error in those two monotonic clocks is a term no
+/// measurement taken on one machine can see. If the growth predicted from the
+/// two rates matches the growth counted here, that term is small. If it does
+/// not, either it is not, or a mechanism in the buffers is unaccounted for.
+///
+/// # Why samples, and why the occupancy percentile cannot do this
+///
+/// The per-window occupancy figure cannot answer it and no length of run would
+/// make it able to. Its histogram's buckets are frames, so it is quantised to
+/// one frame -- 5 ms -- and the whole quantity in dispute is twelve
+/// milliseconds over ten minutes. That is why the 12.3 ppm once read off its
+/// staircase was withdrawn rather than refined.
+///
+/// # The discards are not optional
+///
+/// Every sample that entered either buffer has reached the device, is still
+/// held, or was thrown away somewhere nameable, and the thrown-away term is
+/// larger than the term being measured. A6's clean arm discarded 4587 late
+/// frames, which is 1100880 samples: four hundred times the drift the invariant
+/// exists to find. Left out, it swamps the answer and inverts its sign.
+///
+/// A late frame is discarded and never played, so the discard is itself a drain.
+/// A lost packet never arrived, and the timestamp span counts it as produced
+/// because a span is a statement about the source's clock. The ceiling gives
+/// frames up to hold its bound. The ring refuses what it has no room for. And a
+/// frame the decoder refused reached no ring at all.
+///
+/// Concealment is the one term that goes the other way. A concealed frame is
+/// audio the concealer invented, deposited in the ring and consumed by the
+/// device, and no source ever produced it; a run that left it out would find the
+/// device consuming samples nobody made.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Invariant {
+    /// Per-channel samples the source produced, over the span its own RTP
+    /// timestamps describe.
+    pub produced: u64,
+    /// Per-channel samples the device took out of the ring. Silence written over
+    /// a shortfall is not in here, because the ring's read cursor does not move
+    /// for audio nobody produced.
+    pub consumed: u64,
+    /// Samples that entered the pipeline and reached nobody.
+    pub discarded: u64,
+    /// Samples the concealer invented and the device played.
+    pub inserted: u64,
+    /// What the jitter buffer and the ring were still holding when the run
+    /// ended, from their own occupancies rather than from the arithmetic below.
+    ///
+    /// This is the check and not the measurement: the two are computed from
+    /// disjoint facts -- one from eight counters, the other from two occupancy
+    /// reads -- so a disagreement between them is a term nobody has named.
+    pub held: u64,
+}
+
+impl Invariant {
+    /// The audio the two buffers took on over the run, which is what the two
+    /// measured rates predict.
+    ///
+    /// Signed, because the whole question is which way it went: the established
+    /// table predicts a buffer that empties and the one that was measured
+    /// filled.
+    pub fn growth(&self) -> i64 {
+        (self.produced as i64 + self.inserted as i64) - (self.discarded as i64 + self.consumed as i64)
+    }
+
+    /// The growth the two rates predict over `seconds`, in samples.
+    ///
+    /// The source fills at its own rate and the sink drains at its own, so what
+    /// accumulates is the difference between them. Both figures are ppm against
+    /// the same nominal, and each was taken on its own machine's monotonic
+    /// clock, so the difference carries the error between those two clocks as
+    /// well -- which is exactly the term this prediction is being tested for.
+    pub fn predicted(source_ppm: f64, sink_ppm: f64, nominal_hz: f64, seconds: f64) -> f64 {
+        nominal_hz * seconds * (source_ppm - sink_ppm) / 1e6
+    }
+
+    /// How far the arithmetic is from what the buffers actually hold. Zero is
+    /// the only value that says nothing is missing.
+    pub fn residual(&self) -> i64 {
+        self.growth() - self.held as i64
+    }
+}
+
 /// What the producer thread did and what the system let it do.
 #[derive(Debug)]
 pub struct Producer {
@@ -329,6 +420,14 @@ pub struct Producer {
     /// deadline and another without one.
     pub scheduled_as: ScheduledAs,
     pub pulls: u64,
+    /// Pulls that found the buffer empty, split by which frame of a captured
+    /// packet was due.
+    ///
+    /// Here rather than with the arrival figures because an underrun is the
+    /// absence of an arrival, so nothing on the receiving thread ever sees one:
+    /// the position that went unserved is known only to the pull that went
+    /// looking for it.
+    pub underruns_by_class: [u64; CLASSES],
     /// Interval between consecutive pulls, as achieved rather than as asked
     /// for. A producer that cannot keep its own cadence is measuring itself.
     pub interval_us: Option<Percentiles>,
@@ -371,6 +470,18 @@ pub struct Render {
     /// Between the first and last cycles' own timestamps, so it is the device's
     /// clock and not this program's.
     pub span_seconds: f64,
+    /// The device's own rate against nominal, from the sample time and host time
+    /// the HAL reports for the same cycle, and absent when too few cycles
+    /// carried both.
+    ///
+    /// A7.1's Mac half. What it measures is what the device physically consumed,
+    /// which is not the same statement as the 48000 Hz it advertises, and it is
+    /// taken entirely on this machine's clocks: nothing here is ever subtracted
+    /// from a reading taken on the host.
+    pub sink_rate: Option<Rate>,
+    /// Cycles left out of that rate because the HAL filled in only one half of
+    /// the pair.
+    pub invalid_timestamps: u64,
     /// How long `AudioDeviceStart` took to produce a first cycle.
     ///
     /// Reported because it is the ring's resting occupancy: the producer runs
@@ -410,6 +521,17 @@ pub struct WindowRow {
     /// at its ceiling, or holding its target while frames arrived too late to
     /// be in it.
     pub occupancy_us: Option<Percentiles>,
+    /// What the jitter buffer and the ring were holding together at the end of
+    /// this window, in per-channel samples, and cumulative rather than a delta.
+    ///
+    /// The one figure in this row that is a snapshot, because it is the one whose
+    /// interesting quantity is a slope. Occupancy next door cannot supply that
+    /// slope at any run length: its buckets are frames, so it is quantised to
+    /// 5 ms while the whole accumulation over ten minutes is twelve. This is in
+    /// samples, from the cumulative counters, so a least-squares line through a
+    /// run's worth of it is the drift rate and its scatter is the instrument's
+    /// noise rather than a bucket boundary.
+    pub held_samples: i64,
 }
 
 impl WindowRow {
@@ -438,6 +560,14 @@ pub struct Receipt {
     /// a fixed cost every frame pays; a healthy median under a long tail is a
     /// link that stutters; and the two want opposite remedies.
     pub arrival_delay_us: Option<Percentiles>,
+    /// The same arrivals split by which of a captured packet's two Opus frames
+    /// each datagram carried, which is A6.1's whole subject.
+    ///
+    /// Beside the run-wide distribution rather than instead of it. A figure over
+    /// every frame answers whether the link is late; a figure per class answers
+    /// whether the sender's cadence is what makes it so, and the second cannot be
+    /// recovered from the first because the two classes are interleaved in it.
+    pub pair: PairReport,
     pub counts: Counts,
     pub loss: Loss,
     /// Datagrams that parsed as Opus and carried another SSRC. Not this
@@ -449,6 +579,13 @@ pub struct Receipt {
     pub windows: Vec<WindowRow>,
     /// Between the first datagram and the end of the accounting window.
     pub span_seconds: f64,
+    /// Per-channel samples the source produced, as its own RTP timestamps state
+    /// it, and absent when no frame was ever admitted.
+    pub produced_samples: Option<u64>,
+    /// What the jitter buffer and the PCM ring were holding when the run ended,
+    /// in per-channel samples, read from their own occupancies after the device
+    /// had stopped.
+    pub held_samples: u64,
 }
 
 impl Receipt {
@@ -458,6 +595,47 @@ impl Receipt {
 
     pub fn frame_samples(&self) -> u64 {
         self.config.frame_samples() as u64
+    }
+
+    /// Samples produced against samples consumed, with every discard and every
+    /// invention named, or nothing when no frame was ever admitted.
+    ///
+    /// Assembled here rather than accumulated during the run because every term
+    /// is a run total that already exists: putting the arithmetic in one place is
+    /// what lets a reader check it against the counters beside it instead of
+    /// against a number somebody carried forward.
+    pub fn invariant(&self) -> Option<Invariant> {
+        let frame = self.frame_samples();
+        let counts = self.counts;
+        let never_played = self.loss.lost()
+            + counts.late
+            + counts.off_grid
+            + counts.oversize
+            + counts.overrun_frames
+            + self.producer.decode_failures;
+        Some(Invariant {
+            produced: self.produced_samples?,
+            consumed: self.render.frames_consumed,
+            discarded: never_played * frame + self.producer.refused_frames,
+            inserted: counts.concealed * frame,
+            held: self.held_samples,
+        })
+    }
+
+    /// The growth the two measured rates predict over the device's own span, and
+    /// nothing when either end could not state a rate.
+    ///
+    /// The sender's figure has to be handed in: it is measured on the host and
+    /// travels in the host's own envelope, and a receiver that went looking for it
+    /// would be a receiver reading the other machine's document.
+    pub fn predicted_growth(&self, source_ppm: f64) -> Option<f64> {
+        let sink = self.render.sink_rate?;
+        Some(Invariant::predicted(
+            source_ppm,
+            sink.fitted_ppm,
+            f64::from(self.config.sample_rate),
+            sink.seconds,
+        ))
     }
 
     /// Whether every thread that paces got the deadline it asked for.
@@ -502,6 +680,28 @@ struct Shared {
     /// Frames the producer generated and the ring refused, published so a
     /// window can be closed while the run is going.
     refused_frames: AtomicU64,
+    /// Frames the producer generated and could not decode or conceal, published
+    /// for the same reason: they reached no ring, so the samples invariant has to
+    /// take them off, and a window closed while the run is going cannot read the
+    /// producer's own copy.
+    decode_failures: AtomicU64,
+    /// The RTP timestamp of the first frame this receiver admitted, plus one so
+    /// that zero can mean nothing yet: a timestamp of zero is a legal timestamp.
+    ///
+    /// The packetiser seeds its timestamp from a random draw per RFC 3550 and
+    /// this receiver joins mid-stream, so the absolute value means nothing. What
+    /// is meaningful is the distance from it, which is what the span below is.
+    first_rtp: AtomicU64,
+    /// The furthest any admitted frame's timestamp has reached beyond
+    /// [`Shared::first_rtp`], in the source's own samples.
+    ///
+    /// This is what the source produced, stated by the stream itself. It counts
+    /// the frames that never arrived as well as the ones that did, because a
+    /// timestamp span is a statement about the source's clock and not about the
+    /// radio, and it is the one term of the samples invariant that is measured
+    /// on the far machine without anything having crossed a clock: it is a count
+    /// of samples, not an interval of anybody's time.
+    rtp_span: AtomicU64,
     /// What the buffer held after each pull, for the window that is open now.
     ///
     /// Here rather than in the producer's own stores because a window is closed
@@ -525,6 +725,45 @@ impl Shared {
         match self.playout_at.load(Ordering::Acquire) {
             0 => None,
             published => Some(published),
+        }
+    }
+
+    /// Files one admitted frame's timestamp against the span.
+    ///
+    /// Wrapping-aware from the first frame admitted rather than from the packet
+    /// before, so a reordered arrival cannot shorten the span it is inside. The
+    /// unsigned distance is what is wanted here and not RFC 3550's signed one: a
+    /// frame behind the first one this receiver saw would come back as a distance
+    /// of nearly 2^32, which the max below ignores, and the alternative -- a
+    /// signed distance -- would let one early arrival move the origin the whole
+    /// run is measured from.
+    fn produced(&self, timestamp: RtpTimestamp) {
+        let first = match self.first_rtp.load(Ordering::Relaxed) {
+            0 => {
+                self.first_rtp
+                    .store(u64::from(timestamp.0) + 1, Ordering::Relaxed);
+                return;
+            }
+            stored => (stored - 1) as u32,
+        };
+        let distance = u64::from(timestamp.0.wrapping_sub(first));
+        // The 48 kHz RTP clock wraps every 24.8 hours and the longest arm this
+        // phase runs is twenty minutes, so a distance past half the space is a
+        // frame behind the origin rather than one a wrap ahead of it.
+        if distance < u64::from(u32::MAX) / 2 {
+            self.rtp_span.fetch_max(distance, Ordering::Relaxed);
+        }
+    }
+
+    /// Per-channel samples the source produced over the span its own timestamps
+    /// describe, or nothing while no frame has been admitted.
+    ///
+    /// The span plus one frame, because a span of zero is one frame of audio and
+    /// not none.
+    fn produced_samples(&self, frame_samples: u64) -> Option<u64> {
+        match self.first_rtp.load(Ordering::Relaxed) {
+            0 => None,
+            _ => Some(self.rtp_span.load(Ordering::Relaxed) + frame_samples),
         }
     }
 }
@@ -617,6 +856,9 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
         ssrc: AtomicU64::new(0),
         foreign_ssrc: AtomicU64::new(0),
         refused_frames: AtomicU64::new(0),
+        decode_failures: AtomicU64::new(0),
+        first_rtp: AtomicU64::new(0),
+        rtp_span: AtomicU64::new(0),
         // Sized from the buffer's own slot count, so the histogram spans every
         // occupancy the buffer is able to report and its percentiles are exact
         // rather than sampled.
@@ -634,12 +876,18 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
     let expected_cycles =
         (options.seconds * f64::from(format.sample_rate) / f64::from(buffer_frames)) as usize;
     let render_store = expected_cycles + expected_cycles / 4 + 1_024;
-    let state = Box::new(RenderState::new(Arc::clone(&ring), channels, render_store));
+    let state = Box::new(RenderState::new(
+        Arc::clone(&ring),
+        channels,
+        render_store,
+        f64::from(format.sample_rate),
+    ));
 
     type Outcome = (
         Producer,
         ScheduledAs,
         Option<Percentiles>,
+        PairReport,
         Vec<WindowRow>,
         f64,
         u64,
@@ -649,7 +897,8 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
             let shared = Arc::clone(&shared);
             let socket = &socket;
             let sample_rate = config.sample_rate;
-            scope.spawn(move || listen(socket, &shared, period, sample_rate, store))
+            let frame_samples = config.frame_samples() as u32;
+            scope.spawn(move || listen(socket, &shared, period, sample_rate, store, frame_samples))
         };
 
         // Spawned before the anchor exists rather than after it, and the first
@@ -685,7 +934,7 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
         // rather than spend its whole window measuring an empty socket.
         if await_playout(&shared, options.first_packet_wait).is_none() {
             shared.stop.store(true, Ordering::Relaxed);
-            let (scheduled_as, _) = receiver.join().expect("the receive thread does not panic");
+            let (scheduled_as, ..) = receiver.join().expect("the receive thread does not panic");
             producer.join().expect("the producer thread does not panic");
             return Err(ReceiveError::Mismatch(format!(
                 "nothing arrived on {} within {:.0} s, so there is no run to report; the \
@@ -735,21 +984,29 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
             windows
         };
         let span_seconds = Timestamp::now().saturating_since(began).as_secs_f64();
-        let (receiver_scheduled_as, arrival_delay_us) =
+        let (receiver_scheduled_as, arrival_delay_us, pair) =
             receiver.join().expect("the receive thread does not panic");
         let produced = producer.join().expect("the producer thread does not panic");
         Ok((
             produced,
             receiver_scheduled_as,
             arrival_delay_us,
+            pair,
             windows,
             span_seconds,
             start_call,
         ))
     });
 
-    let (producer, receiver_scheduled_as, arrival_delay_us, windows, span_seconds, start_call) =
-        outcome?;
+    let (
+        producer,
+        receiver_scheduled_as,
+        arrival_delay_us,
+        pair,
+        windows,
+        span_seconds,
+        start_call,
+    ) = outcome?;
     // The stream borrowed the state for exactly as long as the IOProc existed,
     // and consuming it here is the proof that the borrow has ended.
     let rendered = state.finish();
@@ -758,6 +1015,14 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
         0 => None,
         raw => Some(Ssrc((raw - 1) as u32)),
     };
+
+    let frame_samples = config.frame_samples() as u64;
+    // Read after the device has stopped and the producer has finished, so it is
+    // the state the run ended in rather than a moment inside it. The two
+    // occupancies are the only facts the samples invariant does not get from a
+    // counter, which is what makes them a check on it rather than a term of it.
+    let held_samples =
+        shared.buffer.lock().occupancy() as u64 * frame_samples + ring.occupancy_frames() as u64;
 
     Ok(Receipt {
         config,
@@ -768,6 +1033,7 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
         slots,
         receiver_scheduled_as,
         arrival_delay_us,
+        pair: pair.with_underruns(producer.underruns_by_class),
         counts: shared.buffer.lock().counts(),
         loss: *shared.loss.lock(),
         foreign_ssrc: shared.foreign_ssrc.load(Ordering::Relaxed),
@@ -789,6 +1055,8 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
             overrun_frames: ring.overrun_frames(),
             frames_consumed: ring.consumed(),
             span_seconds: rendered.span_seconds,
+            sink_rate: rendered.sink_rate,
+            invalid_timestamps: rendered.invalid_timestamps,
             // Zero when the device never ran a cycle, which is the same thing
             // the callback count already says and is better than an interval
             // measured against a timestamp nobody wrote.
@@ -801,6 +1069,8 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
         },
         windows,
         span_seconds,
+        produced_samples: shared.produced_samples(frame_samples),
+        held_samples,
     })
 }
 
@@ -830,7 +1100,8 @@ fn listen(
     period: Nanos,
     sample_rate: u32,
     store: usize,
-) -> (ScheduledAs, Option<Percentiles>) {
+    frame_samples: u32,
+) -> (ScheduledAs, Option<Percentiles>, PairReport) {
     let scheduled_as = ScheduledAs::request(period.get());
     let mut datagram = [0u8; MAX_UDP_PAYLOAD];
     // Where the stream's clock met this one, kept here rather than asked of the
@@ -838,6 +1109,10 @@ fn listen(
     // every frame of the run.
     let mut anchor: Option<(RtpTimestamp, u64)> = None;
     let mut delay_us = Samples::with_capacity(store);
+    // A6.1's arrival half. It is fed from this thread and only this thread, so
+    // it takes no lock; the underruns it also reports belong to the producer's
+    // schedule and are folded in once, at the end.
+    let mut pairs = PairTiming::new(frame_samples, store);
     loop {
         // Checked before every read and not only after a timeout. On the first
         // run this loop only ever tested the flag when the socket went quiet,
@@ -846,7 +1121,7 @@ fn listen(
         // pushed the buffer past its ceiling with no pull to match, and 1195
         // frames were skipped and charged to a run that had already ended.
         if shared.stop.load(Ordering::Relaxed) {
-            return (scheduled_as, delay_us.percentiles());
+            break;
         }
         let length = match socket.recv_from(&mut datagram) {
             Ok((length, _from)) => length,
@@ -856,7 +1131,7 @@ fn listen(
                     io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
                 );
                 if !timed_out {
-                    return (scheduled_as, delay_us.percentiles());
+                    break;
                 }
                 continue;
             }
@@ -907,19 +1182,46 @@ fn listen(
         // datagrams; and a median already past zero with no tail at all would
         // be an anchor taken on a frame that arrived early, which is this
         // receiver's fault and nobody else's.
+        //
+        // Late frames are timed and classified with the rest. A frame that
+        // missed its moment is the event this whole phase is about, and a
+        // distribution that dropped them would be a distribution with the tail
+        // taken out of it. What is left out is the off-grid and the oversized,
+        // which have no position in a captured packet to be classified by, and
+        // the buffer counts both.
         if admission != Admission::Duplicate {
             shared.loss.lock().arrived(packet.sequence);
+            // What the source produced, from the timestamps rather than from a
+            // count of what turned up. A lost packet leaves its own gap in the
+            // span, so the span states the source's production and not the
+            // radio's delivery, and the samples invariant takes the loss off as
+            // its own named term.
+            shared.produced(packet.timestamp);
             if let Some((anchor_rtp, playout_ns)) = anchor {
                 let ticks = i128::from(packet.timestamp.distance_from(anchor_rtp));
                 let moment =
                     i128::from(playout_ns) + ticks * 1_000_000_000 / i128::from(sample_rate);
                 let late_us = (i128::from(at.as_nanos()) - moment) / 1_000;
                 delay_us.record(bias_micros(late_us as i64));
+                if matches!(admission, Admission::Queued { .. } | Admission::Late) {
+                    pairs.arrived(
+                        packet.timestamp,
+                        late_us as i64,
+                        admission == Admission::Late,
+                    );
+                }
             } else if let Some(playout) = shared.playout_start_ns() {
                 anchor = Some((packet.timestamp, playout));
+                // The same tick the buffer anchored on, so that the classes the
+                // producer attributes its underruns to are the classes this
+                // thread attributes its arrivals to. Two threads each anchoring
+                // on the first frame they happened to see would label them
+                // oppositely half the time, and the labelling is the answer.
+                pairs.anchor(packet.timestamp);
             }
         }
     }
+    (scheduled_as, delay_us.percentiles(), pairs.finish())
 }
 
 /// Microseconds either side of a moment, shifted so a distribution of them can
@@ -973,6 +1275,7 @@ fn produce(
     let mut report = Producer {
         scheduled_as: ScheduledAs::request(period.get()),
         pulls: 0,
+        underruns_by_class: [0; CLASSES],
         interval_us: None,
         occupancy_us: None,
         decode_us: None,
@@ -1004,6 +1307,11 @@ fn produce(
     let window_format = decoded_format(&config);
     let mut analysis = Vec::with_capacity(ANALYSIS_FRAMES * window_format.frame_bytes());
     let mut skipped = 0usize;
+    // Which frame of a captured packet an underrun happened at. The arrival side
+    // of the audit cannot see this: an underrun is a position nothing arrived
+    // for, so the only record of it is the pull that went looking.
+    let frame_samples = config.frame_samples() as u32;
+    let mut underruns_by_class = [0u64; CLASSES];
 
     let mut interval_us = Samples::with_capacity(store);
     let mut occupancy_us = Samples::with_capacity(store);
@@ -1033,10 +1341,23 @@ fn produce(
         }
         previous = Some(at);
 
-        let pulled = {
+        // The position and the anchor are read inside the lock and classified
+        // outside it, because a pull that found nothing belongs to the frame that
+        // was due rather than to the pull, and `pull` advances the cursor as it
+        // returns.
+        let (due, anchor, pulled) = {
             let mut buffer = shared.buffer.lock();
-            buffer.pull(&mut payload)
+            (
+                buffer.cursor(),
+                buffer.anchor_rtp(),
+                buffer.pull(&mut payload),
+            )
         };
+        if matches!(pulled.outcome, Pull::Underrun)
+            && let Some(anchor) = anchor
+        {
+            underruns_by_class[class_of(due, anchor, frame_samples)] += 1;
+        }
         // Twice, into two stores with two lifetimes: the run's, sorted once at
         // the end, and the window's, emptied by the watcher every ten seconds.
         // The second is not derivable from the first, because a percentile taken
@@ -1089,7 +1410,12 @@ fn produce(
                     }
                 }
             }
-            Err(_) => report.decode_failures += 1,
+            Err(_) => {
+                report.decode_failures += 1;
+                shared
+                    .decode_failures
+                    .store(report.decode_failures, Ordering::Relaxed);
+            }
         }
     }
 
@@ -1103,6 +1429,7 @@ fn produce(
     shared.done.store(true, Ordering::Release);
 
     report.pulls = index;
+    report.underruns_by_class = underruns_by_class;
     report.interval_us = interval_us.percentiles();
     report.occupancy_us = occupancy_us.percentiles();
     report.decode_us = decode_us.percentiles();
@@ -1161,7 +1488,8 @@ fn watch(
     // window at all, so it is thrown away rather than charged to the one about
     // to open.
     let _ = occupancy.take();
-    let mut previous = Sample::read(shared, ring, state);
+    let frame_samples = options.config.frame_samples() as u64;
+    let mut previous = Sample::read(shared, ring, state, frame_samples);
     let mut previous_at = Instant::now();
 
     // Woken far more often than a window is long, so the run ends within a
@@ -1174,7 +1502,7 @@ fn watch(
             continue;
         }
         let now = Instant::now();
-        let current = Sample::read(shared, ring, state);
+        let current = Sample::read(shared, ring, state, frame_samples);
         rows.push(current.since(&previous, now.duration_since(previous_at), occupancy.take()));
         previous = current;
         previous_at = now;
@@ -1186,7 +1514,7 @@ fn watch(
     let now = Instant::now();
     let span = now.duration_since(previous_at);
     if span > Duration::ZERO {
-        let current = Sample::read(shared, ring, state);
+        let current = Sample::read(shared, ring, state, frame_samples);
         rows.push(current.since(&previous, span, occupancy.take()));
     }
     rows
@@ -1201,10 +1529,25 @@ struct Sample {
     callbacks: u64,
     underruns: u64,
     overruns: u64,
+    decode_failures: u64,
+    /// Per-channel samples the source produced by this instant, from the RTP
+    /// timestamps, and zero while nothing has been admitted.
+    produced: u64,
+    /// Per-channel samples the device had taken out of the ring by this instant.
+    consumed: u64,
+    /// One frame of audio in per-channel samples, carried so that the held
+    /// figure below is arithmetic on this reading rather than on a constant the
+    /// caller has to remember to supply twice.
+    frame_samples: u64,
 }
 
 impl Sample {
-    fn read(shared: &Shared, ring: &PcmRing, state: &RenderState) -> Sample {
+    fn read(
+        shared: &Shared,
+        ring: &PcmRing,
+        state: &RenderState,
+        frame_samples: u64,
+    ) -> Sample {
         Sample {
             counts: shared.buffer.lock().counts(),
             lost: shared.loss.lock().lost(),
@@ -1212,7 +1555,39 @@ impl Sample {
             callbacks: state.callbacks(),
             underruns: ring.underruns(),
             overruns: ring.overruns(),
+            decode_failures: shared.decode_failures.load(Ordering::Relaxed),
+            produced: shared.produced_samples(frame_samples).unwrap_or(0),
+            consumed: ring.consumed(),
+            frame_samples,
         }
+    }
+
+    /// What the two buffers were holding at this reading, by the same arithmetic
+    /// [`Invariant`] closes at the end of the run.
+    ///
+    /// From the counters rather than from the two occupancies, and the reason is
+    /// noise rather than convenience. An occupancy read is momentary: the jitter
+    /// buffer's is quantised to a whole frame and the ring's moves by a whole IO
+    /// buffer between one cycle and the next, so a single pair of reads carries
+    /// several hundred samples of sampling noise against the few hundred samples
+    /// of drift a whole run accumulates. The counters are cumulative, so this
+    /// figure moves only when audio moves, and a least-squares line through a
+    /// run's worth of them is a drift rate rather than two snapshots and a hope.
+    ///
+    /// Signed, and it can legitimately be negative for a window or two at the
+    /// start: the counters are read one after another rather than at one instant,
+    /// so a frame can be consumed between the produced read and the consumed one.
+    fn held(&self) -> i64 {
+        let never_played = self.lost
+            + self.counts.late
+            + self.counts.off_grid
+            + self.counts.oversize
+            + self.counts.overrun_frames
+            + self.decode_failures;
+        (self.produced as i64 + (self.counts.concealed * self.frame_samples) as i64)
+            - (never_played * self.frame_samples) as i64
+            - self.refused as i64
+            - self.consumed as i64
     }
 
     fn since(
@@ -1242,6 +1617,14 @@ impl Sample {
             // that was emptied at this boundary and so is already this window's
             // and only this window's.
             occupancy_us,
+            // A snapshot and not a delta, which is the one field in this row that
+            // is not. A growth is a difference of two of these, so differencing
+            // it here would leave a reader unable to take one over any span but a
+            // single window - and the span that matters is the whole run with its
+            // first window dropped, because the first is where the ring fills to
+            // its prime and the buffer to its target, and neither of those is
+            // drift.
+            held_samples: self.held(),
         }
     }
 }
@@ -1386,6 +1769,10 @@ mod tests {
             callbacks: 1_000,
             underruns: 1,
             overruns: 0,
+            decode_failures: 0,
+            produced: 240_960,
+            consumed: 239_000,
+            frame_samples: 240,
         };
         let later = Sample {
             counts: counts(720_000, 718_000),
@@ -1394,6 +1781,10 @@ mod tests {
             callbacks: 2_875,
             underruns: 1,
             overruns: 2,
+            decode_failures: 0,
+            produced: 720_000,
+            consumed: 715_000,
+            frame_samples: 240,
         };
         let row = later.since(&earlier, Duration::from_secs(10), None);
         assert_eq!(row.expected_samples, 480_000);
@@ -1406,6 +1797,55 @@ mod tests {
         assert_eq!(
             row.occupancy_us, None,
             "a window with no pull in it has no occupancy, which is not an occupancy of zero"
+        );
+        // A snapshot and not a delta, so it is the later reading's own figure:
+        // 720000 produced, seven lost packets and a refused frame off it, and
+        // 715000 taken by the device.
+        assert_eq!(row.held_samples, 3_080);
+    }
+
+    /// The invariant's whole content, on numbers small enough to check by hand.
+    /// Every discard is a drain and concealment is the one term that fills, and a
+    /// version of this arithmetic that left the late frames out would be wrong by
+    /// four hundred times the quantity it is measuring.
+    #[test]
+    fn every_discard_is_taken_off_the_held_figure_and_concealment_is_added() {
+        let reading = |late: u64, concealed: u64, lost: u64| Sample {
+            counts: Counts {
+                late,
+                concealed,
+                ..counts(0, 0)
+            },
+            lost,
+            refused: 0,
+            callbacks: 0,
+            underruns: 0,
+            overruns: 0,
+            decode_failures: 0,
+            produced: 240_000,
+            consumed: 240_000,
+            frame_samples: 240,
+        };
+
+        assert_eq!(
+            reading(0, 0, 0).held(),
+            0,
+            "everything produced was consumed, so the buffers hold nothing"
+        );
+        assert_eq!(
+            reading(10, 0, 0).held(),
+            -2_400,
+            "ten late frames were discarded, which is a drain of ten frames"
+        );
+        assert_eq!(
+            reading(0, 0, 10).held(),
+            -2_400,
+            "ten lost packets never arrived, and the timestamp span counted them"
+        );
+        assert_eq!(
+            reading(10, 10, 0).held(),
+            0,
+            "ten concealments stood in for ten late frames, so the two cancel"
         );
     }
 
@@ -1428,6 +1868,10 @@ mod tests {
             callbacks: 1_000,
             underruns: 0,
             overruns: 0,
+            decode_failures: 0,
+            produced: 240_000,
+            consumed: 240_000,
+            frame_samples: 240,
         };
 
         for _ in 0..2_000 {

@@ -1,0 +1,2 @@
+t_s,unix_s,rssi_dbm,noise_dbm,tx_rate_mbps,channel,width_mhz,radar_band
+0.000,1787168083.510,-58,-94,612,100,80,1

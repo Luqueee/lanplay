@@ -105,47 +105,59 @@ frame still arrives before its deadline. Nor may it be implemented by sleeping o
 consumes WASAPI: encoder, then a bounded transmit queue, then a scheduler, which is the shape the
 video pacer already settled.
 
-### The A7 discrepancy: the sign is real, the magnitude was never measured
+### A7 answered: both clock figures were right and the prediction crossed a boundary
 
-Occupancy at p50 rose from 10.0 to 15.0 ms with zero overruns, and the **direction** is unambiguous:
-it went up once and never came back, so the effective producer outran the effective consumer.
+Measured directly over a 1200 s arm, each rate against its own machine's monotonic clock and nothing
+subtracted across the pair:
 
-The magnitude quoted here before - 12.3 ppm - was not a measurement and is withdrawn. The
-per-window p50 takes exactly two values across the whole arm, 10.0 for twenty-six windows and 15.0
-for the remaining thirty-four, with a **single step at window 26**:
+| quantity | value | population |
+|---|---|---|
+| host capture device against QPC | **-15.0769 ppm** +-0.0001 | 125999 readings over 1260 s |
+| this Mac's output against `mHostTime` | **+5.1545 ppm** +-0.00003 | 224993 IO cycles over 1200 s |
+
+So the two rows in the table below are correct to a quarter of a part per million, and the
+contradiction was never in them. It was in the arithmetic that used them: `source_ppm` is samples per
+**QPC second** and `sink_ppm` is samples per **mach second**, and subtracting the two is subtracting
+rates held against the reference clocks of two different machines - the thing `AGENTS.md` forbids,
+committed in a formula rather than in a timestamp.
+
+The term that was missing is QPC against mach, which no measurement taken on either machine alone
+can supply. The invariant supplies it, from samples produced against samples consumed:
+**-24.37 ppm +-1.30, 18.8 sigma from zero.** Referred to this Mac's timebase the host's audio clock
+is therefore +9.293 ppm and not -15.077, and the account closes:
 
 ```
-AAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+host vs mach   +9.293 ppm      (-15.077 vs QPC, plus 24.37 of QPC vs mach)
+Mac  vs mach   +5.155 ppm
+net filling    +4.139 ppm  ->  +0.1987 samples/s  ->  +238.4 samples over 1200 s
+observed                       +0.1985 +-0.0622   ->  +238 +-75
 ```
 
-A least-squares slope over that staircase gives 12.3 ppm and its endpoints give 8.33 ppm, and
-neither is a rate: one step in a two-valued series carries no rate information at all. Occupancy p50
-is quantised to the frame duration, 5 ms, because the histogram's buckets are frames, so this
-instrument cannot resolve parts per million by construction however long the arm is. The step is
-consistent with a slow drift crossing a bucket boundary somewhere between windows 25 and 27, and
-equally consistent with something changing once.
+**The consequence is the part that matters for the phase.** A rate matcher must be driven by the
+observed buffer and never by these two figures, however precise they are, because the quantity it has
+to null is the host's audio clock against *this* machine's timebase, and that is not measurable on
+either machine alone. It is measurable exactly as it was measured here.
 
-What remains is a contradiction in sign, which is enough to stop work. The table below has the host
-audio clock at -15 ppm and this Mac's output at +5 ppm, so the sink should drain 20 ppm faster than
-the source fills and the buffer should empty. It filled. **Neither of those two rows is safe to use
-for designing a rate matcher until A7 settles which is wrong.**
+Two corroborations, one of which was withdrawn during the audit and is worth recording as a trap.
+The arrival delay's p50 moved from -10.9 ms on a 90 s arm to -36.3 ms on the 1200 s one, which looks
+like drift and cannot be used as one: the anchor is set by the first admitted packet's own arrival
+plus the target, so a first packet that landed in a bad moment shifts every delay in the run by a
+constant, permanently, and a 25 ms anchor offset reproduces that whole move with no drift at all. It
+corroborates the sign and nothing else, and separating the two needs a per-window arrival delay this
+build does not record.
 
-### A7.1, the clock rate audit, measured directly and simultaneously
+What does corroborate is the occupancy staircase, and only because this arm has more than one step:
+0.0 to 5.0 to 10.0 to 15.0 ms with steps at windows 15, 56 and 96, 405 s per 5 ms step, **+12.35
+ppm** against the +9.29 the invariant predicts for the jitter buffer alone - agreeing inside the one
+frame that instrument is quantised to. A6's single-step staircase carried no rate, which is why its
+12.3 ppm was withdrawn; three steps do.
 
-Two clocks cannot be synchronised across these machines and do not need to be: a rate is measurable
-on each machine against its own monotonic clock, in the same run.
-
-On the host, over the same window: the change in the capture device's sample position against the
-change in QPC, which is what `IAudioCaptureClient::GetBuffer` reports the packet's position and QPC
-for, giving `source_ppm = (samples/seconds / 48000 - 1) x 1e6`. On this Mac, in the render callback:
-the change in `sampleTime` against the change in `hostTime`, giving `sink_ppm` from what the device
-physically consumed rather than from what it says its rate is.
-
-And a third measure that is independent of both, in samples rather than in quantised milliseconds:
-the RTP stream states the samples the source produced and CoreAudio states the samples the sink
-consumed, so over a long window `buffer_growth = produced - consumed`. That is the invariant, and
-all three have to close - the growth predicted from the two measured rates against the growth
-observed. If they do not, a mechanism in the buffer is still unaccounted for.
+The sample bookkeeping closed exactly and independently of all this: 60479520 frames captured from
+device positions with zero position gaps and zero rewinds, the same 60479520 encoded with zero sample
+disagreement and zero split residue, 251998 datagrams with every timestamp step exact, and
+251998 x 240 = 60479520. The RTP timestamp is not a nominal 48 kHz counter running beside the device;
+it is the running total of frames the device delivered, so the wire carries the device's rate as an
+identity rather than as an assumption.
 
 ### The order from here
 

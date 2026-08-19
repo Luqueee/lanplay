@@ -1,0 +1,18 @@
+{
+  "channel": "100",
+  "drift_db_per_min": -0.078,
+  "noise_median_dbm": -94.0,
+  "phy_max_mbps": 720.0,
+  "phy_median_mbps": 648.0,
+  "phy_min_mbps": 154.0,
+  "projected_db_over_run": -1.95,
+  "radar_band": "1",
+  "rssi_max_dbm": -58.0,
+  "rssi_median_dbm": -58.0,
+  "rssi_min_dbm": -60.0,
+  "rssi_sd_db": 0.619,
+  "run_s": 1500.0,
+  "started_unix_s": 1787167784.408,
+  "width_mhz": "80",
+  "window_s": 119.0
+}

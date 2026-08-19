@@ -1,0 +1,67 @@
+audio-e2e-receiver: producer scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+producer scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+receiver scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+every deadline granted yes
+rtp received 18003
+rtp lost 0 of 18003 expected
+rtp duplicate 0
+rtp reordered 0
+rtp late 830
+arrival delay ms p50 -11.4 p95 -1.1 p99 14.1 max 45.6 min -17.4
+pair anchor rtp 3792827502 frame samples 240
+pair class 0 offset samples 0 frames 9001 late 476 underruns 476
+pair class 0 arrival ms p50 -10.243 p95 1.081 p99 15.911 min -12.435 max 45.619 over 9001
+pair class 0 step ms p50 -4.996 p95 -4.988 p99 -2.917 min -4.999 max 2.443 over 9000
+pair class 0 step histogram ms -5:8677 -4:191 -3:109 -2:18 -1:2 0:1 1:1 2:1
+pair class 1 offset samples 240 frames 9001 late 354 underruns 354
+pair class 1 arrival ms p50 -15.165 p95 -3.902 p99 11.003 min -17.387 max 40.662 over 9001
+pair class 1 step ms p50 4.977 p95 7.385 p99 30.516 min -4.999 max 61.941 over 9001
+pair class 1 step histogram ms -5:391 -4:102 -3:76 -2:48 -1:62 0:58 1:112 2:274 3:689 4:3039 5:3119 6:518 7:129 8:56 9:21 10:16 11:15 12:6 over:270
+pair measurements dropped 0 unanchored 0
+frames played 17170
+plc frames 830
+jitter occupancy ms p50 10.0 p95 15.0 p99 15.0 max 15.0
+jitter underruns 830
+jitter overruns 0 dropping 0 frames
+decode us p50 12 p99 30
+render callbacks 16866
+render underruns 0 over 0 frames
+render overruns 0 over 0 frames
+continuity expected 4320000 played 4120800 unbroken no
+tone left 997.0 right 1997.0
+sink ppm +5.167 error 0.002 over 16866 readings and 89.946 s
+sink ppm endpoints +5.035
+sink sample time samples 4317439
+sink host time scatter 0.32 samples estimates agree yes
+sink invalid timestamps 0
+samples produced 4320720 consumed 4317696 discarded 199200 concealed in 199200
+buffer growth 3024 samples held 3024 residual 0
+continuity hole 199200 samples over 18000 frame periods
+worst window hole 25920 samples
+tone channels distinct yes
+tone resolution 2.00 hz over 24000 frames
+rtp off grid 0
+rtp oversize 0
+rtp foreign ssrc 0
+decode failures 0
+conceal us p50 11 p99 70
+producer interval us p50 5000 p99 5000 max 5005
+render interval us p50 5333 p99 5344 max 5371
+ring occupancy frames min 2112 p50 2240 max 2368 of 4096 primed to 496 after a 34.3 ms device start
+ring frames refused 0 consumed 4317696
+jitter target ms 10 ceiling ms 30 over 8 slots
+frame ms 5
+device Altavoces del MacBook Pro (named) at 48000 Hz 2 ch 32 bit float with a 256 frame io buffer
+bind 0.0.0.0:5012 ssrc 1637066052
+odd cycles 0
+measurements dropped 0
+span s 90.0 device span s 89.9
+window 0 s 10.0 rtp/s 200 lost 0 plc 90 played 1910 jitter underruns 90 callbacks 1875 underruns 0 overruns 0 expected 480000 played 458400 hole 21600 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls held 2144
+window 1 s 10.0 rtp/s 200 lost 0 plc 86 played 1914 jitter underruns 86 callbacks 1875 underruns 0 overruns 0 expected 480000 played 459360 hole 20640 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls held 2624
+window 2 s 10.0 rtp/s 200 lost 0 plc 80 played 1920 jitter underruns 80 callbacks 1876 underruns 0 overruns 0 expected 480000 played 460800 hole 19200 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls held 2368
+window 3 s 10.0 rtp/s 200 lost 0 plc 85 played 1915 jitter underruns 85 callbacks 1875 underruns 0 overruns 0 expected 480000 played 459600 hole 20400 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls held 2368
+window 4 s 10.0 rtp/s 200 lost 0 plc 84 played 1917 jitter underruns 84 callbacks 1875 underruns 0 overruns 0 expected 480240 played 460080 hole 20160 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls held 2848
+window 5 s 10.0 rtp/s 200 lost 0 plc 98 played 1902 jitter underruns 98 callbacks 1875 underruns 0 overruns 0 expected 480000 played 456480 hole 23520 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls held 2848
+window 6 s 10.0 rtp/s 200 lost 0 plc 108 played 1893 jitter underruns 108 callbacks 1876 underruns 0 overruns 0 expected 480240 played 454320 hole 25920 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls held 2112
+window 7 s 10.0 rtp/s 201 lost 0 plc 99 played 1902 jitter underruns 99 callbacks 1876 underruns 0 overruns 0 expected 480240 played 456480 hole 23760 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls held 2816
+window 8 s 9.9 rtp/s 200 lost 0 plc 99 played 1888 jitter underruns 99 callbacks 1862 underruns 0 overruns 0 expected 476880 played 453120 hole 23760 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 1987 pulls held 2784

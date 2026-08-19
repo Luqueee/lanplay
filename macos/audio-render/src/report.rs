@@ -19,7 +19,7 @@
 
 use core::fmt;
 
-use lanplay_audio_capture::Percentiles;
+use lanplay_audio_capture::{Percentiles, Rate};
 
 use crate::format::{Layout, OutputFormat};
 
@@ -93,6 +93,22 @@ pub struct Report {
     pub right_hz: f64,
     /// Measurements the fixed-size sample stores had no room for.
     pub samples_dropped: u64,
+    /// The device's rate against nominal, from the `mSampleTime` and `mHostTime`
+    /// of the same cycle, and absent when too few cycles carried both.
+    ///
+    /// Beside [`Report::measured_rate`] rather than instead of it, and the two are
+    /// not the same measurement. That one divides the frames every cycle asked for
+    /// by the host-time span, so it counts what the HAL requested and silently
+    /// omits any cycle whose buffer list was the wrong shape; this one reads the
+    /// device's own sample counter, which moves whatever this program did with the
+    /// buffer it was handed. A5 read +5 ppm from the first, and A7.1 exists
+    /// because that figure and the host's -15 ppm together predict a buffer that
+    /// empties while the one that was measured filled, so the two methods
+    /// agreeing on one run is worth more than either of them alone.
+    pub sink_rate: Option<Rate>,
+    /// Cycles whose timestamp carried only one half of the pair, and which are
+    /// therefore in neither figure above.
+    pub invalid_timestamps: u64,
 }
 
 impl Report {
@@ -236,6 +252,27 @@ impl fmt::Display for Report {
         if let Some(frames) = self.frames_requested {
             writeln!(f, "frames requested min {}", frames.min)?;
         }
+        match self.sink_rate {
+            Some(rate) => {
+                writeln!(
+                    f,
+                    "device ppm {:+.3} error {:.3} endpoints {:+.3} over {} readings and {:.3} s",
+                    rate.fitted_ppm,
+                    rate.error_ppm,
+                    rate.endpoints_ppm,
+                    rate.readings,
+                    rate.seconds
+                )?;
+                writeln!(
+                    f,
+                    "device host time scatter {:.2} samples estimates agree {}",
+                    rate.scatter_samples,
+                    yes_no(rate.estimates_agree())
+                )?;
+            }
+            None => writeln!(f, "device ppm unavailable")?,
+        }
+        writeln!(f, "device invalid timestamps {}", self.invalid_timestamps)?;
         writeln!(f, "measured frames per second {:.2}", self.measured_rate())?;
         writeln!(f, "requested seconds {:.3}", self.requested_seconds)?;
         writeln!(
@@ -305,6 +342,8 @@ impl Report {
 
 #[cfg(test)]
 mod tests {
+    use lanplay_audio_capture::Drift;
+
     use super::*;
     use crate::format::SampleKind;
 
@@ -317,6 +356,21 @@ mod tests {
             p99: value,
             max: value,
         }
+    }
+
+    /// Five minutes of IO cycles on a device running `ppm` against nominal.
+    ///
+    /// Generated rather than left absent, because absent is what a run that
+    /// measured no clock at all looks like and a fixture that prints that cannot
+    /// tell a correct report from one that never wrote the line.
+    fn drifted(ppm: f64) -> Option<Rate> {
+        let mut drift = Drift::new(48_000.0);
+        let rate = 48_000.0 * (1.0 + ppm / 1e6);
+        for cycle in 0..56_250u64 {
+            let position = cycle * 256;
+            drift.record(position as f64, (position as f64 / rate * 1e9) as u64);
+        }
+        drift.rate()
     }
 
     fn clean() -> Report {
@@ -356,6 +410,11 @@ mod tests {
             left_hz: 997.0,
             right_hz: 1997.0,
             samples_dropped: 0,
+            // Five minutes of a device running five parts per million fast, which
+            // is the figure A5 recorded for this endpoint, so the fixture prints
+            // the line rather than the absence of it.
+            sink_rate: drifted(5.0),
+            invalid_timestamps: 0,
         }
     }
 

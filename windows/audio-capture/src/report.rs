@@ -315,7 +315,7 @@ mod tests {
     }
 
     fn good_totals() -> Totals {
-        let mut account = Accounting::new();
+        let mut account = Accounting::new(48_000.0);
         let mut position = 4_800;
         let mut qpc = 100_000_000;
         for _ in 0..10 {
@@ -417,7 +417,7 @@ mod tests {
 
     #[test]
     fn a_run_of_nothing_but_silent_packets_says_so() {
-        let mut account = Accounting::new();
+        let mut account = Accounting::new(48_000.0);
         for index in 0..4u64 {
             account.record(&Packet {
                 device_position: index * 480,
@@ -436,7 +436,7 @@ mod tests {
 
     #[test]
     fn gaps_are_printed_as_a_count_and_a_total() {
-        let mut account = Accounting::new();
+        let mut account = Accounting::new(48_000.0);
         account.record(&Packet {
             device_position: 0,
             frames: 480,

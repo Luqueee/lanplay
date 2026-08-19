@@ -60,7 +60,7 @@ pub mod capture;
 #[cfg(windows)]
 pub mod session;
 
-pub use accounting::{Accounting, Deviation, Packet, Percentiles, Samples, Totals};
+pub use accounting::{Accounting, Deviation, Drift, Packet, Percentiles, Rate, Samples, Totals};
 pub use analysis::{ToneReport, analyse};
 pub use format::{MixFormat, RawWaveFormat, SampleKind};
 pub use goertzel::Tone;

@@ -19,6 +19,7 @@ use lanplay_audio_capture::analysis::hertz;
 use lanplay_tone_source::tone::CONTRACT;
 use serde_json::{Map, Value, json};
 
+use crate::pairs::{BUCKETS, Spread, bucket_floor_us};
 use crate::receive::{DELAY_BIAS_US, Receipt, WindowRow, unbias_micros};
 
 /// How far a decoded frequency may sit from the one that went in.
@@ -92,6 +93,52 @@ pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Optio
         observe("arrival_delay_max_ms", delay_ms(delay.max));
     }
 
+    // A6.1, split by which of a captured packet's two Opus frames a datagram
+    // carried. The classes are counted from the first frame this receiver
+    // accepted and are labelled by their offset from it and never by the words
+    // first and second: the RTP base is random by RFC 3550's requirement and this
+    // end joins a stream already running, so which offset is a packet's first
+    // frame is a bit that lives in the sender's envelope and nowhere here. The
+    // anchor is stated so that join is arithmetic somebody else can check.
+    //
+    // Both step distributions are stated, not one. A step is the lateness of the
+    // frame one position later less this frame's, and exactly one of the two
+    // classes steps within a captured packet while the other steps across the
+    // boundary between two of them. The intra-packet step is the quantity with a
+    // predicted value of -4.956 ms and the cross-packet step is its mirror, so a
+    // run where the two are near -5 and +5 has confirmed the cadence before
+    // anything is labelled, and a run where both are near zero has found a sender
+    // that spaced its pair.
+    let pair = &receipt.pair;
+    if let Some(anchor) = pair.anchor {
+        observe("pair_anchor_rtp", f64::from(anchor));
+    }
+    observe("pair_frame_samples", f64::from(pair.frame_samples));
+    observe("pair_samples_dropped", pair.samples_dropped as f64);
+    observe("pair_unanchored", pair.unanchored as f64);
+    for (index, class) in pair.classes.iter().enumerate() {
+        let key = |name: &str| format!("pair_class{index}_{name}");
+        observe(&key("offset_samples"), f64::from(class.offset_samples));
+        observe(&key("frames"), class.frames as f64);
+        observe(&key("late"), class.late as f64);
+        observe(&key("underruns"), class.underruns as f64);
+        if let Some(delay) = class.delay_us {
+            observe(&key("arrival_p50_ms"), signed_ms(delay.p50));
+            observe(&key("arrival_p95_ms"), signed_ms(delay.p95));
+            observe(&key("arrival_p99_ms"), signed_ms(delay.p99));
+            observe(&key("arrival_min_ms"), signed_ms(delay.min));
+            observe(&key("arrival_max_ms"), signed_ms(delay.max));
+        }
+        if let Some(step) = class.step_us {
+            observe(&key("step_pairs"), step.count as f64);
+            observe(&key("step_p50_ms"), signed_ms(step.p50));
+            observe(&key("step_p95_ms"), signed_ms(step.p95));
+            observe(&key("step_p99_ms"), signed_ms(step.p99));
+            observe(&key("step_min_ms"), signed_ms(step.min));
+            observe(&key("step_max_ms"), signed_ms(step.max));
+        }
+    }
+
     observe("frames_played", counts.played as f64);
     observe("plc_frames", counts.concealed as f64);
     observe("jitter_underruns", counts.underruns as f64);
@@ -133,6 +180,37 @@ pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Optio
         observe("ring_occupancy_p50_frames", occupancy.p50 as f64);
         observe("ring_occupancy_min_frames", occupancy.min as f64);
         observe("ring_occupancy_max_frames", occupancy.max as f64);
+    }
+
+    // A7.1's Mac half and its third measurement. Every one of these is absent
+    // rather than zero when the run could not state it: a rate of 0.000 ppm and a
+    // growth of 0 samples are both exactly what a perfect run looks like, so a
+    // run that measured no clock at all must not be able to print either.
+    if let Some(rate) = render.sink_rate {
+        observe("sink_ppm", rate.fitted_ppm);
+        observe("sink_ppm_endpoints", rate.endpoints_ppm);
+        observe("sink_ppm_error", rate.error_ppm);
+        observe("sink_rate_readings", rate.readings as f64);
+        observe("sink_rate_span_s", rate.seconds);
+        observe("sink_sample_time_samples", rate.samples);
+        observe("sink_host_time_scatter_samples", rate.scatter_samples);
+    }
+    observe(
+        "sink_invalid_timestamps",
+        render.invalid_timestamps as f64,
+    );
+
+    if let Some(invariant) = receipt.invariant() {
+        observe("samples_produced", invariant.produced as f64);
+        observe("samples_consumed", invariant.consumed as f64);
+        observe("samples_discarded", invariant.discarded as f64);
+        observe("samples_concealed_in", invariant.inserted as f64);
+        observe("buffer_growth_samples", invariant.growth() as f64);
+        observe("buffer_held_samples", invariant.held as f64);
+        // Zero is the only value that says the eight counters and the two
+        // occupancies agree, so this is the one number here that is a check on the
+        // instrument rather than a measurement of the link.
+        observe("buffer_invariant_residual", invariant.residual() as f64);
     }
 
     observe("samples_expected", continuity.expected as f64);
@@ -478,6 +556,61 @@ fn delay_ms(biased: u64) -> f64 {
     unbias_micros(biased) as f64 / 1_000.0
 }
 
+/// Microseconds that are already signed, as milliseconds.
+///
+/// Beside [`delay_ms`] rather than folded into it, because the two take their
+/// input in different units: the arrival delay lives in a store that could not
+/// hold a negative number and the pair figures come back already unbiased. One
+/// function taking both would be a function whose caller has to remember which
+/// kind it is holding.
+fn signed_ms(micros: i64) -> f64 {
+    micros as f64 / 1_000.0
+}
+
+/// One signed distribution, or the word for a run that measured none.
+///
+/// Absent rather than a row of zeros, because zero is the answer a sender that
+/// spaced its pair would give and a run that closed no pair at all must not be
+/// able to print it.
+fn spread(f: &mut fmt::Formatter<'_>, key: &str, values: Option<Spread>) -> fmt::Result {
+    match values {
+        Some(held) => writeln!(
+            f,
+            "{key} p50 {:.3} p95 {:.3} p99 {:.3} min {:.3} max {:.3} over {}",
+            signed_ms(held.p50),
+            signed_ms(held.p95),
+            signed_ms(held.p99),
+            signed_ms(held.min),
+            signed_ms(held.max),
+            held.count
+        ),
+        None => writeln!(f, "{key} none measured"),
+    }
+}
+
+/// The occupied buckets of a step histogram, as a floor in milliseconds against
+/// its count.
+///
+/// Only the occupied ones. Twenty-eight buckets of which two are filled is a
+/// line whose shape nobody can see, and the shape is the whole reason this is
+/// printed beside percentiles that already say where the middle is. The two
+/// tails are named rather than numbered, because a tail has no floor and a run
+/// with anything in one is a run whose steps left the span this audit expected.
+fn buckets(f: &mut fmt::Formatter<'_>, key: &str, counts: &[u64; BUCKETS]) -> fmt::Result {
+    write!(f, "{key}")?;
+    for (index, count) in counts.iter().enumerate() {
+        if *count == 0 {
+            continue;
+        }
+        match bucket_floor_us(index) {
+            Some(floor) => write!(f, " {}:{count}", floor / 1_000)?,
+            None if index == 0 => write!(f, " under:{count}")?,
+            None => write!(f, " over:{count}")?,
+        }
+    }
+    writeln!(f)
+}
+
 fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
 }
@@ -525,6 +658,41 @@ impl fmt::Display for Receipt {
             delay_ms(delay.max),
             delay_ms(delay.min)
         )?;
+
+        // A6.1. The two classes of the stream, and the step out of each of them.
+        //
+        // Labelled by offset from the anchor and not as first and second: the
+        // sender's RTP base is random and this end joined a stream already
+        // running, so the position of a class inside a captured packet is a bit
+        // that comes from the sender's envelope. `pair anchor rtp` is this end's
+        // half of that join and `rtp base` is the other.
+        writeln!(
+            f,
+            "pair anchor rtp {} frame samples {}",
+            self.pair
+                .anchor
+                .map_or("none".to_string(), |anchor| anchor.to_string()),
+            self.pair.frame_samples
+        )?;
+        for (index, class) in self.pair.classes.iter().enumerate() {
+            writeln!(
+                f,
+                "pair class {index} offset samples {} frames {} late {} underruns {}",
+                class.offset_samples, class.frames, class.late, class.underruns
+            )?;
+            spread(f, &format!("pair class {index} arrival ms"), class.delay_us)?;
+            spread(f, &format!("pair class {index} step ms"), class.step_us)?;
+            buckets(
+                f,
+                &format!("pair class {index} step histogram ms"),
+                &class.step_buckets,
+            )?;
+        }
+        writeln!(
+            f,
+            "pair measurements dropped {} unanchored {}",
+            self.pair.samples_dropped, self.pair.unanchored
+        )?;
         writeln!(f, "frames played {}", counts.played)?;
         writeln!(f, "plc frames {}", counts.concealed)?;
         writeln!(
@@ -568,6 +736,51 @@ impl fmt::Display for Receipt {
             hertz(producer.tone.left),
             hertz(producer.tone.right)
         )?;
+
+        // A7.1. The device's own rate and the samples invariant, kept together
+        // because neither means much without the other: the rate is a slope
+        // against this machine's monotonic clock and the invariant is a count of
+        // audio, and it is the second that says whether the first can be believed
+        // across the two machines.
+        match render.sink_rate {
+            Some(rate) => {
+                writeln!(
+                    f,
+                    "sink ppm {:+.3} error {:.3} over {} readings and {:.3} s",
+                    rate.fitted_ppm, rate.error_ppm, rate.readings, rate.seconds
+                )?;
+                writeln!(f, "sink ppm endpoints {:+.3}", rate.endpoints_ppm)?;
+                writeln!(f, "sink sample time samples {:.0}", rate.samples)?;
+                writeln!(
+                    f,
+                    "sink host time scatter {:.2} samples estimates agree {}",
+                    rate.scatter_samples,
+                    yes_no(rate.estimates_agree())
+                )?;
+            }
+            None => writeln!(f, "sink ppm unavailable")?,
+        }
+        writeln!(f, "sink invalid timestamps {}", render.invalid_timestamps)?;
+        match self.invariant() {
+            Some(invariant) => {
+                writeln!(
+                    f,
+                    "samples produced {} consumed {} discarded {} concealed in {}",
+                    invariant.produced,
+                    invariant.consumed,
+                    invariant.discarded,
+                    invariant.inserted
+                )?;
+                writeln!(
+                    f,
+                    "buffer growth {} samples held {} residual {}",
+                    invariant.growth(),
+                    invariant.held,
+                    invariant.residual()
+                )?;
+            }
+            None => writeln!(f, "samples produced unavailable, no frame was admitted")?,
+        }
 
         // Everything below is for a person reading the run rather than for the
         // harness parsing it, in the order somebody asking "why those numbers"
@@ -702,8 +915,13 @@ impl fmt::Display for WindowRow {
                 millis(held.min),
                 millis(held.max),
                 held.count
-            ),
-            None => write!(f, " occupancy none"),
+            )?,
+            None => write!(f, " occupancy none")?,
         }
+        // The same buffers in samples rather than in frame-quantised
+        // milliseconds, and cumulative rather than this window's. A slope through
+        // this column is A7.1's drift; the occupancy beside it is quantised to one
+        // frame and cannot carry one at any run length.
+        write!(f, " held {}", self.held_samples)
     }
 }
