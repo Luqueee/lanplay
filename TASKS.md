@@ -229,6 +229,76 @@ p10-p90 intervals intersect at exactly -68 to -68 dBm, a degenerate band, and th
 288 to 576 Mbps, a factor of 2.00 against a limit of 2.0. That sweep's conclusion stands and it was
 never robust.
 
+### A8 answered: no target at or below 20 ms holds, and the tail is the reason
+
+Thirty-four minutes, eleven arms, on the steadiest link this project has measured: channel 36 at
+80 MHz with median signal -40 to -43 dBm and **every arm negotiating a median 1200 Mbps**, a factor of
+1.00 across the sweep. Evidence in `results/audio/jitter-target-a8/`.
+
+| target | arms | continuity hole |
+|---|---|---|
+| 5 ms | 2 | 0.196, 2.087 % |
+| 10 ms | 2 | 2.267, 7.442 % |
+| 15 ms | 3 | 0.258, 0.838, 2.179 % |
+| 20 ms | 2 | 1.179, 7.142 % |
+
+**No candidate at or below 20 ms**, and the targets are not extended to 30, 40 or 80 ms - that is a
+decision about the latency budget and not this gate's to take.
+
+What makes the answer trustworthy is what did not vary. The margins ascended with the nominal targets
+in every pass - 8.45, 11.87, 16.86, 21.90 and 7.64, 11.89, 18.22, 21.94 ms - so no anchor draw
+shuffled the effective targets and the sweep swept what it meant to. The arms were comparable by the
+mechanism that produces the tail. And the holes still refuse to order by target, because what varies
+is **burst incidence per window**: worst arrivals of 78, 61, 76 and 221 ms in one pass against 24, 79,
+19 and 91 in another. The worst was 221 ms, **eleven times the largest target under test**. A quantity
+whose sampling noise exceeds the effect being measured cannot rank the effect, and no target inside
+this phase's budget is within reach of a 221 ms arrival.
+
+### What A8 says about how to ask the question
+
+Not "run longer arms". If a 120 s arm sees between zero and three bursts, averaging that out needs
+arms an order of magnitude longer - four targets by three passes by twenty minutes is four hours per
+sweep - and it would still rank one draw of a heavy tail against another.
+
+The distribution is the primitive and the target is a function of it. One long clean run gives the
+whole arrival-delay curve, and the late fraction at any candidate target is read off that curve
+without an arm each: `late(T) = P(arrival delay > T)`. Every target in the same population, no
+between-arm comparability problem to solve, and the burst structure visible instead of averaged away.
+`Derive before building` is this repository's own rule and a sweep of four targets is the built
+version of an arithmetic question.
+
+What that curve is also the right instrument for is the question A8 could not reach: whether the
+bursts are a tail of one distribution or a second mechanism arriving occasionally. Three arms with a
+worst arrival near 80 ms and one at 221 ms is the shape of two mechanisms, and if it is, the target
+that absorbs the first has nothing to do with the one that would absorb the second.
+
+### Three instrument defects, each found by a refusal rather than by review
+
+**The interpretability identity was an approximation.** `late == underruns == concealed` is what A6's
+clean run measured, and `receive.rs` has `Pull::Conceal | Pull::Underrun` both concealing with only
+the second counted as a starve. So the identity holds only where there is no overrun and no startup
+starvation. The control arm had 66 underruns with no late frame behind them: 18 frames thrown away by
+two buffer overruns and 48 concealed before the first datagram arrived. Replaced by three identities
+that are exact on the control arm and the clean 600 s run alike - starves equal concealments, the hole
+equals concealments plus overrun casualties, discards equal late plus overrun casualties - each shown
+firing against a single-field mutation.
+
+**Zero loss was assumed rather than required.** Those identities then refused t20-p3, which had lost
+382 datagrams of 23997, **1.59 per cent - the first real packet loss this project has measured**, on
+the best link of the session. A frame that never arrived is neither played, concealed nor discarded,
+so no identity can close. Loss is now a criterion stated before the arithmetic, refused with the radio
+named instead of the buffer blamed. It is the established state of this link - 0 of 120005 in A6, 0 of
+3000 in A3 - and the decision to leave FEC and NACK out of scope depends on it.
+
+**The comparability check was degenerate.** It intersected the arms' p10-to-p90 signal intervals. Those
+arms were flat to a decibel inside themselves, p10 and p90 identical, at either -40 or -43 dBm, so the
+intersection was empty by construction and the criterion reduced to *every arm at the same integer
+dBm* - a gate that passes by luck, which is the exact shape of error the redesign was meant to remove.
+Meanwhile all of them negotiated 1200 Mbps: three decibels moved the rate not at all. The ratio
+between the extreme per-arm median rates decides now, against the measured factor of two, and the
+signal is recorded without deciding. Porting the intersection onto the rate was tried first and has
+the same degeneracy.
+
 ### A7 answered: both clock figures were right and the prediction crossed a boundary
 
 Measured directly over a 1200 s arm, each rate against its own machine's monotonic clock and nothing
@@ -285,27 +355,17 @@ identity rather than as an assumption.
 
 ### The order from here
 
-The stable link exists and A6 has been run on it, so the question is no longer whether a base
-condition can be had. It is that two numbers contradict themselves, and neither a sender change nor
-a target sweep means anything until they stop.
+A6.1, A7 and A8 have all answered. What is left is not another sweep.
 
 ```
-A6.1  pair timing audit      first against second frame: sample and RTP
-                             timestamps, arrival margin, late counts, and the
-                             per-pair lateness difference, which has a
-                             predicted value of -4.956 ms
-A7.1  clock rate audit       host device-position against QPC, Mac sampleTime
-                             against hostTime, and samples produced against
-                             samples consumed; all three must close and agree
-                             in sign
-A6.2  SKIPPED - A6.1 found no cadence defect, so there is nothing to fix
-A8    5, 10, 15 and 20 ms on a link that holds, with the occupancy instrument
+A8.1  the arrival-delay distribution over one long clean run, from which
+      late(T) is read for every candidate target at once
+A8.2  and whether the 221 ms arrivals are the tail of that distribution or a
+      second mechanism, because the answer changes what a target can buy
 ```
 
-Both audits have answered. A6.1 cleared the sender at -4.996 ms per pair against a required -4.956,
-and A7 closed to +238.4 samples predicted against +238 +-75 observed once the QPC-to-mach term was
-measured rather than assumed away. A8 is the next thing to run, and it needs `tools/radio-preflight.sh`
-to pass first.
+Nothing else starts until A8.1 exists. A target chosen without that curve is a target chosen from one
+draw of a heavy tail.
 
 ### What stays out until the data asks for it
 
