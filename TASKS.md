@@ -168,6 +168,67 @@ concealments and underruns**, never on arrival-delay percentiles. If every targe
 answer on this link and the targets are **not** extended to 30, 40 or 80 ms - that would be a product
 decision about the latency budget, taken elsewhere.
 
+### What A8's preconditions became, and why the projection stopped deciding
+
+Two questions were being asked as one, and only the categorical half belongs before a run.
+
+**Before the run, and binding: the channel.** Channel 36 at 80 MHz occupies 5170 to 5250 MHz, and
+5150-5250 is the only WAS/RLAN band in Spain with no DFS obligation - CNAF note UN-128 as rewritten by
+Orden ETD/625/2023 imposes DFS on 5250-5350 and 5470-5725, pointing at EN 301 893 v2.1.1, whose radar
+detection attaches to any channel whose nominal bandwidth falls partly or completely within either
+range. So the non-DFS set is **36, 40, 44 and 48**, the 36/40/44/48 block is the only non-DFS 80 MHz
+configuration available here, and channel 100 - centre 5500, 80 MHz span 5490 to 5570 - is not one of
+them. The width is required alongside the channel because the obligation attaches to the occupied
+span: 160 MHz anchored at 36 reaches 5330 and is a radar band. A8's twelve committed arms all ran on
+36 at 80 MHz with `radar_band 0`, so this is the baseline recovered rather than a new preference.
+
+`radar_band` is **this repository's own derived column**, not anything the OS reports. CoreWLAN exposes
+`channelNumber`, `channelWidth` and `channelBand` and nothing else; neither "radar" nor "dfs" occurs
+anywhere in its headers. `Association::uses_radar_band` computes it by intersecting the occupied span
+against the two ranges with strict inequalities, which is why the 36/80 block - whose upper edge
+touches 5250 exactly, the same number that starts the first DFS range - is correctly not flagged.
+`crates/capabilities` already tests that boundary and the 160 MHz case beside it.
+
+**Not before the run, and no longer deciding: whether the signal will hold still.** That criterion fits
+a line to a two-minute window and extrapolates it to ten, and this radio was measured at -0.593,
++6.907 and -1.474 dB/min in three consecutive windows on one evening. A line through any part of a
+swing projects a disaster that may not arrive. Worse, the 3 dB it is judged against was derived as the
+spread of median signal **between** A8's arms, so applying it to a projection inside one window put a
+between-arm number in a within-window place. The sweep is counterbalanced so that a monotone drift
+contributes a term proportional to position, which cancels; what it cannot survive is arms measured in
+different regimes. So the projection is downgraded to a note for this caller, and the question it was
+standing in for is asked of the arms themselves.
+
+**After the run, and binding: overlap.** Every arm records signal and rate at p10, p50 and p90 as well
+as its extremes, plus how many channels it saw. The criterion is that the intersection of the arms'
+p10-to-p90 signal intervals is non-empty - a band of signal every arm actually spent time in. It needs
+no threshold: either such a band exists or it does not. Arms at -58..-61 and -70..-78 have none and are
+two links; arms at -57..-62, -58..-63, -57..-61 and -59..-63 intersect over -59..-61 and are one link
+breathing, which is the most this radio has ever offered. Both are exercised as fixtures and refuse and
+pass respectively. A channel change **inside** an arm refuses that arm outright: it is two links
+wearing one name, and every percentile of it is a mixture.
+
+The `RSSI_SPREAD_DB=8` that used to guard this is gone. Applied to the spread of arm means it admitted
+two arms with equal means and disjoint ranges, and refused four arms whose ranges nested.
+
+Two defects found while wiring this, both in the instrument rather than the pipeline:
+
+The comparability checks **only ran when the outcome was mixed**. A sweep in which every target broke
+skipped all of them and then printed "no target between 5 and 20 ms held continuity" - a statement
+about a link, made by arms that had never been shown to share one. The strongest claim this gate can
+print was resting on the weakest evidence it collects. The radio checks now run unconditionally, and
+incomparability refuses **before** the ranking fails, because a ranking of arms from different regimes
+is not repaired by knowing how different they were.
+
+And the first version of the per-arm distribution used `asort`, which is a gawk extension; this
+machine's awk is the one true awk and does not have it. It would have refused every arm for having no
+rows. It is python now.
+
+Re-checked against the committed A8 record, which the new criteria accept **by a hair**: the arms'
+p10-p90 intervals intersect at exactly -68 to -68 dBm, a degenerate band, and their median rates run
+288 to 576 Mbps, a factor of 2.00 against a limit of 2.0. That sweep's conclusion stands and it was
+never robust.
+
 ### A7 answered: both clock figures were right and the prediction crossed a boundary
 
 Measured directly over a 1200 s arm, each rate against its own machine's monotonic clock and nothing

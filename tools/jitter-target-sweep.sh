@@ -270,7 +270,20 @@ CONTROL_FLOOR_PCT=10
 # What movement makes the arms uncomparable. Each is derived in the header above and each
 # is printed with its measured value when it fires.
 RATE_FACTOR=2.0
-RSSI_SPREAD_DB=8
+
+# The link this project validated for audio, and the only non-DFS 80 MHz configuration
+# available in Spain. Moving from channel 116 to channel 36 took late access units from
+# 69/min to 5.5/min, which is why 36 is the baseline rather than merely a preference.
+BASELINE_CHANNEL=36
+BASELINE_WIDTH_MHZ=80
+
+# There was an RSSI_SPREAD_DB=8 here, applied to the spread of the arms' mean signal. It is
+# gone because it asked the wrong question twice over. Eight decibels of spread between
+# means admits two arms with the same mean and disjoint ranges - two links - and refuses
+# four arms whose ranges sit inside one another, which is one link breathing and is the best
+# this radio has ever offered. What replaced it is the intersection of the arms' own
+# p10-to-p90 intervals, which needs no threshold at all: either a band of signal is common
+# to every arm or none is.
 
 # How much longer the host end runs than the window being measured. One arithmetic with the
 # receiver's first-packet wait rather than two guesses: the receiver anchors its window on
@@ -450,25 +463,45 @@ PY
     echo "radio     host -> en0 $LOCAL_IP:$PORT"
     echo "device    rendering through $DEVICE"
 
-    # ---- and whether the link will hold still long enough to rank anything ----
+    # ---- the link this sweep is allowed to run on ----------------------------
     #
-    # The environment probe above answers whether a radio exists. It has no opinion on
-    # whether that radio is about to move, and this sweep's whole output is a comparison
-    # between arms taken forty minutes apart: A6 was measured twice on the same
-    # association, once at -52 dBm and 1200 Mbps and once falling from -70 to -78 at 288 to
-    # 432 Mbps, and the second produced a continuity figure 1.8 times the first. Ranking
-    # four targets across a link doing that ranks the link.
+    # Two different questions, and only one of them belongs before the run.
     #
-    # So the projection is asked for once, before any arm runs, from the instrument that
-    # measures it rather than from a second reading of the same idea here. A refusal here
-    # costs two minutes and ends the run; the alternative costs forty and produces a
-    # ranking of the weather.
+    # The one that does is categorical. Channel 36 at 80 MHz occupies 5170 to 5250 MHz, and
+    # 5150-5250 is the only WAS/RLAN band in Spain carrying no DFS obligation: CNAF note
+    # UN-128, as rewritten by Orden ETD/625/2023, imposes DFS on 5250-5350 and 5470-5725,
+    # pointing at EN 301 893 v2.1.1, whose radar detection applies to any channel whose
+    # nominal bandwidth falls partly or completely within either range. So the non-DFS set
+    # here is 36, 40, 44 and 48, the 36/40/44/48 block is the only non-DFS 80 MHz
+    # configuration available, and channel 100 - centre 5500, 80 MHz span 5490 to 5570 - is
+    # inside 5470-5725 and is not one of them. A DFS channel may be told to vacate in the
+    # middle of a forty-minute measurement, and no arithmetic downstream survives that.
+    # The width is required as well as the channel because the obligation attaches to the
+    # occupied span: 160 MHz anchored at 36 reaches 5330 and is a radar band.
+    #
+    # The question that does NOT belong before the run is whether the signal will hold
+    # still. That criterion fits a line to a two-minute window and extrapolates it to ten,
+    # and this radio has been measured at -0.593, +6.907 and -1.474 dB/min in three
+    # consecutive windows on one evening: a line through any part of a swing projects a
+    # disaster that may not arrive. Worse, the 3 dB it is judged against was derived as the
+    # spread of median signal BETWEEN A8's arms, so applying it to a projection inside one
+    # window puts a between-arm number in a within-window place.
+    #
+    # This sweep is counterbalanced precisely so that a monotone drift contributes a term
+    # proportional to position, which cancels. What it cannot survive is arms measured in
+    # different regimes, and that is a question about the arms, answered from their own
+    # traces after they run - the overlap check in the report below. So the projection is
+    # downgraded to a note here, deliberately and in one place, and the preflight refuses if
+    # its control arm can then no longer demonstrate a criterion that still binds.
 
-    if ! "$REPO/tools/radio-preflight.sh" >"$OUT/radio-preflight.txt" 2>&1; then
+    if ! REQUIRE_CHANNEL="$BASELINE_CHANNEL" REQUIRE_WIDTH="$BASELINE_WIDTH_MHZ" \
+        REQUIRE_NON_DFS=1 ADVISORY="the signal holds still for the run" \
+        "$REPO/tools/radio-preflight.sh" >"$OUT/radio-preflight.txt" 2>&1; then
         sed 's/^/  /' "$OUT/radio-preflight.txt"
-        refuse "the link was not steady enough to rank targets across; the preflight above says by how much"
+        refuse "the link is not the one this project validated, or the window could not be read;" \
+            "the preflight above says which criterion and why"
     fi
-    grep -E "^(preflight|NOTE)" "$OUT/radio-preflight.txt" | sed 's/^/  /'
+    grep -E "^(PASS|NOTE|preflight)" "$OUT/radio-preflight.txt" | sed 's/^/  /'
 
     # ---- both ends built where they run -------------------------------------
 
@@ -701,21 +734,62 @@ PY
             values+=("$value")
         done
 
-        # The arm's own conditions, out of its own trace. Mean, and the range beside it,
-        # because a mean of a link that fell 8 dB across the arm is a number that describes
-        # neither end of it.
+        # The arm's own conditions, out of its own trace, as a distribution and not as a
+        # mean. A mean of a link that fell 8 dB across an arm describes neither end of it,
+        # and the question the ranking turns on is not what each arm averaged but whether
+        # the arms overlap: two arms with the same mean and disjoint ranges were measured on
+        # two links, and two arms 4 dB apart whose ranges sit inside one another were not.
+        # So p10 and p90 as well as the extremes, on signal and on negotiated rate, and the
+        # count of distinct channels the arm saw.
+        # In python because `asort` is a gawk extension and this machine's awk is the one
+        # true awk, which does not have it: the version that used it ran, printed nothing
+        # anybody read, and would have refused every arm for having no rows.
         local radio_summary
-        radio_summary="$(awk -F, 'NR > 1 && NF >= 5 {
-            rssi += $3; rate += $5; n++
-            if (lo == "" || $3 < lo) lo = $3
-            if (hi == "" || $3 > hi) hi = $3
-        }
-        END {
-            if (n == 0) { print "absent"; exit }
-            printf "%.2f,%s,%s,%.1f,%d", rssi / n, lo, hi, rate / n, n
-        }' "$OUT/$arm.radio.csv")"
+        radio_summary="$(python3 - "$OUT/$arm.radio.csv" <<'PY'
+import csv
+import sys
+
+rows = [row for row in csv.DictReader(open(sys.argv[1])) if row.get("rssi_dbm")]
+if not rows:
+    print("absent")
+    raise SystemExit
+
+
+def at(values, q):
+    """Nearest-rank, on the sorted sample. No interpolation: these are integer
+    decibels and integer rates off a driver, and a p10 of -60.5 dBm is a number
+    the radio never reported."""
+    return values[min(len(values) - 1, max(0, int(q * (len(values) - 1) + 0.5)))]
+
+
+signal = sorted(int(row["rssi_dbm"]) for row in rows)
+rate = sorted(float(row["tx_rate_mbps"]) for row in rows)
+channels = {row["channel"] for row in rows}
+widths = {row["width_mhz"] for row in rows}
+bands = {row["radar_band"] for row in rows}
+print(
+    "{:.2f},{},{},{},{},{:.1f},{:.0f},{:.0f},{:.0f},{:.0f},{},{},{},{}".format(
+        sum(signal) / len(signal), signal[0], at(signal, 0.10), at(signal, 0.50), at(signal, 0.90),
+        sum(rate) / len(rate), rate[0], at(rate, 0.10), at(rate, 0.50), at(rate, 0.90),
+        len(rows), len(channels), len(widths), "".join(sorted(bands)),
+    )
+)
+PY
+)"
         [ "$radio_summary" != "absent" ] ||
             refuse "arm $arm left a radio trace with no rows in it, so its conditions were not recorded"
+
+        # A channel change inside an arm is not a movement to be measured, it is two links
+        # wearing one arm's name, and every percentile above it becomes a mixture of the two.
+        local arm_channels arm_bands
+        arm_channels="$(printf '%s' "$radio_summary" | cut -d, -f12)"
+        arm_bands="$(printf '%s' "$radio_summary" | cut -d, -f14)"
+        [ "$arm_channels" = "1" ] ||
+            refuse "arm $arm ran across $arm_channels channels, so its numbers are a mixture of two links" \
+                "and neither its own percentiles nor its place in the ranking means anything"
+        [ "$arm_bands" = "0" ] ||
+            refuse "arm $arm ran on a channel under a DFS obligation (radar band $arm_bands), which can be" \
+                "told to vacate mid-arm; the validated baseline for this AP is a non-DFS channel"
 
         # ---- the depth this arm was handed, as a control on the ranking ---------
         #
@@ -764,7 +838,9 @@ PY
     {
         printf 'arm,pass,target_ms,verdict,sender_verdict'
         for key in $RECEIVER_KEYS; do printf ',%s' "$key"; done
-        printf ',rssi_mean_dbm,rssi_min_dbm,rssi_max_dbm,rate_mean_mbps,radio_rows'
+        printf ',rssi_mean_dbm,rssi_min_dbm,rssi_p10_dbm,rssi_p50_dbm,rssi_p90_dbm'
+        printf ',rate_mean_mbps,rate_min_mbps,rate_p10_mbps,rate_p50_mbps,rate_p90_mbps'
+        printf ',radio_rows,radio_channels,radio_widths,radar_bands'
         printf ',occupancy_start_ms,occupancy_end_ms,occupancy_travel_ms,occupancy_slope_ms_per_window\n'
     } >"$ARMS"
 
@@ -828,19 +904,18 @@ fi
 # captured packets were once read as none.
 
 set +e
-python3 - "$ARMS" "$STEP" "$REFERENCE" "$CONTROL_FLOOR_PCT" "$RATE_FACTOR" "$RSSI_SPREAD_DB" "$ARM_S" <<'PY'
+python3 - "$ARMS" "$STEP" "$REFERENCE" "$CONTROL_FLOOR_PCT" "$RATE_FACTOR" "$ARM_S" <<'PY'
 import csv
 import statistics
 import sys
 
-arms_path, step, reference, control_floor, rate_factor, rssi_spread, arm_s = (
+arms_path, step, reference, control_floor, rate_factor, arm_s = (
     sys.argv[1],
     float(sys.argv[2]),
     int(sys.argv[3]),
     float(sys.argv[4]),
     float(sys.argv[5]),
     float(sys.argv[6]),
-    float(sys.argv[7]),
 )
 
 PASS, FAIL, REFUSE = 0, 1, 2
@@ -851,9 +926,10 @@ with open(arms_path) as handle:
 # Every column but the name is a number, and the names come from the row rather than from a
 # list here: a second copy of the writer's columns is a second thing to keep in step, which
 # is how a gate came to read `margin_ms` after a probe renamed it from `target_ms`.
+TEXT = {"arm", "radar_bands"}
 for row in rows:
     for name, value in row.items():
-        if name != "arm":
+        if name not in TEXT:
             row[name] = float(value)
 
 control = [row for row in rows if row["arm"] == "control"]
@@ -882,7 +958,8 @@ def spread(values):
 
 findings = []
 refusals = []
-failures = []
+pipeline_failures = []
+ranking_failures = []
 
 # --- must not be zero: that the arms happened at all -------------------------
 #
@@ -1008,8 +1085,11 @@ for row in sweep:
     findings.append(
         f"{row['arm']}: {hole_pct(row):.3f} % hole, {late_pct(row):.3f} % late, margin "
         f"{margin(row):.2f} ms, worst arrival {row['arrival_delay_max_ms']:.1f} ms,\n"
-        f"          radio {row['rssi_mean_dbm']:.1f} dBm mean over {row['rssi_min_dbm']:.0f} to "
-        f"{row['rssi_max_dbm']:.0f}, {row['rate_mean_mbps']:.0f} Mbps over {row['radio_rows']:.0f} samples"
+        f"          radio p10/p50/p90 {row['rssi_p10_dbm']:.0f}/{row['rssi_p50_dbm']:.0f}/"
+        f"{row['rssi_p90_dbm']:.0f} dBm from {row['rssi_min_dbm']:.0f}, rate p10/p50/p90 "
+        f"{row['rate_p10_mbps']:.0f}/{row['rate_p50_mbps']:.0f}/{row['rate_p90_mbps']:.0f} Mbps\n"
+        f"          over {row['radio_rows']:.0f} samples on {row['radio_channels']:.0f} channel(s), "
+        f"occupancy {row['occupancy_start_ms']:.0f} to {row['occupancy_end_ms']:.0f} ms"
     )
 
 if control:
@@ -1023,10 +1103,60 @@ if control:
 # --- the sender end, which says the source was the same each time ------------
 sender_bad = [row["arm"] for row in sweep if row["sender_verdict"] != 0]
 if sender_bad:
-    failures.append(
+    pipeline_failures.append(
         "the host end did not hold its own criteria on "
         + ", ".join(sender_bad)
         + ", so the audio those arms were measured on had already lost something before the radio"
+    )
+
+# Whether the arms shared a link at all, and this is NOT under the mixed-outcome guard the
+# ordering checks sit under. It was, and that was wrong: a sweep in which every target broke
+# skipped every comparability test and then reported "no target between 5 and 20 ms held
+# continuity", which is a statement about a link. Arms that did not share one have no such
+# statement to make, and the strongest claim this gate can print was resting on the weakest
+# evidence it collects.
+# And the link itself, which is what those disagreements are usually made of. Asked as
+# overlap and not as flatness. A sweep does not need a flat radio - it is counterbalanced
+# so that a monotone drift contributes a term proportional to position, which cancels -
+# and requiring 3 dB of stillness across forty minutes builds a gate that passes by luck.
+# What it cannot survive is targets measured in different regimes, and that is a question
+# about whether the arms' distributions sit on top of one another.
+#
+# So: the intersection of every arm's own p10-to-p90 interval. Non-empty means there is a
+# band of signal every arm actually spent time in, whatever each one's mean was. Two arms
+# at -58..-61 and -70..-78 have none and are two links; four arms at -57..-62, -58..-63,
+# -57..-61 and -59..-63 intersect over -59..-61 and are one link breathing, which is the
+# most this radio has ever offered.
+rates = [row["rate_p50_mbps"] for row in sweep]
+lows = [row["rssi_p10_dbm"] for row in sweep]
+highs = [row["rssi_p90_dbm"] for row in sweep]
+overlap_low, overlap_high = max(lows), min(highs)
+if min(rates) > 0 and max(rates) / min(rates) > rate_factor:
+    refusals.append(
+        f"the arms negotiated median PHY rates from {min(rates):.0f} to {max(rates):.0f} Mbps, a "
+        f"factor of {max(rates) / min(rates):.2f} against the {rate_factor:.0f} this gate allows. "
+        "Airtime per datagram is inversely proportional to PHY rate and airtime is the mechanism "
+        "that produces the tail a target is chosen against, so those are two links and not one "
+        "link breathing"
+    )
+if overlap_high < overlap_low:
+    worst_low = max(range(len(sweep)), key=lambda i: lows[i])
+    worst_high = min(range(len(sweep)), key=lambda i: highs[i])
+    refusals.append(
+        f"no band of signal is common to every arm: {sweep[worst_low]['arm']} spent its middle "
+        f"eighty per cent at or above {lows[worst_low]:.0f} dBm while {sweep[worst_high]['arm']} "
+        f"spent its own at or below {highs[worst_high]:.0f}, so the two never shared a link and the "
+        "targets they carry were measured in different regimes. This is asked as overlap rather "
+        "than as flatness on purpose: an arm may move, so long as every arm moved through the "
+        "same place"
+    )
+else:
+    findings.append(
+        f"every arm spent its middle eighty per cent inside {overlap_low:.0f} to "
+        f"{overlap_high:.0f} dBm,\n          a band {overlap_high - overlap_low:.0f} dB wide common "
+        f"to all {len(sweep)} of them, with median rates "
+        f"{min(rates):.0f} to {max(rates):.0f} Mbps;\n          the arms are comparable and the "
+        "ranking above is about targets rather than about the link"
     )
 
 # --- what the outcome is, before any comparison is attempted ----------------
@@ -1043,7 +1173,7 @@ mixed = winner is not None and not all(held.values())
 
 if winner is None:
     worst = max(row["arrival_delay_max_ms"] for row in sweep)
-    failures.append(
+    ranking_failures.append(
         "no target between {:.0f} and {:.0f} ms held continuity: the hole runs from {:.3f} % to {:.3f} % "
         "of samples expected across the sweep, so A8 has no answer on this link and the choice is owed "
         "rather than read off a ranking of failures. The tail is the term - the "
@@ -1141,31 +1271,28 @@ if mixed:
             "nominal targets read off arms whose effective targets were shuffled by a whole step is an "
             "ordering of the shuffle"
         )
-    # And the link itself, which is what those disagreements are usually made of.
-    rates = [row["rate_mean_mbps"] for row in sweep]
-    signals = [row["rssi_mean_dbm"] for row in sweep]
-    if min(rates) > 0 and max(rates) / min(rates) > rate_factor:
-        refusals.append(
-            f"the arms ran at mean PHY rates from {min(rates):.0f} to {max(rates):.0f} Mbps, a factor of "
-            f"{max(rates) / min(rates):.2f} against the {rate_factor:.0f} this gate allows. Airtime per "
-            "datagram is inversely proportional to PHY rate and airtime is the mechanism that produces "
-            "the tail a target is chosen against, so those are two links and not one link breathing"
-        )
-    if spread(signals) > rssi_spread:
-        refusals.append(
-            f"the arms' mean signal ran from {min(signals):.1f} to {max(signals):.1f} dBm, a spread of "
-            f"{spread(signals):.1f} dB against the {rssi_spread:.0f} dB this gate allows - which is what "
-            "A6's trace moved inside a single arm, so a wider spread between arm means is arms sitting "
-            "on different links"
-        )
 
 print()
 for finding in findings:
     print(f"  FINDING {finding}")
 
 print()
-if failures:
-    for failure in failures:
+
+# Three outcomes and the order between them is the whole point, because the same arms can
+# produce two of them and only one is true.
+#
+# A broken sender comes first: the audio had already lost something before it reached the
+# radio, so neither a comparison nor a ranking describes anything.
+#
+# Then incomparability, and it precedes the ranking deliberately. "No target held" is a
+# statement about a link, and arms that did not share a link have no such statement to make;
+# reporting it as a failure would put the strongest available claim on the weakest available
+# evidence. Nothing is corrected statistically afterwards either - a ranking of arms measured
+# in different regimes is not repaired by knowing how different they were.
+#
+# The ranking failure comes last, when the arms were comparable and none of them held.
+if pipeline_failures:
+    for failure in pipeline_failures:
         print(f"FAIL {failure}")
     sys.exit(FAIL)
 if refusals:
@@ -1175,6 +1302,10 @@ if refusals:
     print("      Neither a pass nor a failure: the arms were measured and the numbers above stand,")
     print("      but they cannot be ranked against each other and no target is chosen here.")
     sys.exit(REFUSE)
+if ranking_failures:
+    for failure in ranking_failures:
+        print(f"FAIL {failure}")
+    sys.exit(FAIL)
 
 # The latency the winner costs above the smallest target under test, named because that is
 # the whole subject: a target is a bill every frame pays forever, and the arms below the

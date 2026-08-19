@@ -37,6 +37,28 @@ COVERAGE_MIN = 0.99
 
 PASS, REFUSED = 0, 2
 
+# What a caller may add and what a caller may downgrade. Both are policy and
+# neither has a default, so this gate on its own behaves exactly as it did.
+#
+# The additions are categorical: the channel a baseline was validated on, its
+# width, and whether the channel carries a DFS obligation. Nothing is projected
+# to state them, which is why they can be required of a short window.
+#
+# The downgrade exists because one criterion here answers a question a
+# counterbalanced experiment has already handled. `the signal holds still for
+# the run` fits a line to a window and extrapolates it, and this radio has been
+# measured swinging in both directions - -0.593, +6.907 and -1.474 dB/min in
+# three consecutive windows on one evening - so a line through any part of that
+# projects a disaster that may not arrive, or misses one that does. Worse, the
+# 3 dB it is judged against was derived as the spread of median signal BETWEEN
+# A8's arms, so applying it to a projection inside one window puts a
+# between-arm number in a within-window place. A caller whose design compares
+# arms should require the comparison of the arms instead, and say so here.
+ADVISORY = [name for name in os.environ.get("ADVISORY", "").split(",") if name]
+REQUIRE_CHANNEL = os.environ.get("REQUIRE_CHANNEL", "")
+REQUIRE_WIDTH = os.environ.get("REQUIRE_WIDTH", "")
+REQUIRE_NON_DFS = os.environ.get("REQUIRE_NON_DFS", "") == "1"
+
 
 def read(path):
     with open(path, newline="") as handle:
@@ -117,9 +139,16 @@ def band(m):
     The first entry of each tuple is the name the control arm is checked
     against, so that a control refusing for the wrong reason is caught rather
     than counted.
+
+    The last three are only present when a caller asked for them, and they are
+    categorical rather than projected: a channel number either is the one a
+    baseline was validated on or is not, and no extrapolation is involved in
+    saying so. They exist because the projected criterion answers the wrong
+    question for a counterbalanced experiment, and the argument is in the gate
+    below rather than here.
     """
     run_min = m["run_s"] / 60.0
-    return [
+    criteria = [
         (
             "the window was sampled",
             m["coverage"] >= COVERAGE_MIN,
@@ -158,6 +187,33 @@ def band(m):
         ),
     ]
 
+    if REQUIRE_CHANNEL:
+        criteria.append(
+            (
+                "the channel is the validated one",
+                m["channels"] == [REQUIRE_CHANNEL],
+                f"channel {'/'.join(m['channels'])} against {REQUIRE_CHANNEL} asked for",
+            )
+        )
+    if REQUIRE_WIDTH:
+        criteria.append(
+            (
+                "the width is the validated one",
+                m["widths"] == [REQUIRE_WIDTH],
+                f"{'/'.join(m['widths'])} MHz against {REQUIRE_WIDTH} asked for",
+            )
+        )
+    if REQUIRE_NON_DFS:
+        criteria.append(
+            (
+                "the channel carries no DFS obligation",
+                m["radar_bands"] == ["0"],
+                f"radar band {'/'.join(m['radar_bands'])}; a channel under a DFS obligation can "
+                f"be told to vacate mid-measurement and nothing downstream survives that",
+            )
+        )
+    return criteria
+
 
 def label(m):
     """What the run has to carry, because a run whose conditions were not
@@ -195,7 +251,13 @@ def report(title, m, verdicts):
           f"dB/min, scatter {m['scatter_db']:.2f} dB about it")
     print()
     for name, held, detail in verdicts:
-        print(f"  {'hold' if held else 'OUT ':<5} {name:<36} {detail}")
+        if held:
+            state = "hold"
+        elif name in ADVISORY:
+            state = "NOTE"
+        else:
+            state = "OUT "
+        print(f"  {state:<5} {name:<36} {detail}")
     print()
 
 
@@ -231,18 +293,44 @@ def gate(argv):
         control_verdicts,
     )
 
+    # An advisory name that matches nothing is a caller who thinks a criterion
+    # has been downgraded and is wrong about it - the most expensive way to be
+    # wrong here, because the run proceeds believing it was checked.
+    names = [name for name, _, _ in verdicts]
+    unknown = [name for name in ADVISORY if name not in names]
+    if unknown:
+        print(f"REFUSE the caller downgraded {', '.join(repr(name) for name in unknown)}, which is not a")
+        print("       criterion this gate has. Nothing was downgraded and nothing was checked")
+        print("       in its place, so the run would proceed believing in a protection that")
+        print(f"       does not exist. The names are: {', '.join(names)}")
+        return REFUSED
+
     # A control that refuses for any reason at all would be satisfied by a
     # harness that cannot read a file. The deciding criterion has to be the one
     # that fired, or this arm certifies nothing.
-    deciding = "the signal holds still for the run"
+    #
+    # When the caller has downgraded the criterion the control was built to
+    # fire on, this arm has to demonstrate a criterion that still binds: a
+    # control whose only failure is advisory proves that nothing capable of
+    # stopping the run can stop it. A6's window fires on its halves as well as
+    # on its projection, so the demonstration survives the downgrade - but it
+    # is checked here rather than relied upon.
     fired = [name for name, held, _ in control_verdicts if not held]
+    binding_fired = [name for name in fired if name not in ADVISORY]
+    deciding = "the signal holds still for the run"
     if deciding not in fired:
         print(f"REFUSE the control arm did not refuse on {deciding}: it fired {fired or 'nothing'},")
         print("       so this run has no evidence that the criterion deciding the window")
         print("       above is capable of coming out negative")
         return REFUSED
+    if not binding_fired:
+        print(f"REFUSE the control arm fired only on {', '.join(fired)}, every one of which this")
+        print("       caller downgraded to advisory. Nothing that could stop this run has been")
+        print("       shown capable of stopping one, so the remaining criteria are decoration")
+        return REFUSED
 
-    out = [name for name, held, _ in verdicts if not held]
+    out = [name for name, held, _ in verdicts if not held and name not in ADVISORY]
+    noted = [name for name, held, _ in verdicts if not held and name in ADVISORY]
     if out:
         print("REFUSE " + f"{len(out)} of {len(verdicts)} criteria are outside the band: " + ", ".join(out))
         print("       This is not a failure and there is no failure available here. A radio")
@@ -250,11 +338,28 @@ def gate(argv):
         print("       downstream can be measured, so the run is not worth starting rather")
         print("       than the pipeline being wrong.")
         return REFUSED
+    if noted:
+        print(f"NOTE  outside the band but downgraded by the caller: {', '.join(noted)}.")
+        print(f"      The control arm still fired on {', '.join(binding_fired)}, so what remains")
+        print("      binding here has been shown capable of refusing.")
+        print()
 
-    print(f"PASS the link held: {m['projected_db']:+.2f} dB projected over {m['run_s']:.0f} s against a")
-    print(f"     {BUDGET_DB:.1f} dB budget, on channel {m['channels'][0]} at {m['widths'][0]} MHz with the")
-    print(f"     rate's halves within a factor of {m['phy_half_ratio']:.2f}. Start the run, and carry the")
-    print("     label with it.")
+    # What held, named by what actually bound. Saying "the link held" over a
+    # projection the caller downgraded would be this gate claiming a check it
+    # was told not to make.
+    if deciding in ADVISORY:
+        print(f"PASS every binding criterion held, on channel {m['channels'][0]} at "
+              f"{m['widths'][0]} MHz with the")
+        print(f"     rate's halves within a factor of {m['phy_half_ratio']:.2f}. The projection is not "
+              f"among them at this")
+        print(f"     caller's request and read {m['projected_db']:+.2f} dB over {m['run_s']:.0f} s; "
+              f"whatever the run does")
+        print("     with the link is settled from the run's own arms. Carry the label with it.")
+    else:
+        print(f"PASS the link held: {m['projected_db']:+.2f} dB projected over {m['run_s']:.0f} s against a")
+        print(f"     {BUDGET_DB:.1f} dB budget, on channel {m['channels'][0]} at {m['widths'][0]} MHz with the")
+        print(f"     rate's halves within a factor of {m['phy_half_ratio']:.2f}. Start the run, and carry the")
+        print("     label with it.")
     if m["radar_bands"][0] == "1":
         print()
         print("     NOTE this is a DFS channel. The window shows no hold and no vacate, and")
