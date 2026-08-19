@@ -35,58 +35,140 @@ A7  drift                                       measurable now, and it disagrees
 A8  jitter target                               the question has changed, see below
 ```
 
-### The two contributions, and only one of them is free
+### A retraction: the pair argument had its sign inverted
 
-The margin is thin by construction before the link does anything. The sender takes a 480-frame
-WASAPI packet - 10 ms of audio - and sends both of its 5 ms frames at once, 44 microseconds apart,
-so the stream lands as a pair every 10 ms rather than one frame every 5. The second frame of each
-pair has its moment 5 ms after the first, so relative to its own moment it arrives 5 ms later than
-its partner. At the measured p95 of -4.25 ms that puts the second of each pair at +0.75 ms - past
-its moment - which is where the tail crosses zero, and the observed 3.82 per cent sits just beyond
-it.
+What stood here claimed the second Opus frame of each WASAPI packet arrives 5 ms later relative to
+its own moment, and that pacing it would return the margin. **That is backwards and the paragraph
+was wrong.**
 
-**Pacing the second frame 5 ms after the first would return that margin at no latency cost.** It
-is not buying continuity with delay; it is declining to spend margin on a burst this end creates.
-
-But the burst is not all of it, and the natural experiment in the same run says so. Drift deepened
-the buffer by 5 ms across the ten minutes and the hole fell by **41 per cent, not by all of it** -
-134880 samples in the first minute against 78960 in the last. Had the pair structure been the whole
-cause, five milliseconds would have removed essentially every late frame. So a real tail remains
-underneath: p99 at +12.2 ms and a worst arrival at +85.0 ms on a link that was not moving.
-
-That tail is delay and not loss - zero packets lost of 120005 - so nothing recovers it. Only more
-buffer or less burst helps, which is why FEC and NACK stay out: there is nothing for them to
-retransmit.
-
-### What A8's question became
-
-Not "which of 5, 10, 15 and 20 ms holds", which the sweep answered with none. It is now: **pace the
-sender, then find the smallest target that holds.** The order matters, because measuring targets
-against a stream that wastes 5 ms of every second frame ranks the burst rather than the buffer.
-
-### The A7 discrepancy, recorded and not resolved
-
-Occupancy rose monotonically from 10.0 to 15.0 ms at p50, +0.737 ms/min, with zero overruns. That
-is 12.3 ppm of relative rate with **the source faster than the sink**. The table below has the host
-audio clock at -15 ppm and this Mac's output at +5 ppm, which predicts the sink draining 20 ppm
-faster and a buffer that empties. It fills. Thirty-two parts per million and a reversed sign
-between two established figures and a joined run, and it is A7's subject rather than a footnote.
-
-Neither of those two rows is safe to keep using until A7 settles which is wrong.
-
-### The order when a stable link exists
-
-Not the sweep first. A6 has to establish that a base condition exists in which this system works
-before anything is ranked against anything.
+Lateness is arrival minus deadline. Both frames leave within 44 microseconds of each other, and the
+second frame's deadline is 240 samples - 5 ms - after the first's, so:
 
 ```
-1  per-window occupancy in place
-2  audio-e2e-gate 60
-3  audio-e2e-gate 600
-4  A7 from those same 600 s, if A6 passed
-5  jitter-target-sweep
-6  choose A8
+lateness(first)  = t - D
+lateness(second) = (t + 0.044 ms) - (D + 5 ms) = lateness(first) - 4.956 ms
 ```
+
+Arriving at the same instant with a later deadline is **more** margin, not less. The second frame of
+each pair is the safer of the two, and the sender's burst cannot be the thing that spends the
+margin. No pacing change is authorised, and none should be made on this reasoning.
+
+The rest of that paragraph's arithmetic was fitted to the conclusion after the fact: taking p95 of
+-4.25 ms and adding five to reach +0.75 ms produced a number that crossed zero near the observed
+3.82 per cent, which looked like corroboration and was a coincidence between a wrong sign and a
+plausible magnitude.
+
+What survives is the measurement rather than the story. Drift deepened the buffer by 5 ms across the
+ten minutes and the hole fell **41 per cent** - 134880 samples in the first minute against 78960 in
+the last - so more margin does remove lateness, without saying where the lateness comes from. And a
+real tail exists underneath: p99 at +12.2 ms and a worst arrival at +85.0 ms on a link that was not
+moving.
+
+That tail is delay and not loss - zero packets lost of 120005 - so nothing recovers it. FEC and NACK
+stay out for want of anything to retransmit.
+
+### A6.1, the pair timing audit, before anything is changed
+
+The sign has to be settled by measurement now, because if a per-pair delta comes out at +5 ms rather
+than the -4.956 ms the timestamps require, then something upstream is wrong and it is one of: the
+RTP timestamp, the playout deadline arithmetic, a capture timestamp assigned to the wrong sample,
+the sign or definition of the arrival-delay metric, or the pair ordering itself.
+
+Report separately, over 60 to 120 s, for the first and second frame of each WASAPI packet: arrival
+margin p50, p95 and p99, late count, and underrun count - and above all the per-pair difference
+`lateness(second) - lateness(first)`, which is the quantity with a predicted value.
+
+The anchor for a frame's media time is its **sample position**, not the instant a thread processed
+the packet. `IAudioCaptureClient::GetBuffer` reports the device position and a QPC value for the
+packet, so the first frame belongs at position P and the second at P + 240. Assigning both frames
+the packet's single QPC while the receiver reads their RTP timestamps as 5 ms apart would fabricate
+exactly a fixed offset in this telemetry, and that is one of the candidates above.
+
+### What A8's question became, and what it is conditional on
+
+Not "which of 5, 10, 15 and 20 ms holds", which the sweep answered with none. The reordering that is
+authorised is: **establish that the sender introduces no artificial structure, then find the smallest
+target that absorbs the link's natural tail.** Measuring targets against a stream with a cadence
+defect ranks the defect rather than the buffer.
+
+What is **not** authorised is the sender change itself. A6.1 has to come back first, because the
+reasoning that proposed it was wrong by a sign and a cadence defect has not been shown to exist. If
+the audit finds the per-pair delta at the -4.956 ms the timestamps require, the sender is innocent,
+the whole tail belongs to the link, and A8 is simply the sweep repeated on a stable link with the
+occupancy instrument in place.
+
+And if a spacing change is ever justified, it is not free and should not be described as free. It
+holds the second frame 5 ms longer in the sender; its playout latency need not rise, since its
+deadline is 5 ms later too, but when it enters the network does change. The claim to be demonstrated
+would be that spacing smooths the cadence without raising the playout target, provided the second
+frame still arrives before its deadline. Nor may it be implemented by sleeping on the thread that
+consumes WASAPI: encoder, then a bounded transmit queue, then a scheduler, which is the shape the
+video pacer already settled.
+
+### The A7 discrepancy: the sign is real, the magnitude was never measured
+
+Occupancy at p50 rose from 10.0 to 15.0 ms with zero overruns, and the **direction** is unambiguous:
+it went up once and never came back, so the effective producer outran the effective consumer.
+
+The magnitude quoted here before - 12.3 ppm - was not a measurement and is withdrawn. The
+per-window p50 takes exactly two values across the whole arm, 10.0 for twenty-six windows and 15.0
+for the remaining thirty-four, with a **single step at window 26**:
+
+```
+AAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+```
+
+A least-squares slope over that staircase gives 12.3 ppm and its endpoints give 8.33 ppm, and
+neither is a rate: one step in a two-valued series carries no rate information at all. Occupancy p50
+is quantised to the frame duration, 5 ms, because the histogram's buckets are frames, so this
+instrument cannot resolve parts per million by construction however long the arm is. The step is
+consistent with a slow drift crossing a bucket boundary somewhere between windows 25 and 27, and
+equally consistent with something changing once.
+
+What remains is a contradiction in sign, which is enough to stop work. The table below has the host
+audio clock at -15 ppm and this Mac's output at +5 ppm, so the sink should drain 20 ppm faster than
+the source fills and the buffer should empty. It filled. **Neither of those two rows is safe to use
+for designing a rate matcher until A7 settles which is wrong.**
+
+### A7.1, the clock rate audit, measured directly and simultaneously
+
+Two clocks cannot be synchronised across these machines and do not need to be: a rate is measurable
+on each machine against its own monotonic clock, in the same run.
+
+On the host, over the same window: the change in the capture device's sample position against the
+change in QPC, which is what `IAudioCaptureClient::GetBuffer` reports the packet's position and QPC
+for, giving `source_ppm = (samples/seconds / 48000 - 1) x 1e6`. On this Mac, in the render callback:
+the change in `sampleTime` against the change in `hostTime`, giving `sink_ppm` from what the device
+physically consumed rather than from what it says its rate is.
+
+And a third measure that is independent of both, in samples rather than in quantised milliseconds:
+the RTP stream states the samples the source produced and CoreAudio states the samples the sink
+consumed, so over a long window `buffer_growth = produced - consumed`. That is the invariant, and
+all three have to close - the growth predicted from the two measured rates against the growth
+observed. If they do not, a mechanism in the buffer is still unaccounted for.
+
+### The order from here
+
+The stable link exists and A6 has been run on it, so the question is no longer whether a base
+condition can be had. It is that two numbers contradict themselves, and neither a sender change nor
+a target sweep means anything until they stop.
+
+```
+A6.1  pair timing audit      first against second frame: sample and RTP
+                             timestamps, arrival margin, late counts, and the
+                             per-pair lateness difference, which has a
+                             predicted value of -4.956 ms
+A7.1  clock rate audit       host device-position against QPC, Mac sampleTime
+                             against hostTime, and samples produced against
+                             samples consumed; all three must close and agree
+                             in sign
+A6.2  only if A6.1 shows a defect: the cadence fix, then a clean 600 s, then
+                             read what lateness is left
+A8    5, 10, 15 and 20 ms on a link that holds, with the occupancy instrument
+```
+
+A6.1 and A7.1 are independent of each other and can run in either order or together. Nothing after
+them starts until both have answered.
 
 ### What stays out until the data asks for it
 
