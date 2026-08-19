@@ -1,0 +1,55 @@
+scheduling MMCSS Pro Audio, thread priority 18
+endpoint LG ULTRAWIDE (NVIDIA High Definition Audio)
+mix format 48000 Hz 2 ch 32 bit float
+sending to 192.168.1.108:5014 from 0.0.0.0:59858
+ssrc 849486547
+rtp base 968816152
+span 150.007 s
+capture packets 15001
+capture frames 7200480
+capture packets per s 100.00
+frames encoded 30002
+frames encoded per s 200.00
+datagrams sent 30002
+datagram bytes 2790266
+samples captured 7200480
+samples encoded 7200480
+sample disagreement 0
+split residue frames 0
+encode us p50 119 p95 209 p99 215 max 273
+send us p50 12 p95 51 p99 78 max 101
+packet bytes p50 81 p95 81 p99 81 max 122
+position gaps 0 totalling 0 frames
+position rewinds 0 totalling 0 frames
+discontinuities 1 in flight 0
+silent packets 0
+source ppm -15.298 error 0.001 over 15001 readings and 150.002 s
+source ppm endpoints -15.320
+source position samples 7200000
+source counter scatter 0.31 samples estimates agree yes
+source counter stalls 0
+timestamp steps 30002 exact 30002
+send failures 0
+encode failures 0
+unreadable packets 0
+buffer errors 0
+wakeup timeouts 0
+tone left 997.0 right 1997.0
+tone channels distinct yes
+wire kbps 148.8
+datagrams per s 200.00
+packet frames p50 480 min 480 max 480
+wakeup us p50 10000 p95 10071 p99 10131 max 10679
+wakeup event
+device period default 10.000 ms minimum 3.000 ms
+endpoint buffer frames 1056
+frame ms 5
+frame samples per channel 240
+requested kbps 128
+encoder reports bitrate 128000
+application OPUS_APPLICATION_RESTRICTED_LOWDELAY
+vbr yes constrained yes dtx no inband fec no
+lookahead samples 120
+tone resolution 2.00 hz over 24000 frames
+samples dropped 0
+libopus libopus unknown

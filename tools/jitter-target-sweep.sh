@@ -361,7 +361,7 @@ RECEIVER_KEYS="rtp_received rtp_expected rtp_lost rtp_late rtp_off_grid plc_fram
 frames_played render_callbacks render_underruns jitter_underruns jitter_overruns \
 jitter_occupancy_p50_ms jitter_occupancy_p95_ms samples_expected samples_played \
 continuity_hole arrival_delay_p50_ms arrival_delay_p95_ms arrival_delay_p99_ms \
-arrival_delay_max_ms"
+arrival_delay_max_ms jitter_overrun_frames samples_discarded pair_frame_samples"
 
 # The numbers a document is not a result without, insisted on before anything is decided
 # from it. Belt and braces with `xtask verdict`, which already refuses a document holding a
@@ -693,38 +693,87 @@ PY
 
         # ---- is this arm interpretable at all ----------------------------------
         #
-        # A6.1 measured the three deciding counters on a clean run and found them not close
-        # but identical: 4587 frames late, 4587 buffer underruns, 4587 concealments, and
-        # 4587 x 240 exactly the continuity hole. That is not a coincidence to be admired,
-        # it is the pipeline's shape - every late frame is an underrun because nothing else
-        # ever starves this buffer, and every underrun is concealed because the concealer is
-        # the only thing that fills one - and it makes the identity an instrument.
+        # Every frame the device demanded was played, concealed, or thrown away, and every
+        # frame thrown away was late or arrived to a full buffer. That is the whole of this
+        # receiver's accounting, and it closes to the sample on arms as different as a clean
+        # 600 s run and a control arm behind a relay holding 400 ms out of every 2000.
         #
-        # An arm where it stops holding has some other mechanism in it: a starve that was
-        # not a late frame, a concealment with no underrun behind it, a hole that does not
-        # divide by the frame. Whatever that mechanism is, the arm is no longer measuring
-        # the tail this sweep ranks, and a percentage from it reads exactly like one that
-        # is. So it is refused rather than noted, and it is checked on every arm including
-        # the control, whose relay breaks the path on purpose and must break it in a way
-        # that still shows up in these four counters.
-        local late underruns concealed hole expected_hole
+        # An earlier version of this check asked instead for `late == underruns ==
+        # concealed`, which is what A6's clean run measured - 4587 of each, and 4587 x 240
+        # exactly the hole. It refused the control arm on its first run, and it was right to:
+        # not about the arm, but about itself. That identity is the general one collapsed
+        # onto a run with no buffer overrun and no startup starvation, and the control had 66
+        # underruns with no late frame behind them - 18 frames thrown away by two overruns
+        # and 48 concealed at the start before anything had arrived. A criterion true only
+        # of clean runs cannot be the criterion that decides whether an arm is clean.
+        #
+        # So the identities below are exact, with no slack anywhere - on every arm whose
+        # radio delivered every datagram. That last condition is a criterion here rather than
+        # an assumption, and it is the established state of this link rather than a hope:
+        # A3's own gate measured 0 lost of 3000 on a link at -71 dBm, A6's ten-minute arm lost
+        # 0 of 120005, and ten of the eleven arms in the run that produced this paragraph lost
+        # none. The eleventh lost 382 of 23952, 1.59 per cent, and none of the identities
+        # closed for it: a frame that never arrived is neither played, concealed nor thrown
+        # away, and it was never discarded either.
+        #
+        # That arm is refused on the loss and not on the arithmetic downstream of it. The
+        # first version said "starved 5950 times and concealed 5957", which is true, useless,
+        # and blames the buffer for the radio. And the whole phase rests on this being zero:
+        # FEC and NACK are out of scope precisely because there has been nothing to
+        # retransmit, so an arm with loss in it does not measure the thing being ranked.
+        local lost
+        lost="$("$XTASK" verdict --observation rtp_lost "$document")"
+        if [ "$lost" != "0" ]; then
+            local expected
+            expected="$("$XTASK" verdict --observation rtp_expected "$document")"
+            refuse "arm $arm lost $lost datagrams of $expected over the air," \
+                "$(awk -v l="$lost" -v e="$expected" 'BEGIN { printf "%.2f", 100 * l / e }') per cent," \
+                "where this link has measured zero over 120005 in A6 and zero over 3000 in A3. A frame" \
+                "that never arrived is not late, and an arm carrying real loss is not measuring the" \
+                "arrival tail these targets are being ranked on"
+        fi
+
+        # An arm that breaks one of the three below has a mechanism in it this pipeline does
+        # not know about, its continuity figure is not comparable with any other arm's, and a
+        # percentage from it reads exactly like one that is.
+        local late underruns concealed hole discarded dropped frame_samples startup
         late="$("$XTASK" verdict --observation rtp_late "$document")"
         underruns="$("$XTASK" verdict --observation jitter_underruns "$document")"
         concealed="$("$XTASK" verdict --observation plc_frames "$document")"
         hole="$("$XTASK" verdict --observation continuity_hole "$document")"
-        expected_hole=$((concealed * FRAME_MS * 48))
-        if [ "$late" != "$underruns" ] || [ "$underruns" != "$concealed" ]; then
-            refuse "arm $arm reports $late frames late, $underruns underruns and $concealed concealed," \
-                "which do not agree, so something starves or conceals in it that is not a late frame" \
-                "and its continuity figure is not comparable with the other arms'"
-        fi
-        # One frame of slack, and only one: the hole is counted in samples against a
-        # per-callback expectation, so a run ending mid-callback can round by less than a
-        # frame. Anything larger is a second mechanism.
-        awk -v seen="$hole" -v want="$expected_hole" -v slack="$((FRAME_MS * 48))" \
-            'BEGIN { exit ((seen - want <= slack && want - seen <= slack) ? 0 : 1) }' ||
-            refuse "arm $arm conceals $concealed frames, which is $expected_hole samples, against a" \
-                "continuity hole of $hole; the two describe different events and the arm is not interpretable"
+        discarded="$("$XTASK" verdict --observation samples_discarded "$document")"
+        dropped="$("$XTASK" verdict --observation jitter_overrun_frames "$document")"
+        frame_samples="$("$XTASK" verdict --observation pair_frame_samples "$document")"
+
+        # The receiver's own frame size against the one this harness asked for, because every
+        # identity below multiplies by it and a disagreement would divide the blame silently.
+        [ "$frame_samples" = "$((FRAME_MS * 48))" ] ||
+            refuse "arm $arm ran with $frame_samples samples per frame where this sweep asked for" \
+                "$FRAME_MS ms, which is $((FRAME_MS * 48)); every count below is scaled by that number"
+
+        [ "$underruns" = "$concealed" ] ||
+            refuse "arm $arm starved $underruns times and concealed $concealed frames; the concealer is" \
+                "the only thing that fills a starved callback, so something else is writing into this" \
+                "buffer or something else is emptying it"
+
+        [ "$hole" = "$(((concealed + dropped) * frame_samples))" ] ||
+            refuse "arm $arm has a continuity hole of $hole samples against $concealed concealed and" \
+                "$dropped thrown away, which is $(((concealed + dropped) * frame_samples)); a frame the" \
+                "device demanded went missing without being played, concealed or dropped"
+
+        [ "$discarded" = "$(((late + dropped) * frame_samples))" ] ||
+            refuse "arm $arm discarded $discarded samples against $late late and $dropped dropped to a" \
+                "full buffer, which is $(((late + dropped) * frame_samples)); something is being thrown" \
+                "away for a third reason and lateness is no longer the whole of what this arm measures"
+
+        # Not a criterion - there is no counter for it and no expected value. It is printed
+        # because it is the one term in the accounting with no name of its own, and a reader
+        # comparing arms should be able to see an arm that spent its first quarter-second
+        # concealing silence while its neighbour did not.
+        startup=$((concealed - late - dropped))
+        [ "$startup" -ge 0 ] ||
+            refuse "arm $arm concealed $concealed frames against $late late and $dropped dropped, which" \
+                "leaves $startup unaccounted; a negative count here means the arithmetic above is wrong"
 
         local name value
         local -a values=()
@@ -1115,48 +1164,38 @@ if sender_bad:
 # continuity", which is a statement about a link. Arms that did not share one have no such
 # statement to make, and the strongest claim this gate can print was resting on the weakest
 # evidence it collects.
-# And the link itself, which is what those disagreements are usually made of. Asked as
-# overlap and not as flatness. A sweep does not need a flat radio - it is counterbalanced
-# so that a monotone drift contributes a term proportional to position, which cancels -
-# and requiring 3 dB of stillness across forty minutes builds a gate that passes by luck.
-# What it cannot survive is targets measured in different regimes, and that is a question
-# about whether the arms' distributions sit on top of one another.
 #
-# So: the intersection of every arm's own p10-to-p90 interval. Non-empty means there is a
-# band of signal every arm actually spent time in, whatever each one's mean was. Two arms
-# at -58..-61 and -70..-78 have none and are two links; four arms at -57..-62, -58..-63,
-# -57..-61 and -59..-63 intersect over -59..-61 and are one link breathing, which is the
-# most this radio has ever offered.
-rates = [row["rate_p50_mbps"] for row in sweep]
-lows = [row["rssi_p10_dbm"] for row in sweep]
-highs = [row["rssi_p90_dbm"] for row in sweep]
-overlap_low, overlap_high = max(lows), min(highs)
-if min(rates) > 0 and max(rates) / min(rates) > rate_factor:
+# Judged on the negotiated rate and not on the signal, because the rate is the mechanism.
+# Airtime per datagram is inversely proportional to PHY rate and airtime is what produces the
+# tail a target is chosen against; the signal is only a proxy for the rate, and a proxy is
+# not the thing when the thing itself was recorded.
+#
+# The first version of this check intersected the arms' p10-to-p90 SIGNAL intervals and would
+# have refused the run that taught it better. Those ten arms were internally flat to a
+# decibel - p10, p50 and p90 identical inside each arm - and sat at either -40 or -43 dBm, so
+# the intersection was empty by construction: with degenerate intervals the criterion reduces
+# to "every arm at the same integer dBm", which almost nothing passes and which passes by
+# luck when it does. Meanwhile every one of those arms negotiated 1200 Mbps. Three decibels
+# moved the rate not at all, which is the measurement that settles which quantity to judge.
+rate_medians = [row["rate_p50_mbps"] for row in sweep]
+spans = [(row["rate_p10_mbps"], row["rate_p90_mbps"]) for row in sweep]
+signals = [row["rssi_p50_dbm"] for row in sweep]
+worst_ratio = max(rate_medians) / min(rate_medians) if min(rate_medians) > 0 else 0.0
+if worst_ratio > rate_factor:
     refusals.append(
-        f"the arms negotiated median PHY rates from {min(rates):.0f} to {max(rates):.0f} Mbps, a "
-        f"factor of {max(rates) / min(rates):.2f} against the {rate_factor:.0f} this gate allows. "
-        "Airtime per datagram is inversely proportional to PHY rate and airtime is the mechanism "
-        "that produces the tail a target is chosen against, so those are two links and not one "
-        "link breathing"
-    )
-if overlap_high < overlap_low:
-    worst_low = max(range(len(sweep)), key=lambda i: lows[i])
-    worst_high = min(range(len(sweep)), key=lambda i: highs[i])
-    refusals.append(
-        f"no band of signal is common to every arm: {sweep[worst_low]['arm']} spent its middle "
-        f"eighty per cent at or above {lows[worst_low]:.0f} dBm while {sweep[worst_high]['arm']} "
-        f"spent its own at or below {highs[worst_high]:.0f}, so the two never shared a link and the "
-        "targets they carry were measured in different regimes. This is asked as overlap rather "
-        "than as flatness on purpose: an arm may move, so long as every arm moved through the "
-        "same place"
+        f"the arms negotiated median PHY rates from {min(rate_medians):.0f} to "
+        f"{max(rate_medians):.0f} Mbps, a factor of {worst_ratio:.2f} against the "
+        f"{rate_factor:.0f} this gate allows. Airtime per datagram is inversely proportional to PHY "
+        "rate and airtime is the mechanism that produces the tail a target is chosen against, so "
+        "those are two links and not one link breathing"
     )
 else:
     findings.append(
-        f"every arm spent its middle eighty per cent inside {overlap_low:.0f} to "
-        f"{overlap_high:.0f} dBm,\n          a band {overlap_high - overlap_low:.0f} dB wide common "
-        f"to all {len(sweep)} of them, with median rates "
-        f"{min(rates):.0f} to {max(rates):.0f} Mbps;\n          the arms are comparable and the "
-        "ranking above is about targets rather than about the link"
+        f"the arms negotiated median rates {min(rate_medians):.0f} to {max(rate_medians):.0f} Mbps, "
+        f"a factor of {worst_ratio:.2f}\n          against the {rate_factor:.0f} allowed, over "
+        f"middle-eighty spans {min(lo for lo, _ in spans):.0f} to {max(hi for _, hi in spans):.0f}, "
+        f"at median signal\n          {min(signals):.0f} to {max(signals):.0f} dBm. Airtime is the "
+        "mechanism and it was shared; the signal is recorded and does not decide"
     )
 
 # --- what the outcome is, before any comparison is attempted ----------------
