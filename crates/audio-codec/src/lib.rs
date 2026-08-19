@@ -48,6 +48,8 @@
 //! both halves at once, and it has to sit on the side that already vendors the
 //! C. That is [`rtp_probe`], and it is an instrument rather than a component:
 //! nothing in [`encoder`] or [`decoder`] knows a socket exists.
+//! [`rtp_envelope`] is the gate document it emits, and which arm of the gate a
+//! run belongs to is the one thing about itself that probe cannot measure.
 //!
 //! The receiving path is here for the same reason the RTP probe is: a jitter
 //! buffer that conceals a missing frame needs the decoder's own concealer, so
@@ -97,6 +99,7 @@ mod ffi;
 pub mod jitter;
 pub mod jitter_probe;
 pub mod probe;
+pub mod rtp_envelope;
 pub mod rtp_probe;
 
 pub use config::{CodecConfig, FrameDuration, MAX_PACKET_BYTES, SAMPLE_RATES};

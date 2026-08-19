@@ -1,0 +1,52 @@
+results   /tmp/radio-preflight-evidence/guard2
+window    replayed from results/audio/radio-preflight/window-a.csv at 1000 ms, as a preflight for a
+          600 s run
+requires  an association this Mac can read; nothing crosses the air here, so this
+          gate needs no second machine and no endpoint, and a Mac with no
+          association is refused with that as the reason rather than filtered out
+          of a listing
+replayed  120 rows, nothing sampled
+
+the band, and where it came from
+
+  3.0 dB      A8's thirteen arms had median signal from -70 to -67 dBm and
+              median rate from 288 to 576 Mbps over the same arms, so three
+              decibels is the movement that doubles this radio's rate
+  99 per cent all nineteen committed windows delivered every row they were
+              due at the interval each was taken at
+  factor 2    the same doubling, on the quantity it was measured on
+
+the window
+
+  channel           100 at 80 MHz, radar band 1
+  signal            median -61 dBm, -63 to -59, sd 0.94, noise -95 dBm
+  negotiated rate   median 648 Mbps, 408 to 720
+  movement          +0.008 +-0.149 dB/min, scatter 0.94 dB about it
+
+  hold  the window was sampled               120 rows of 120 due at 1000 ms, 100.0 per cent against 99
+  hold  the link stayed where it was         channel 100 at 80 MHz, radar band 1
+  hold  the window can resolve the budget    the slope is worth +-0.149 dB/min over this 119 s window, which is +-1.49 dB over 10 min against a 3.0 dB budget
+  hold  the signal holds still for the run   +0.008 dB/min projects +0.08 dB over 10 min against a 3.0 dB budget
+  hold  the signal's halves agree            +0.0 dB between the half medians against 3.0
+  hold  the negotiated rate's halves agree   a factor of 1.06 between the half medians against 2.0
+
+  label written to /tmp/radio-preflight-evidence/guard2/label.json, and a run that does not carry it cannot be
+  compared with any other run
+
+the control arm, window-b.csv: the window this gate exists to have stopped
+
+  channel           100 at 80 MHz, radar band 1
+  signal            median -61 dBm, -62 to -59, sd 0.68, noise -95 dBm
+  negotiated rate   median 648 Mbps, 432 to 720
+  movement          -0.084 +-0.108 dB/min, scatter 0.68 dB about it
+
+  hold  the window was sampled               120 rows of 120 due at 1000 ms, 100.0 per cent against 99
+  hold  the link stayed where it was         channel 100 at 80 MHz, radar band 1
+  hold  the window can resolve the budget    the slope is worth +-0.108 dB/min over this 119 s window, which is +-1.08 dB over 10 min against a 3.0 dB budget
+  hold  the signal holds still for the run   -0.084 dB/min projects -0.84 dB over 10 min against a 3.0 dB budget
+  hold  the signal's halves agree            +0.0 dB between the half medians against 3.0
+  hold  the negotiated rate's halves agree   a factor of 1.06 between the half medians against 2.0
+
+REFUSE the control arm did not refuse on the signal holds still for the run: it fired nothing,
+       so this run has no evidence that the criterion deciding the window
+       above is capable of coming out negative

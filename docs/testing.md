@@ -156,6 +156,26 @@ not be tested" and the verdict above it said `PASS`. A6's harness found it while
 itself and had to insist on ten observation keys by name to protect itself; that
 insistence stays, as a second lock on a door that is now shut.
 
+The same three answers apply to the conditions a gate runs under, not only to the checks
+inside it, and that is a rule for every harness here rather than a habit of some:
+
+```
+PASS     the criteria were measured and hold
+FAIL     the criteria were measured and do not hold
+REFUSED  the conditions needed to interpret the gate did not exist
+```
+
+A radio that degrades during a run makes the run REFUSED. A stable radio with a two per cent
+continuity hole is a FAIL. The distinction is not politeness: a moving link is not a defect in
+the system under test, it is the absence of a condition under which that system can be measured,
+and recording it as a failure invites the next reader to go looking for a bug that is not there.
+Three of the audio phase's runs are labelled with the link's state for exactly this reason, and a
+fourth was refused before it started rather than after.
+
+The temptation this rule exists against is the opposite one: widening a tolerance, or shortening
+a window, until the instrument stops complaining. That is choosing the measurement to fit the
+instrument, and it converts a gate into a thing that cannot fail.
+
 ### 3. A mandatory negative control
 
 Every gate declares an invocation that is expected to fail, and the harness runs it.

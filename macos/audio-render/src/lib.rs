@@ -87,6 +87,7 @@
 //! converter.
 
 pub mod format;
+pub mod occupancy;
 pub mod report;
 pub mod ring;
 
@@ -102,6 +103,7 @@ pub mod run;
 pub mod stream;
 
 pub use format::{Layout, OutputFormat, SampleKind};
+pub use occupancy::{OccupancyReader, WindowOccupancy};
 pub use report::{Report, Verdict};
 pub use ring::{Drained, Filled, PcmRing};
 

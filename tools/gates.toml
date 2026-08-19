@@ -74,6 +74,15 @@ plumbing = [
 # Audio
 # ---------------------------------------------------------------------------
 
+[gates.radio-preflight]
+script = "tools/radio-preflight.sh"
+proves = "whether this link will hold still for the length of a run, so that what the run then measures is about the system and not about the weather"
+phase = "A0"
+requires = []
+minutes = 2
+negative_control = "A6's own first two minutes, results/audio/e2e-corrected/radio-trace-first-120s.csv, replayed through the same reader: the one window in this repository everybody agrees was contaminated, and the run this gate exists to have stopped. It refuses at -4.305 dB/min, which projects -43.05 dB over a 600 s run against a 3 dB budget, and on a half-median step of -6.0 dB against a population inside +-1.5. The harness requires that the refusal names the deciding criterion rather than merely happening, because a control that refuses on an unreadable file certifies nothing. Rejected: a band tightened below the measured scatter, which tests the arithmetic against itself; and a scan run underneath the sampler, which depends on the radio's mood on the day and would have this gate reach for the very instrument that once produced the bunching an experiment went looking for"
+notes = "requires nothing because nothing crosses the air: it reads the association through CoreWLAN, so a Mac with no association is refused with that as the reason rather than filtered out of a listing. The verdict is two-valued - a link outside the band is REFUSED and exits 2, never 1, because a radio that moves is the absence of a condition and not a defect in the pipeline. It therefore does not go through xtask verdict, whose Fail is unconditional and correct: a precondition is not a criterion. The band is one measured number, 3 dB, the spread of median signal across A8's thirteen arms over which their median rate ran 288 to 576 Mbps; `tools/radio-preflight.sh --band` recomputes the whole derivation from the nineteen committed windows. Level is recorded and never judged, since no measurement here says which level works, and a DFS channel is recorded and carried rather than refused - ten unbroken minutes of channel 100 showed no hold, and refusing it would invent a threshold"
+
 [gates.audio-gate]
 script = "tools/audio-gate.sh"
 proves = "WASAPI loopback delivers a known format and cadence with every frame accounted for by device position"
@@ -99,8 +108,8 @@ phase = "A3"
 requires = []
 optional_requires = ["windows-host", "radio"]
 minutes = 1
-negative_control = "the broken arm: the same loopback path relayed through udp-fault at seed 20250815, which must produce loss, duplicates and reordering this gate reads as failures. Wired with one probe first, sending from the socket it received on, which udp-fault reads as the reply direction: 2000 of 2000 lost and the control passed on the harness being broken rather than on the criteria firing"
-notes = "the radio arm needs a second endpoint and declares itself unavailable rather than sending to this machine's own address, which the kernel puts on loopback"
+negative_control = "the control arm: the same loopback path relayed through udp-fault at seed 20250815, which must produce loss, duplicates and reordering, and which is judged against the loopback arm's own criteria rather than a threshold of its own. Measured at ten seconds: 51 missing, 24 duplicated and 18 reordered of 1967 that arrived, against a loopback arm of 2000 with none of the three. Wired with one probe first, sending from the socket it received on, which udp-fault reads as the reply direction: 2000 of 2000 lost and the control passed on the harness being broken rather than on the criteria firing, which is why what it received is now held against what the loopback arm received"
+notes = "each end of each arm writes a JSON envelope and `xtask verdict` decides it; nothing here parses the probe prose. Which criteria an arm states follows from the arm it is told it is, because a receive-only run cannot tell a fault relay on 127.0.0.1 from a peer across the air. The radio arm needs a second endpoint and declares itself unavailable rather than sending to this machine's own address, which the kernel puts on loopback, and its loss figure comes out of the receiving end sequence accounting rather than out of differencing the two ends: one run sent 2000 and the far end saw 1740 with no sequence gap at all, a contiguous head that left before its socket was listening"
 
 [gates.jitter-gate]
 script = "tools/jitter-gate.sh"

@@ -538,6 +538,7 @@ dependencies = [
 name = "lanplay-radio-sample"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "lanplay-capabilities",
 ]
 

@@ -283,6 +283,17 @@ pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Optio
     } else {
         0.0
     };
+    // Across the windows that measured an occupancy at all, so a run whose last
+    // window caught no pull does not drag the span down to an absence.
+    let window_p50s = || {
+        receipt
+            .windows
+            .iter()
+            .filter_map(|row| row.occupancy_us)
+            .map(|held| held.p50)
+    };
+    let lowest_window_p50 = optional_millis(window_p50s().min());
+    let highest_window_p50 = optional_millis(window_p50s().max());
     let findings = json!([
         format!(
             "{:.3} per cent of the stream was lost over the link, {} packets of the {} the \
@@ -310,6 +321,17 @@ pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Optio
             receipt.target.as_millis_f64().round() as u64,
         ),
         format!(
+            "window by window that occupancy went from {} ms at p50 in the first of {} windows \
+             to {} in the last, staying between {} and {}; a run-wide percentile cannot be \
+             separated back into these, so whether the buffer grew during the arm is readable \
+             here and nowhere above",
+            window_p50(receipt.windows.first()),
+            receipt.windows.len(),
+            window_p50(receipt.windows.last()),
+            lowest_window_p50,
+            highest_window_p50,
+        ),
+        format!(
             "the ring sat at {} frames of {} at p50, having been primed to {}; the difference is \
              the {:.1} ms `AudioDeviceStart` spent getting the device going, during which the \
              producer kept depositing and the device consumed nothing, so it is the ring's \
@@ -331,6 +353,11 @@ pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Optio
         .windows
         .iter()
         .map(|row| {
+            // Null rather than zero for a window nothing was pulled in, and the
+            // pull count beside the figures so that a reader fitting a slope
+            // across windows can see which of them were measured over a full
+            // ten seconds and which over the remainder at the end of a run.
+            let held = row.occupancy_us;
             json!({
                 "seconds": row.seconds,
                 "rtp_received": row.rtp_received,
@@ -344,6 +371,12 @@ pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Optio
                 "samples_expected": row.expected_samples,
                 "samples_played": row.played_samples,
                 "continuity_hole": row.hole(),
+                "jitter_occupancy_pulls": held.map_or(0, |held| held.count),
+                "jitter_occupancy_min_ms": held.map(|held| millis(held.min)),
+                "jitter_occupancy_p50_ms": held.map(|held| millis(held.p50)),
+                "jitter_occupancy_p95_ms": held.map(|held| millis(held.p95)),
+                "jitter_occupancy_p99_ms": held.map(|held| millis(held.p99)),
+                "jitter_occupancy_max_ms": held.map(|held| millis(held.max)),
             })
         })
         .collect();
@@ -422,6 +455,22 @@ const UNBIASED_ZERO: Percentiles = Percentiles {
 
 fn millis(micros: u64) -> f64 {
     micros as f64 / 1_000.0
+}
+
+/// Milliseconds, or the word for a figure a run did not measure.
+///
+/// Written out rather than printed as zero, because zero occupancy is a buffer
+/// that ran dry and this is a window in which nothing was pulled at all.
+fn optional_millis(micros: Option<u64>) -> String {
+    micros.map_or_else(
+        || "none".to_string(),
+        |micros| format!("{:.1}", millis(micros)),
+    )
+}
+
+/// One window's median occupancy, in milliseconds.
+fn window_p50(row: Option<&WindowRow>) -> String {
+    optional_millis(row.and_then(|row| row.occupancy_us).map(|held| held.p50))
 }
 
 /// A biased arrival delay as signed milliseconds, positive when late.
@@ -633,6 +682,28 @@ impl fmt::Display for WindowRow {
             self.expected_samples,
             self.played_samples,
             self.hole()
-        )
+        )?;
+        // After the hole rather than beside the other jitter figures, because it
+        // is what a reader asks next: a hole with the buffer at its target is
+        // audio that arrived too late to be in it, one with the buffer empty is
+        // audio that did not arrive, and one with the buffer at its ceiling is
+        // audio this end threw away.
+        //
+        // Absent prints as an absence. Zeroes here would read as a buffer that
+        // ran dry for ten seconds, which is the opposite of a window in which
+        // nothing was pulled at all.
+        match self.occupancy_us {
+            Some(held) => write!(
+                f,
+                " occupancy ms p50 {:.1} p95 {:.1} p99 {:.1} min {:.1} max {:.1} over {} pulls",
+                millis(held.p50),
+                millis(held.p95),
+                millis(held.p99),
+                millis(held.min),
+                millis(held.max),
+                held.count
+            ),
+            None => write!(f, " occupancy none"),
+        }
     }
 }

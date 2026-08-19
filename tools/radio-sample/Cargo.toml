@@ -20,4 +20,5 @@ name = "radio-sample"
 path = "src/main.rs"
 
 [dependencies]
+clap = { workspace = true }
 lanplay-capabilities = { workspace = true }

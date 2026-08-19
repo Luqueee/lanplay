@@ -92,6 +92,7 @@ use parking_lot::Mutex;
 
 use crate::device::{self, Error as DeviceError};
 use crate::format::OutputFormat;
+use crate::occupancy::WindowOccupancy;
 use crate::ring::PcmRing;
 use crate::stream::{RenderState, Stream};
 
@@ -399,6 +400,16 @@ pub struct WindowRow {
     pub render_overruns: u64,
     pub expected_samples: u64,
     pub played_samples: u64,
+    /// Occupancy the buffer reported after serving each pull inside this
+    /// window, in microseconds of audio, and absent when no pull happened.
+    ///
+    /// This window's rather than the run's so far, which for a distribution
+    /// means a store that empties at the boundary rather than a difference of
+    /// two running ones: see [`crate::occupancy`]. It is the figure that says
+    /// what state the buffer was in when the hole beside it appeared - empty,
+    /// at its ceiling, or holding its target while frames arrived too late to
+    /// be in it.
+    pub occupancy_us: Option<Percentiles>,
 }
 
 impl WindowRow {
@@ -491,6 +502,14 @@ struct Shared {
     /// Frames the producer generated and the ring refused, published so a
     /// window can be closed while the run is going.
     refused_frames: AtomicU64,
+    /// What the buffer held after each pull, for the window that is open now.
+    ///
+    /// Here rather than in the producer's own stores because a window is closed
+    /// by another thread while the run is going, and the producer's stores are
+    /// read once at the end. The producer writes and the watcher empties; see
+    /// [`crate::occupancy`] for why a distribution has to be emptied rather
+    /// than differenced.
+    occupancy: WindowOccupancy,
     /// The producer has pulled its last frame. The device is stopped on this
     /// rather than on a duration of the watcher's own, because the producer's
     /// schedule is derived from the playout anchor and the watcher's is not:
@@ -598,6 +617,10 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
         ssrc: AtomicU64::new(0),
         foreign_ssrc: AtomicU64::new(0),
         refused_frames: AtomicU64::new(0),
+        // Sized from the buffer's own slot count, so the histogram spans every
+        // occupancy the buffer is able to report and its percentiles are exact
+        // rather than sampled.
+        occupancy: WindowOccupancy::new(slots, u64::from(config.frame.millis()) * 1_000),
         done: AtomicBool::new(false),
         stop: AtomicBool::new(false),
     });
@@ -1014,7 +1037,12 @@ fn produce(
             let mut buffer = shared.buffer.lock();
             buffer.pull(&mut payload)
         };
+        // Twice, into two stores with two lifetimes: the run's, sorted once at
+        // the end, and the window's, emptied by the watcher every ten seconds.
+        // The second is not derivable from the first, because a percentile taken
+        // over a run cannot be split back into the windows that made it.
         occupancy_us.record(pulled.occupancy as u64 * frame_us);
+        shared.occupancy.record(pulled.occupancy);
 
         let started = Timestamp::now();
         let decoded = match pulled.outcome {
@@ -1104,10 +1132,14 @@ fn await_playout(shared: &Shared, patience: Duration) -> Option<Timestamp> {
 /// Closes a counter window every `window` seconds until the producer stops.
 ///
 /// It runs on the caller's thread, which is the one thread here with no
-/// deadline to keep, so sampling costs the path nothing. Every figure is a
-/// delta against the previous window rather than a running total, because a
-/// total cannot show a fault that started halfway through it, and a ten-minute
-/// run reported as one number is a ten-minute run nobody can read.
+/// deadline to keep, so sampling costs the path nothing. Every count is a delta
+/// against the previous window rather than a running total, because a total
+/// cannot show a fault that started halfway through it, and a ten-minute run
+/// reported as one number is a ten-minute run nobody can read.
+///
+/// Occupancy is the one figure that cannot be had that way, since a percentile
+/// does not subtract, so what closing a window does for it is empty the store
+/// the producer has been filling. Same intent and the other mechanism.
 ///
 /// It ends when the producer says it has finished rather than after a duration
 /// of its own, because the two schedules do not share a start: the producer's
@@ -1122,6 +1154,13 @@ fn watch(
 ) -> Vec<WindowRow> {
     let mut rows =
         Vec::with_capacity((options.seconds / options.window.as_secs_f64()) as usize + 2);
+    // The snapshot the drain fills is allocated here, before the first window,
+    // so that closing one costs an atomic swap per bucket and nothing else.
+    let mut occupancy = shared.occupancy.reader();
+    // What the producer recorded while the ring was being primed belongs to no
+    // window at all, so it is thrown away rather than charged to the one about
+    // to open.
+    let _ = occupancy.take();
     let mut previous = Sample::read(shared, ring, state);
     let mut previous_at = Instant::now();
 
@@ -1136,7 +1175,7 @@ fn watch(
         }
         let now = Instant::now();
         let current = Sample::read(shared, ring, state);
-        rows.push(current.since(&previous, now.duration_since(previous_at)));
+        rows.push(current.since(&previous, now.duration_since(previous_at), occupancy.take()));
         previous = current;
         previous_at = now;
     }
@@ -1148,7 +1187,7 @@ fn watch(
     let span = now.duration_since(previous_at);
     if span > Duration::ZERO {
         let current = Sample::read(shared, ring, state);
-        rows.push(current.since(&previous, span));
+        rows.push(current.since(&previous, span, occupancy.take()));
     }
     rows
 }
@@ -1176,7 +1215,12 @@ impl Sample {
         }
     }
 
-    fn since(&self, earlier: &Sample, span: Duration) -> WindowRow {
+    fn since(
+        &self,
+        earlier: &Sample,
+        span: Duration,
+        occupancy_us: Option<Percentiles>,
+    ) -> WindowRow {
         let played = self.counts.played_samples.saturating_sub(self.refused);
         let played_before = earlier
             .counts
@@ -1194,6 +1238,10 @@ impl Sample {
             render_overruns: self.overruns.saturating_sub(earlier.overruns),
             expected_samples: self.counts.expected_samples - earlier.counts.expected_samples,
             played_samples: played.saturating_sub(played_before),
+            // Handed in rather than differenced, because it arrives from a store
+            // that was emptied at this boundary and so is already this window's
+            // and only this window's.
+            occupancy_us,
         }
     }
 }
@@ -1347,7 +1395,7 @@ mod tests {
             underruns: 1,
             overruns: 2,
         };
-        let row = later.since(&earlier, Duration::from_secs(10));
+        let row = later.since(&earlier, Duration::from_secs(10), None);
         assert_eq!(row.expected_samples, 480_000);
         assert_eq!(row.played_samples, 478_760);
         assert_eq!(row.hole(), 1_240);
@@ -1355,5 +1403,44 @@ mod tests {
         assert_eq!(row.render_callbacks, 1_875);
         assert_eq!(row.render_underruns, 0);
         assert_eq!(row.render_overruns, 2);
+        assert_eq!(
+            row.occupancy_us, None,
+            "a window with no pull in it has no occupancy, which is not an occupancy of zero"
+        );
+    }
+
+    /// The two stores the producer writes to, working the way a run needs them
+    /// to: the buffer holds two frames while the first window is open and six
+    /// while the second is, and the rows have to say so rather than both
+    /// reporting the run's mixture of the two.
+    ///
+    /// This is the shape of the defect the per-window figure exists to rule out.
+    /// A running store would give both windows the same median, and every other
+    /// number in both rows would still be right.
+    #[test]
+    fn a_window_carries_the_occupancy_measured_inside_it() {
+        let histogram = WindowOccupancy::new(8, 5_000);
+        let mut reader = histogram.reader();
+        let sample = Sample {
+            counts: counts(240_000, 240_000),
+            lost: 0,
+            refused: 0,
+            callbacks: 1_000,
+            underruns: 0,
+            overruns: 0,
+        };
+
+        for _ in 0..2_000 {
+            histogram.record(2);
+        }
+        let first = sample.since(&sample, Duration::from_secs(10), reader.take());
+        assert_eq!(first.occupancy_us.map(|held| held.p50), Some(10_000));
+
+        for _ in 0..2_000 {
+            histogram.record(6);
+        }
+        let second = sample.since(&sample, Duration::from_secs(10), reader.take());
+        assert_eq!(second.occupancy_us.map(|held| held.p50), Some(30_000));
+        assert_eq!(second.occupancy_us.map(|held| held.min), Some(30_000));
     }
 }

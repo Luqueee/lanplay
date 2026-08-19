@@ -125,7 +125,7 @@ const IDLE_STOP: Duration = Duration::from_secs(2);
 /// beyond what the measurement can resolve and still four hundred times narrower
 /// than the gap between the two contract tones. Nothing that is the tone lands
 /// outside it, and nothing that is not lands inside.
-const TONE_TOLERANCE_HZ: f64 = 5.0;
+pub const TONE_TOLERANCE_HZ: f64 = 5.0;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Options {

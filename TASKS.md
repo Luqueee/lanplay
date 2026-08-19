@@ -5,6 +5,61 @@ already been decided, so that none of it has to be reconstructed from the commit
 
 `docs/testing.md` has the harness design, `.claude/skills/realtime-audio/SKILL.md` has the
 findings that shaped the code, and `tools/gates.toml` says which gates can run where.
+`docs/reports/2026-08-15-audio-and-ci.md` is how the phase reached the state below.
+
+## Where the phase stands, and why the audio code is frozen
+
+**There is no current evidence of a defect in capture, the codec, RTP, the jitter buffer or
+CoreAudio that explains the continuity failure. The failure observed is quantitatively explained
+by frames arriving after their deadline. A7 and A8 stay blocked until a run exists on a stable
+radio with negligible lateness.**
+
+The arithmetic that says so, from A6's ten-minute arm: 2499 late frames times 240 samples is
+599760, against a continuity hole of 600960 - one window's rounding apart. Device underruns zero,
+RTP loss zero, buffer overruns zero. Nothing is hiding anywhere else.
+
+```
+A0  contract and telemetry                     done
+A1  WASAPI loopback                            done
+A2  Opus in isolation                           done
+A3  RTP audio, with its radio figure and control done
+A4  receiver and jitter buffer                  done
+A5  CoreAudio                                   done
+A6  Windows to Mac, functional                  works
+A6  the continuity criterion                    fails, 2.09 % under the current radio
+A7  drift                                       not interpretable while lateness exists
+A8  jitter target                               refused, no candidate holds
+```
+
+So the next block is not more audio. It is a reproducible radio condition, and until one exists
+every comparison - 5 against 10 ms, 10 against 15, drift, continuity - is contaminated by an
+external variable that moves more than the one under study.
+
+### The order when a stable link exists
+
+Not the sweep first. A6 has to establish that a base condition exists in which this system works
+before anything is ranked against anything.
+
+```
+1  per-window occupancy in place
+2  audio-e2e-gate 60
+3  audio-e2e-gate 600
+4  A7 from those same 600 s, if A6 passed
+5  jitter-target-sweep
+6  choose A8
+```
+
+### What stays out until the data asks for it
+
+Opus FEC, NACK, audio retransmission, jitter targets above 20 ms, another codec, another frame
+size, per-process capture, an A/V sync controller and an adaptive resampler. And the capture
+period, which is not a candidate any more: the losses live in an upper tail of lateness, not in a
+fixed cost every frame pays, and the distribution said so before anything was changed.
+
+A8's answer, when it comes, is the **smallest** target that holds continuity reproducibly - not the
+one with the prettiest statistics. If 5 ms fails and 10, 15 and 20 hold, the answer is 10. Audio
+latency is structural and paid on every frame forever; ten more milliseconds bought for
+statistical comfort is a loss.
 
 ## What is already established
 
