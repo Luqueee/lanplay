@@ -1,0 +1,53 @@
+results   /tmp/radio-preflight/20260819-224140
+window    120 s at 1000 ms, as a preflight for a 600 s run
+requires  an association this Mac can read; nothing crosses the air here, so this
+          gate needs no second machine and no endpoint, and a Mac with no
+          association is refused with that as the reason rather than filtered out
+          of a listing
+sampled   120 rows
+
+the band, and where it came from
+
+  3.0 dB      A8's thirteen arms had median signal from -70 to -67 dBm and
+              median rate from 288 to 576 Mbps over the same arms, so three
+              decibels is the movement that doubles this radio's rate
+  99 per cent all nineteen committed windows delivered every row they were
+              due at the interval each was taken at
+  factor 2    the same doubling, on the quantity it was measured on
+
+the window
+
+  channel           100 at 80 MHz, radar band 1
+  signal            median -60 dBm, -66 to -59, sd 1.65, noise -94 dBm
+  negotiated rate   median 576 Mbps, 146 to 720
+  movement          -1.474 +-0.226 dB/min, scatter 1.43 dB about it
+
+  hold  the window was sampled               120 rows of 120 due at 1000 ms, 100.0 per cent against 99
+  hold  the link stayed where it was         channel 100 at 80 MHz, radar band 1
+  hold  the window can resolve the budget    the slope is worth +-0.226 dB/min over this 119 s window, which is +-2.26 dB over 10 min against a 3.0 dB budget
+  OUT   the signal holds still for the run   -1.474 dB/min projects -14.74 dB over 10 min against a 3.0 dB budget
+  hold  the signal's halves agree            -1.0 dB between the half medians against 3.0
+  hold  the negotiated rate's halves agree   a factor of 1.19 between the half medians against 2.0
+
+  label written to /tmp/radio-preflight/20260819-224140/label.json, and a run that does not carry it cannot be
+  compared with any other run
+
+the control arm, radio-trace-first-120s.csv: the window this gate exists to have stopped
+
+  channel           36 at 80 MHz, radar band 0
+  signal            median -76 dBm, -79 to -69, sd 3.07, noise -95 dBm
+  negotiated rate   median 360 Mbps, 288 to 576
+  movement          -4.305 +-0.293 dB/min, scatter 1.79 dB about it
+
+  hold  the window was sampled               110 rows of 110 due at 1100 ms, 100.0 per cent against 99
+  hold  the link stayed where it was         channel 36 at 80 MHz, radar band 0
+  hold  the window can resolve the budget    the slope is worth +-0.293 dB/min over this 120 s window, which is +-2.93 dB over 10 min against a 3.0 dB budget
+  OUT   the signal holds still for the run   -4.305 dB/min projects -43.05 dB over 10 min against a 3.0 dB budget
+  OUT   the signal's halves agree            -6.0 dB between the half medians against 3.0
+  hold  the negotiated rate's halves agree   a factor of 1.33 between the half medians against 2.0
+
+REFUSE 1 of 6 criteria are outside the band: the signal holds still for the run
+       This is not a failure and there is no failure available here. A radio
+       that moves is the absence of a condition under which anything
+       downstream can be measured, so the run is not worth starting rather
+       than the pipeline being wrong.

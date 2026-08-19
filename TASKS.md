@@ -121,6 +121,53 @@ not comparable between arms, because the anchor is the first admitted packet's o
 target and a bad first packet shifts every delay in a run by a constant. Late counts and continuity
 holes are comparable; p50 and p95 of arrival delay are not.
 
+### A8 attempted on 19 August and refused by the link, before any arm ran
+
+The sweep was armed with three things it did not have before - `tools/radio-preflight.sh` as a hard
+precondition, a per-arm interpretability check, and the per-arm depth control - and then it did not
+run, because the preflight refused. Three live 120 s windows, all on channel 100:
+
+| window | RSSI | slope | half medians |
+|---|---|---|---|
+| 22:36 | -68 -> -70 dBm | -0.593 dB/min | -1.0 dB |
+| 22:38 | -71 -> **-59** dBm | **+6.907 dB/min** | +10.0 dB |
+| 22:41 | -59 -> -61 dBm | -1.474 dB/min | -1.0 dB |
+
+The link is not falling, it is **swinging twelve decibels in six minutes**, and none of the three can
+project across a 600 s run inside the 3 dB budget. A forty-minute sweep across that ranks the swing.
+
+A mistake worth keeping, because it is the reason this is written down rather than retried. After the
+first refusal a 30 s sample read a flat -59 dBm and that was used to argue the refusal was transient.
+It was taken at the top of the 22:38 climb: **a window short enough to be convenient cannot see a
+swing slower than itself**, and the instrument was right both times while the argument against it was
+not. Two windows were taken and both are recorded; a third would have been shopping for a pass.
+
+What the arming added, and the failure each part is capable of:
+
+The **interpretability check** turns A6.1's finding into an instrument. That run had 4587 frames late,
+4587 underruns, 4587 concealments and exactly 4587 x 240 samples of hole, and the identity is the
+pipeline's shape rather than a coincidence: nothing else starves this buffer and nothing else fills an
+underrun. An arm where it stops holding has some other mechanism in it and its percentage reads like
+one that does not, so it is refused rather than noted. Demonstrated by lowering `plc_frames` by one in
+a copy of the clean 600 s envelope: the real document is interpretable and the copy is refused at a
+single frame of disagreement.
+
+The **depth control** records occupancy at both ends of every arm and its slope. It decides nothing -
+A7 is closed and a sweep does not reopen it - and exists because a target that ran while the buffer
+sat three frames deeper was ranked with three frames it did not earn. A7's +9.29 ppm projects 1.1 ms
+across a 120 s arm, below the 5 ms this instrument resolves, so the check is between arms and not
+within one: if the targets that held began a whole frame deeper than the ones that broke, the report
+says the winner is not safe to build on.
+
+And a defect found in that control before it ever ran: re-deciding an older record raised a
+`KeyError`. A record written before those columns cannot answer the question, and a traceback is
+neither an answer nor a refusal. It now refuses and names the reason.
+
+The ranking contract, restated because the audits changed it: rank on **late frames, continuity hole,
+concealments and underruns**, never on arrival-delay percentiles. If every target fails, A8 has no
+answer on this link and the targets are **not** extended to 30, 40 or 80 ms - that would be a product
+decision about the latency budget, taken elsewhere.
+
 ### A7 answered: both clock figures were right and the prediction crossed a boundary
 
 Measured directly over a 1200 s arm, each rate against its own machine's monotonic clock and nothing

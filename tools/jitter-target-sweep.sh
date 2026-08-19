@@ -450,6 +450,26 @@ PY
     echo "radio     host -> en0 $LOCAL_IP:$PORT"
     echo "device    rendering through $DEVICE"
 
+    # ---- and whether the link will hold still long enough to rank anything ----
+    #
+    # The environment probe above answers whether a radio exists. It has no opinion on
+    # whether that radio is about to move, and this sweep's whole output is a comparison
+    # between arms taken forty minutes apart: A6 was measured twice on the same
+    # association, once at -52 dBm and 1200 Mbps and once falling from -70 to -78 at 288 to
+    # 432 Mbps, and the second produced a continuity figure 1.8 times the first. Ranking
+    # four targets across a link doing that ranks the link.
+    #
+    # So the projection is asked for once, before any arm runs, from the instrument that
+    # measures it rather than from a second reading of the same idea here. A refusal here
+    # costs two minutes and ends the run; the alternative costs forty and produces a
+    # ranking of the weather.
+
+    if ! "$REPO/tools/radio-preflight.sh" >"$OUT/radio-preflight.txt" 2>&1; then
+        sed 's/^/  /' "$OUT/radio-preflight.txt"
+        refuse "the link was not steady enough to rank targets across; the preflight above says by how much"
+    fi
+    grep -E "^(preflight|NOTE)" "$OUT/radio-preflight.txt" | sed 's/^/  /'
+
     # ---- both ends built where they run -------------------------------------
 
     cargo build --release -q -p lanplay-audio-render
@@ -638,6 +658,41 @@ PY
         local code=0
         decide "$document" || code=$?
 
+        # ---- is this arm interpretable at all ----------------------------------
+        #
+        # A6.1 measured the three deciding counters on a clean run and found them not close
+        # but identical: 4587 frames late, 4587 buffer underruns, 4587 concealments, and
+        # 4587 x 240 exactly the continuity hole. That is not a coincidence to be admired,
+        # it is the pipeline's shape - every late frame is an underrun because nothing else
+        # ever starves this buffer, and every underrun is concealed because the concealer is
+        # the only thing that fills one - and it makes the identity an instrument.
+        #
+        # An arm where it stops holding has some other mechanism in it: a starve that was
+        # not a late frame, a concealment with no underrun behind it, a hole that does not
+        # divide by the frame. Whatever that mechanism is, the arm is no longer measuring
+        # the tail this sweep ranks, and a percentage from it reads exactly like one that
+        # is. So it is refused rather than noted, and it is checked on every arm including
+        # the control, whose relay breaks the path on purpose and must break it in a way
+        # that still shows up in these four counters.
+        local late underruns concealed hole expected_hole
+        late="$("$XTASK" verdict --observation rtp_late "$document")"
+        underruns="$("$XTASK" verdict --observation jitter_underruns "$document")"
+        concealed="$("$XTASK" verdict --observation plc_frames "$document")"
+        hole="$("$XTASK" verdict --observation continuity_hole "$document")"
+        expected_hole=$((concealed * FRAME_MS * 48))
+        if [ "$late" != "$underruns" ] || [ "$underruns" != "$concealed" ]; then
+            refuse "arm $arm reports $late frames late, $underruns underruns and $concealed concealed," \
+                "which do not agree, so something starves or conceals in it that is not a late frame" \
+                "and its continuity figure is not comparable with the other arms'"
+        fi
+        # One frame of slack, and only one: the hole is counted in samples against a
+        # per-callback expectation, so a run ending mid-callback can round by less than a
+        # frame. Anything larger is a second mechanism.
+        awk -v seen="$hole" -v want="$expected_hole" -v slack="$((FRAME_MS * 48))" \
+            'BEGIN { exit ((seen - want <= slack && want - seen <= slack) ? 0 : 1) }' ||
+            refuse "arm $arm conceals $concealed frames, which is $expected_hole samples, against a" \
+                "continuity hole of $hole; the two describe different events and the arm is not interpretable"
+
         local name value
         local -a values=()
         for name in $RECEIVER_KEYS; do
@@ -662,12 +717,43 @@ PY
         [ "$radio_summary" != "absent" ] ||
             refuse "arm $arm left a radio trace with no rows in it, so its conditions were not recorded"
 
+        # ---- the depth this arm was handed, as a control on the ranking ---------
+        #
+        # A7 measured a real drift: this pair of machines fills the buffer at +9.29 ppm
+        # referred to the Mac's timebase, closing against +238 samples observed over 1200 s.
+        # Over one 120 s arm that is 1.1 ms, which is less than the frame this instrument is
+        # quantised to, so drift cannot move an arm's own occupancy by a readable amount.
+        # Across thirteen arms and forty minutes it can, and an arm that began with 15 ms of
+        # depth was ranked with three frames more headroom than one that began with 5.
+        #
+        # So the depth is recorded, per arm, at both ends. It decides nothing: A7 is closed
+        # and is not reopened by a sweep. It is here so that a target cannot come out ahead
+        # on depth it was handed rather than on the target it was testing, and so the
+        # question is answerable from the file afterwards instead of being unanswerable.
+        local occupancy_control
+        occupancy_control="$(awk '/^window /{
+            for (i = 1; i < NF; i++) if ($i == "occupancy" && $(i + 1) == "ms" && $(i + 2) == "p50") {
+                p50 = $(i + 3)
+                if (n == 0) first = p50
+                last = p50; n++
+                sx += n; sy += p50; sxy += n * p50; sxx += n * n
+            }
+        }
+        END {
+            if (n < 3) { print "absent"; exit }
+            slope = (n * sxy - sx * sy) / (n * sxx - sx * sx)
+            printf "%.1f,%.1f,%.1f,%.2f", first, last, last - first, slope
+        }' "$OUT/$arm.receiver.out")"
+        [ "$occupancy_control" != "absent" ] ||
+            refuse "arm $arm printed fewer than three per-window occupancy rows, so the depth it was" \
+                "handed cannot be read and its rank cannot be told from a rank it was given"
+
         local row
         row="$arm,$pass,$target,$code,$sender_code"
         for value in "${values[@]}"; do
             row="$row,$value"
         done
-        echo "$row,$radio_summary" >>"$ARMS"
+        echo "$row,$radio_summary,$occupancy_control" >>"$ARMS"
     }
 
     # ---- the control first --------------------------------------------------
@@ -678,7 +764,8 @@ PY
     {
         printf 'arm,pass,target_ms,verdict,sender_verdict'
         for key in $RECEIVER_KEYS; do printf ',%s' "$key"; done
-        printf ',rssi_mean_dbm,rssi_min_dbm,rssi_max_dbm,rate_mean_mbps,radio_rows\n'
+        printf ',rssi_mean_dbm,rssi_min_dbm,rssi_max_dbm,rate_mean_mbps,radio_rows'
+        printf ',occupancy_start_ms,occupancy_end_ms,occupancy_travel_ms,occupancy_slope_ms_per_window\n'
     } >"$ARMS"
 
     run_arm control "$CONTROL_TARGET" --stall-ms "$STALL_MS" --stall-every-ms "$STALL_EVERY_MS"
@@ -838,6 +925,51 @@ for target in targets:
         f"{statistics.median(margin(row) for row in rows_for):.2f} ms; continuity "
         f"{'held' if holds else 'broke'}"
     )
+
+# --- and the depth each target was handed, which decides nothing ---------------
+#
+# A7 is closed and a sweep does not reopen it. This exists because the ranking above is a
+# comparison between arms up to forty minutes apart on a link that fills this buffer at
+# +9.29 ppm, and a target that happened to run while the buffer sat three frames deeper was
+# ranked with three frames it did not earn. Predicted travel over one arm is below the frame
+# this instrument resolves, so within an arm the drift is unreadable and the check is
+# between arms: if the targets that held started systematically deeper than the ones that
+# broke, the ranking is depth and not target, and the reader has to be able to see that.
+#
+# A record written before these columns existed cannot answer the question, and the second
+# form of this gate re-decides exactly such records. Refusing is the answer; a traceback is
+# not, and neither is carrying on without the control and printing a winner as though the
+# depth had been checked.
+if any("occupancy_start_ms" not in row for row in rows):
+    print()
+    print("REFUSE this record predates the per-arm occupancy columns, so the depth each target was")
+    print("       handed cannot be read from it. The ranking in it may be sound and cannot be")
+    print("       confirmed here: re-run the sweep rather than re-deciding this one.")
+    sys.exit(REFUSE)
+starts = {target: [row["occupancy_start_ms"] for row in by_target[target]] for target in targets}
+predicted_travel_ms = 9.29e-6 * arm_s * 1000.0
+findings.append(
+    f"depth handed to each target at its first window: "
+    + ", ".join(f"{target:.0f} ms -> {statistics.median(starts[target]):.1f}" for target in targets)
+    + f" ms;\n          A7's +9.29 ppm projects {predicted_travel_ms:.2f} ms of travel across a "
+    f"{arm_s:.0f} s arm, below the {step:.0f} ms this\n          instrument resolves, and the arms "
+    f"travelled "
+    + ", ".join(f"{row['occupancy_travel_ms']:+.1f}" for row in sorted(sweep, key=lambda r: r["arm"]))
+    + " ms"
+)
+
+deepest_held = [target for target in targets if all(row["verdict"] == 0 for row in by_target[target])]
+if deepest_held and len(deepest_held) < len(targets):
+    broke = [target for target in targets if target not in deepest_held]
+    held_depth = statistics.median(d for target in deepest_held for d in starts[target])
+    broke_depth = statistics.median(d for target in broke for d in starts[target])
+    if held_depth - broke_depth >= step:
+        findings.append(
+            f"the targets that held continuity began {held_depth:.1f} ms deep against "
+            f"{broke_depth:.1f} ms for those that\n          broke, a whole frame or more apart, so "
+            f"part of what separates them is depth they were handed\n          rather than the target "
+            f"they were testing; the winner below is not safe to build on"
+        )
 
 # --- and whether the direction survived each pass ----------------------------
 #
