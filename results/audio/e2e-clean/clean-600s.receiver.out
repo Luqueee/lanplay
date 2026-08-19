@@ -1,0 +1,101 @@
+audio-e2e-receiver: producer scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+producer scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+receiver scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+every deadline granted yes
+rtp received 120005
+rtp lost 0 of 120005 expected
+rtp duplicate 0
+rtp reordered 0
+rtp late 4587
+arrival delay ms p50 -16.5 p95 -4.3 p99 12.2 max 85.0 min -25.2
+frames played 115413
+plc frames 4587
+jitter occupancy ms p50 15.0 p95 20.0 p99 20.0 max 25.0
+jitter underruns 4587
+jitter overruns 0 dropping 0 frames
+decode us p50 10 p99 24
+render callbacks 112493
+render underruns 0 over 0 frames
+render overruns 0 over 0 frames
+continuity expected 28800000 played 27699120 unbroken no
+tone left 997.0 right 1997.0
+continuity hole 1100880 samples over 120000 frame periods
+worst window hole 29040 samples
+tone channels distinct yes
+tone resolution 2.00 hz over 24000 frames
+rtp off grid 0
+rtp oversize 0
+rtp foreign ssrc 0
+decode failures 0
+conceal us p50 10 p99 69
+producer interval us p50 5000 p99 5000 max 5007
+render interval us p50 5333 p99 5346 max 5370
+ring occupancy frames min 1888 p50 2080 max 2272 of 4096 primed to 496 after a 32.4 ms device start
+ring frames refused 0 consumed 28798208
+jitter target ms 10 ceiling ms 30 over 8 slots
+frame ms 5
+device Altavoces del MacBook Pro (named) at 48000 Hz 2 ch 32 bit float with a 256 frame io buffer
+bind 0.0.0.0:5012 ssrc 3345340606
+odd cycles 0
+measurements dropped 0
+span s 600.0 device span s 600.0
+window 0 s 10.0 rtp/s 200 lost 0 plc 121 played 1879 jitter underruns 121 callbacks 1876 underruns 0 overruns 0 expected 480000 played 450960 hole 29040 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls
+window 1 s 10.0 rtp/s 200 lost 0 plc 100 played 1901 jitter underruns 100 callbacks 1875 underruns 0 overruns 0 expected 480240 played 456240 hole 24000 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls
+window 2 s 10.0 rtp/s 200 lost 0 plc 80 played 1920 jitter underruns 80 callbacks 1876 underruns 0 overruns 0 expected 480000 played 460800 hole 19200 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls
+window 3 s 10.0 rtp/s 200 lost 0 plc 74 played 1926 jitter underruns 74 callbacks 1875 underruns 0 overruns 0 expected 480000 played 462240 hole 17760 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls
+window 4 s 10.0 rtp/s 200 lost 0 plc 96 played 1905 jitter underruns 96 callbacks 1875 underruns 0 overruns 0 expected 480240 played 457200 hole 23040 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls
+window 5 s 10.0 rtp/s 200 lost 0 plc 91 played 1909 jitter underruns 91 callbacks 1876 underruns 0 overruns 0 expected 480000 played 458160 hole 21840 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls
+window 6 s 10.0 rtp/s 200 lost 0 plc 107 played 1895 jitter underruns 107 callbacks 1876 underruns 0 overruns 0 expected 480480 played 454800 hole 25680 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2002 pulls
+window 7 s 10.0 rtp/s 200 lost 0 plc 120 played 1881 jitter underruns 120 callbacks 1876 underruns 0 overruns 0 expected 480240 played 451440 hole 28800 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls
+window 8 s 10.0 rtp/s 200 lost 0 plc 67 played 1934 jitter underruns 67 callbacks 1876 underruns 0 overruns 0 expected 480240 played 464160 hole 16080 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls
+window 9 s 10.0 rtp/s 200 lost 0 plc 80 played 1920 jitter underruns 80 callbacks 1876 underruns 0 overruns 0 expected 480000 played 460800 hole 19200 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls
+window 10 s 10.0 rtp/s 200 lost 0 plc 81 played 1920 jitter underruns 81 callbacks 1875 underruns 0 overruns 0 expected 480240 played 460800 hole 19440 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls
+window 11 s 10.0 rtp/s 200 lost 0 plc 86 played 1915 jitter underruns 86 callbacks 1876 underruns 0 overruns 0 expected 480240 played 459600 hole 20640 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls
+window 12 s 10.0 rtp/s 200 lost 0 plc 83 played 1918 jitter underruns 83 callbacks 1876 underruns 0 overruns 0 expected 480240 played 460320 hole 19920 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls
+window 13 s 10.0 rtp/s 200 lost 0 plc 118 played 1882 jitter underruns 118 callbacks 1875 underruns 0 overruns 0 expected 480000 played 451680 hole 28320 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls
+window 14 s 10.0 rtp/s 200 lost 0 plc 99 played 1902 jitter underruns 99 callbacks 1876 underruns 0 overruns 0 expected 480240 played 456480 hole 23760 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls
+window 15 s 10.0 rtp/s 200 lost 0 plc 87 played 1913 jitter underruns 87 callbacks 1875 underruns 0 overruns 0 expected 480000 played 459120 hole 20880 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls
+window 16 s 10.0 rtp/s 200 lost 0 plc 109 played 1891 jitter underruns 109 callbacks 1875 underruns 0 overruns 0 expected 480000 played 453840 hole 26160 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls
+window 17 s 10.0 rtp/s 200 lost 0 plc 75 played 1926 jitter underruns 75 callbacks 1876 underruns 0 overruns 0 expected 480240 played 462240 hole 18000 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls
+window 18 s 10.0 rtp/s 200 lost 0 plc 102 played 1898 jitter underruns 102 callbacks 1875 underruns 0 overruns 0 expected 480000 played 455520 hole 24480 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls
+window 19 s 10.0 rtp/s 200 lost 0 plc 76 played 1925 jitter underruns 76 callbacks 1876 underruns 0 overruns 0 expected 480240 played 462000 hole 18240 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls
+window 20 s 10.0 rtp/s 200 lost 0 plc 71 played 1930 jitter underruns 71 callbacks 1876 underruns 0 overruns 0 expected 480240 played 463200 hole 17040 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls
+window 21 s 10.0 rtp/s 200 lost 0 plc 87 played 1914 jitter underruns 87 callbacks 1876 underruns 0 overruns 0 expected 480240 played 459360 hole 20880 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls
+window 22 s 10.0 rtp/s 200 lost 0 plc 87 played 1914 jitter underruns 87 callbacks 1876 underruns 0 overruns 0 expected 480240 played 459360 hole 20880 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 20.0 over 2001 pulls
+window 23 s 10.0 rtp/s 200 lost 0 plc 57 played 1943 jitter underruns 57 callbacks 1875 underruns 0 overruns 0 expected 480000 played 466320 hole 13680 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls
+window 24 s 10.0 rtp/s 200 lost 0 plc 60 played 1941 jitter underruns 60 callbacks 1876 underruns 0 overruns 0 expected 480240 played 465840 hole 14400 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 20.0 over 2001 pulls
+window 25 s 10.0 rtp/s 200 lost 0 plc 67 played 1934 jitter underruns 67 callbacks 1875 underruns 0 overruns 0 expected 480240 played 464160 hole 16080 occupancy ms p50 10.0 p95 15.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 26 s 10.0 rtp/s 200 lost 0 plc 78 played 1922 jitter underruns 78 callbacks 1876 underruns 0 overruns 0 expected 480000 played 461280 hole 18720 occupancy ms p50 15.0 p95 15.0 p99 20.0 min 0.0 max 20.0 over 2000 pulls
+window 27 s 10.0 rtp/s 200 lost 0 plc 83 played 1918 jitter underruns 83 callbacks 1876 underruns 0 overruns 0 expected 480240 played 460320 hole 19920 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 28 s 10.0 rtp/s 200 lost 0 plc 80 played 1920 jitter underruns 80 callbacks 1875 underruns 0 overruns 0 expected 480000 played 460800 hole 19200 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2000 pulls
+window 29 s 10.0 rtp/s 200 lost 0 plc 80 played 1921 jitter underruns 80 callbacks 1876 underruns 0 overruns 0 expected 480240 played 461040 hole 19200 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 30 s 10.0 rtp/s 200 lost 0 plc 103 played 1898 jitter underruns 103 callbacks 1876 underruns 0 overruns 0 expected 480240 played 455520 hole 24720 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 31 s 10.0 rtp/s 200 lost 0 plc 86 played 1915 jitter underruns 86 callbacks 1875 underruns 0 overruns 0 expected 480240 played 459600 hole 20640 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 32 s 10.0 rtp/s 200 lost 0 plc 74 played 1927 jitter underruns 74 callbacks 1876 underruns 0 overruns 0 expected 480240 played 462480 hole 17760 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 33 s 10.0 rtp/s 200 lost 0 plc 48 played 1952 jitter underruns 48 callbacks 1875 underruns 0 overruns 0 expected 480000 played 468480 hole 11520 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2000 pulls
+window 34 s 10.0 rtp/s 200 lost 0 plc 71 played 1930 jitter underruns 71 callbacks 1876 underruns 0 overruns 0 expected 480240 played 463200 hole 17040 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 35 s 10.0 rtp/s 200 lost 0 plc 63 played 1938 jitter underruns 63 callbacks 1876 underruns 0 overruns 0 expected 480240 played 465120 hole 15120 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 36 s 10.0 rtp/s 200 lost 0 plc 64 played 1936 jitter underruns 64 callbacks 1875 underruns 0 overruns 0 expected 480000 played 464640 hole 15360 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2000 pulls
+window 37 s 10.0 rtp/s 200 lost 0 plc 77 played 1925 jitter underruns 77 callbacks 1877 underruns 0 overruns 0 expected 480480 played 462000 hole 18480 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2002 pulls
+window 38 s 10.0 rtp/s 200 lost 0 plc 54 played 1946 jitter underruns 54 callbacks 1875 underruns 0 overruns 0 expected 480000 played 467040 hole 12960 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2000 pulls
+window 39 s 10.0 rtp/s 200 lost 0 plc 74 played 1927 jitter underruns 74 callbacks 1876 underruns 0 overruns 0 expected 480240 played 462480 hole 17760 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 40 s 10.0 rtp/s 200 lost 0 plc 67 played 1934 jitter underruns 67 callbacks 1876 underruns 0 overruns 0 expected 480240 played 464160 hole 16080 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 41 s 10.0 rtp/s 200 lost 0 plc 60 played 1940 jitter underruns 60 callbacks 1875 underruns 0 overruns 0 expected 480000 played 465600 hole 14400 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2000 pulls
+window 42 s 10.0 rtp/s 200 lost 0 plc 62 played 1939 jitter underruns 62 callbacks 1876 underruns 0 overruns 0 expected 480240 played 465360 hole 14880 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 43 s 10.0 rtp/s 200 lost 0 plc 59 played 1941 jitter underruns 59 callbacks 1875 underruns 0 overruns 0 expected 480000 played 465840 hole 14160 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2000 pulls
+window 44 s 10.0 rtp/s 200 lost 0 plc 67 played 1934 jitter underruns 67 callbacks 1876 underruns 0 overruns 0 expected 480240 played 464160 hole 16080 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 45 s 10.0 rtp/s 200 lost 0 plc 67 played 1933 jitter underruns 67 callbacks 1876 underruns 0 overruns 0 expected 480000 played 463920 hole 16080 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2000 pulls
+window 46 s 10.0 rtp/s 200 lost 0 plc 80 played 1921 jitter underruns 80 callbacks 1875 underruns 0 overruns 0 expected 480240 played 461040 hole 19200 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 47 s 10.0 rtp/s 200 lost 0 plc 80 played 1921 jitter underruns 80 callbacks 1876 underruns 0 overruns 0 expected 480240 played 461040 hole 19200 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 48 s 10.0 rtp/s 200 lost 0 plc 77 played 1923 jitter underruns 77 callbacks 1875 underruns 0 overruns 0 expected 480000 played 461520 hole 18480 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2000 pulls
+window 49 s 10.0 rtp/s 200 lost 0 plc 87 played 1914 jitter underruns 87 callbacks 1876 underruns 0 overruns 0 expected 480240 played 459360 hole 20880 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 50 s 10.0 rtp/s 201 lost 0 plc 70 played 1931 jitter underruns 70 callbacks 1876 underruns 0 overruns 0 expected 480240 played 463440 hole 16800 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 51 s 10.0 rtp/s 200 lost 0 plc 56 played 1944 jitter underruns 56 callbacks 1875 underruns 0 overruns 0 expected 480000 played 466560 hole 13440 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2000 pulls
+window 52 s 10.0 rtp/s 200 lost 0 plc 59 played 1942 jitter underruns 59 callbacks 1875 underruns 0 overruns 0 expected 480240 played 466080 hole 14160 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 53 s 10.0 rtp/s 200 lost 0 plc 51 played 1949 jitter underruns 51 callbacks 1876 underruns 0 overruns 0 expected 480000 played 467760 hole 12240 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2000 pulls
+window 54 s 10.0 rtp/s 200 lost 0 plc 45 played 1956 jitter underruns 45 callbacks 1876 underruns 0 overruns 0 expected 480240 played 469440 hole 10800 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 55 s 10.0 rtp/s 200 lost 0 plc 59 played 1942 jitter underruns 59 callbacks 1876 underruns 0 overruns 0 expected 480240 played 466080 hole 14160 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 56 s 10.0 rtp/s 200 lost 0 plc 51 played 1950 jitter underruns 51 callbacks 1876 underruns 0 overruns 0 expected 480240 played 468000 hole 12240 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 57 s 10.0 rtp/s 200 lost 0 plc 63 played 1938 jitter underruns 63 callbacks 1876 underruns 0 overruns 0 expected 480240 played 465120 hole 15120 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 20.0 over 2001 pulls
+window 58 s 10.0 rtp/s 200 lost 0 plc 58 played 1943 jitter underruns 58 callbacks 1875 underruns 0 overruns 0 expected 480240 played 466320 hole 13920 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 25.0 over 2001 pulls
+window 59 s 9.8 rtp/s 200 lost 0 plc 53 played 1898 jitter underruns 53 callbacks 1830 underruns 0 overruns 0 expected 468240 played 455520 hole 12720 occupancy ms p50 15.0 p95 20.0 p99 20.0 min 0.0 max 25.0 over 1951 pulls
