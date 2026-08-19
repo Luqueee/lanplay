@@ -654,7 +654,9 @@ mod tests {
 
     #[test]
     fn a_device_running_slow_reads_negative_parts_per_million() {
-        let rate = drifting(-15.0, 600.0, 480, 0).rate().expect("many readings");
+        let rate = drifting(-15.0, 600.0, 480, 0)
+            .rate()
+            .expect("many readings");
         assert!(
             (rate.fitted_ppm + 15.0).abs() < 0.05,
             "fitted {} ppm",

@@ -195,10 +195,7 @@ pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Optio
         observe("sink_sample_time_samples", rate.samples);
         observe("sink_host_time_scatter_samples", rate.scatter_samples);
     }
-    observe(
-        "sink_invalid_timestamps",
-        render.invalid_timestamps as f64,
-    );
+    observe("sink_invalid_timestamps", render.invalid_timestamps as f64);
 
     if let Some(invariant) = receipt.invariant() {
         observe("samples_produced", invariant.produced as f64);
@@ -766,10 +763,7 @@ impl fmt::Display for Receipt {
                 writeln!(
                     f,
                     "samples produced {} consumed {} discarded {} concealed in {}",
-                    invariant.produced,
-                    invariant.consumed,
-                    invariant.discarded,
-                    invariant.inserted
+                    invariant.produced, invariant.consumed, invariant.discarded, invariant.inserted
                 )?;
                 writeln!(
                     f,

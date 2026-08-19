@@ -392,7 +392,8 @@ impl Invariant {
     /// table predicts a buffer that empties and the one that was measured
     /// filled.
     pub fn growth(&self) -> i64 {
-        (self.produced as i64 + self.inserted as i64) - (self.discarded as i64 + self.consumed as i64)
+        (self.produced as i64 + self.inserted as i64)
+            - (self.discarded as i64 + self.consumed as i64)
     }
 
     /// The growth the two rates predict over `seconds`, in samples.
@@ -1542,12 +1543,7 @@ struct Sample {
 }
 
 impl Sample {
-    fn read(
-        shared: &Shared,
-        ring: &PcmRing,
-        state: &RenderState,
-        frame_samples: u64,
-    ) -> Sample {
+    fn read(shared: &Shared, ring: &PcmRing, state: &RenderState, frame_samples: u64) -> Sample {
         Sample {
             counts: shared.buffer.lock().counts(),
             lost: shared.loss.lock().lost(),

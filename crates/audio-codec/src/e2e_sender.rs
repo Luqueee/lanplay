@@ -725,11 +725,7 @@ impl fmt::Display for Measurement {
                 self.carried.drift.readings()
             )?,
         }
-        writeln!(
-            f,
-            "source counter stalls {}",
-            self.carried.drift.stalled()
-        )?;
+        writeln!(f, "source counter stalls {}", self.carried.drift.stalled())?;
         writeln!(
             f,
             "timestamp steps {} exact {}",

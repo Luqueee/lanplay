@@ -111,14 +111,58 @@ invariant predicts for that buffer alone, agreeing inside the one frame the
 instrument is quantised to. Three steps rather than A6's one, which is what makes
 this staircase carry a rate where that one carried none.
 
-The corroboration that does not survive, recorded because it was offered before it
-was checked: the arrival delay's p50 moved from -10.9 ms on the 90 s arm to -36.3
-on the 1200 s one, which looks like drift and cannot be used as one. The deadline
-is anchored on the first admitted packet's own arrival plus the target, so a first
-packet that turned up in a bad moment shifts every delay in the run by a constant
-and permanently; twenty-five milliseconds of anchor offset reproduces the whole
-difference with no drift at all. It corroborates the sign and nothing else, and
-separating the two would need a per-window arrival delay, which is not recorded.
+The third instrument turned out not to be an instrument, and it took three attempts
+to establish that. All three are recorded, because two of them were wrong in ways
+that are easy to repeat and the third found a defect.
+
+The arrival delay's median moved from -12.0 ms on the 90 s arm to -36.3 on the
+1200 s one, and that was first offered as corroboration of the drift. It cannot be:
+a linear ramp of rate r moves a median by r x T / 2 and not by r x T, so +9.29 ppm
+over 1200 s is worth 5.6 ms of median and the move is 24 ms. Nor is it the anchor
+being unlucky, which was the second guess. A6.1's second 90 s arm settles that:
+two arms taken half an hour apart have medians of -12.0 and -11.4 ms and
+median-to-minimum spreads of 2.188 and 2.192, so the anchor and the jitter floor
+are both reproducible to well under a millisecond.
+
+What it is, is a defect in the arrival metric, and the deciding comparison needs
+that metric and this audit's occupancy histogram in one row. A frame arriving m
+milliseconds early waits m milliseconds in the buffer, so absent a cursor offset
+the margin's median and the occupancy's median must agree:
+
+  arm             overruns  frames skipped   margin p50   occupancy p50   out by
+  clean-90s              0     0 =  0 ms         -12.0            10.0    + 2.0 ms
+  a61-pair-90s           0     0 =  0 ms         -11.4            10.0    + 1.4 ms
+  clean-1200s            1     5 = 25 ms         -36.3            10.0    +26.3 ms
+
+The two arms with no skip agree to within the sub-frame phase the histogram cannot
+resolve. The one with a skip is out by 26.3 ms, and taking the control mean off
+leaves 24.6 against the 25 ms that five skipped frames create. The buffer's ceiling
+advances the cursor past every position it discards, and the metric's deadline is
+`playout_anchor + (ts - anchor_rtp)/48000`, which does not follow the cursor. So
+from that event onward the metric reports 25 ms more margin than the buffer has,
+permanently. Two arms as a negative control, one as the positive, and the size
+right to 0.4 ms.
+
+Its timing is startup, as receive.rs:911 predicts for a producer late to the
+anchor. No window contains a skip - cursor travel inside the 120 windows is 239990
+frames against 239990 pulls, while the run total is 240005 against 240000 - and
+window 0 opens ten seconds in, so the event is inside those ten seconds. Window 0's
+occupancy p50 is 0.0 ms, which is a buffer that had just been emptied.
+
+Which leaves the metric unusable here in both of its statistics, and one figure
+withdrawn. Its location carries the 24.6 ms offset. Its internal spread looked
+immune, since a constant offset shifts the median and the minimum together, and
+solving p50 - min = rT/2 + j across the 90 s and 1200 s arms gave 13.28 ppm - but
+that solve does not close against the location. Corrected by the measured offset
+the long arm's median is -11.7 ms against -12.0 and -11.4 on the short arms, so the
+median did not move at all where 13.28 ppm demands eight milliseconds. Three
+unknowns - the rate, the jitter floor, and the instant of the skip - against two arm
+lengths is not a solve, and 13.28 ppm is withdrawn.
+
+So the jitter buffer's drift has two readings and not three. The samples invariant
+says +9.29 +-1.30 ppm and the occupancy staircase says +12.35 with a one-frame
+quantisation worth about +-4 ppm over this arm. They agree in sign and magnitude,
+one of them carries an error bar, and neither is averaged into the other.
 
 What both established rows came to. The host endpoint was -15 ppm in A1 and reads
 -15.0769 +-0.0001 here. This Mac's output was +5 ppm in A5 and reads +5.1545

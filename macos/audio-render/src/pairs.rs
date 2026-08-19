@@ -550,7 +550,10 @@ mod tests {
         let report = pairs.finish();
         assert_eq!(report.classes[0].late, 1);
         assert_eq!(report.classes[1].late, 1);
-        assert_eq!(report.classes[0].delay_us.map(|held| held.p50), Some(20_000));
+        assert_eq!(
+            report.classes[0].delay_us.map(|held| held.p50),
+            Some(20_000)
+        );
         assert_eq!(
             report.classes[0].step_us.map(|step| step.p50),
             Some(-4_956),

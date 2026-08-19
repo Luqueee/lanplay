@@ -139,12 +139,7 @@ impl RenderState {
     /// `nominal_hz` the rate the device advertises, which the drift below is a
     /// deviation from. Both sized and read by the caller before the device
     /// starts, because the callback cannot allocate and should not call.
-    pub fn new(
-        ring: Arc<PcmRing>,
-        channels: usize,
-        store: usize,
-        nominal_hz: f64,
-    ) -> RenderState {
+    pub fn new(ring: Arc<PcmRing>, channels: usize, store: usize, nominal_hz: f64) -> RenderState {
         // A billion ticks rather than one, because the conversion is integer and
         // a ratio of one twenty-fourth asked about a single tick quantises to
         // zero.

@@ -67,43 +67,59 @@ moving.
 That tail is delay and not loss - zero packets lost of 120005 - so nothing recovers it. FEC and NACK
 stay out for want of anything to retransmit.
 
-### A6.1, the pair timing audit, before anything is changed
+### A6.1 answered: the sender is innocent and the tail is the link's
 
-The sign has to be settled by measurement now, because if a per-pair delta comes out at +5 ms rather
-than the -4.956 ms the timestamps require, then something upstream is wrong and it is one of: the
-RTP timestamp, the playout deadline arithmetic, a capture timestamp assigned to the wrong sample,
-the sign or definition of the arrival-delay metric, or the pair ordering itself.
+The per-pair difference `lateness(second) - lateness(first)` is what the timestamps require, measured
+on three arms rather than argued:
 
-Report separately, over 60 to 120 s, for the first and second frame of each WASAPI packet: arrival
-margin p50, p95 and p99, late count, and underrun count - and above all the per-pair difference
-`lateness(second) - lateness(first)`, which is the quantity with a predicted value.
+| arm | p50 | p95 | in [-5, -4) ms | pairs |
+|---|---|---|---|---|
+| clean-90s | **-4.997 ms** | -4.992 | 96.0 % | 8998 |
+| a61-pair-90s | **-4.996 ms** | -4.988 | 96.4 % | 9000 |
+| clean-1200s | **-4.996 ms** | -4.988 | 95.9 % | 120004 |
 
-The anchor for a frame's media time is its **sample position**, not the instant a thread processed
-the packet. `IAudioCaptureClient::GetBuffer` reports the device position and a QPC value for the
-packet, so the first frame belongs at position P and the second at P + 240. Assigning both frames
-the packet's single QPC while the receiver reads their RTP timestamps as 5 ms apart would fabricate
-exactly a fixed offset in this telemetry, and that is one of the candidates above.
+Against a prediction of -4.956 ms. The second frame of each packet has five milliseconds **more**
+margin, so the burst cannot be what spends it, and the retracted paragraph above was wrong in exactly
+the way the arithmetic said it was.
 
-### What A8's question became, and what it is conditional on
+It is the **first** frame that is late, consistently: 524 against 384 on one 90 s arm, 476 against 354
+on the other, 8594 against 6391 over the 1200 s. The opposite of the claim that started this.
 
-Not "which of 5, 10, 15 and 20 ms holds", which the sweep answered with none. The reordering that is
-authorised is: **establish that the sender introduces no artificial structure, then find the smallest
-target that absorbs the link's natural tail.** Measuring targets against a stream with a cadence
-defect ranks the defect rather than the buffer.
+Two internal checks make the figures load-bearing rather than plausible. The population closes to the
+sample - 524 + 384 = 908 = the late count, 524 + 385 = 909 = the underruns, and 909 x 240 = 218160 =
+the continuity hole - and the within-pair step is mirrored by the cross-packet one, -4.996 against
++4.979, summing to -0.017 ms so that nothing is left unaccounted per 10 ms of audio.
 
-What is **not** authorised is the sender change itself. A6.1 has to come back first, because the
-reasoning that proposed it was wrong by a sign and a cadence defect has not been shown to exist. If
-the audit finds the per-pair delta at the -4.956 ms the timestamps require, the sender is innocent,
-the whole tail belongs to the link, and A8 is simply the sweep repeated on a stable link with the
-occupancy instrument in place.
+**No cadence defect exists. No sender change is justified and none should be proposed on this
+ground.** The whole arrival tail belongs to the link.
 
-And if a spacing change is ever justified, it is not free and should not be described as free. It
-holds the second frame 5 ms longer in the sender; its playout latency need not rise, since its
-deadline is 5 ms later too, but when it enters the network does change. The claim to be demonstrated
-would be that spacing smooths the cadence without raising the playout target, provided the second
-frame still arrives before its deadline. Nor may it be implemented by sleeping on the thread that
-consumes WASAPI: encoder, then a bounded transmit queue, then a scheduler, which is the shape the
-video pacer already settled.
+The candidate that would have fabricated this offset was checked and does not exist: no frame carries
+a capture timestamp and no QPC value reaches the wire. The second frame's timestamp is the first's
+plus 240 by counter arithmetic, which is what RFC 7587 asks for and is also why the clock audit found
+the wire carrying the device's rate as an identity.
+
+How the pairing was recovered is worth keeping, because the obvious route does not work. A 480-frame
+packet becomes two datagrams 240 ticks apart, so every frame falls into one of two residue classes
+modulo 480 computed from its own timestamp - immune to loss and to reordering, and needing no arrival
+time. But which class is *first* cannot come from the wire: the packetiser seeds its timestamp from
+`random_u32()` as RFC 3550 requires, and a receiver joining a running stream cannot tell position from
+an absolute residue. Deciding it from arrival order was rejected as circular, since arrival order
+within a pair is the question. So one integer went into the sender's internal telemetry and not into
+the protocol - the packetiser's starting timestamp, read before any datagram can move it - and the
+join is `(anchor - base) mod 480`. It came out 0 on all three arms, and the base and anchor being
+identical also proves each receiver caught the stream's very first datagram, that timestamp being
+unique for twenty-five hours.
+
+### What A8's question is, now that both audits have answered
+
+Simply the sweep repeated on a link that holds, with the occupancy instrument in place. There is no
+cadence to fix first, so A6.2 is skipped.
+
+The criterion stands as decided: the **smallest** target that holds continuity reproducibly, not the
+one with the prettiest statistics. And one caution the audits produced: arrival-delay percentiles are
+not comparable between arms, because the anchor is the first admitted packet's own arrival plus the
+target and a bad first packet shifts every delay in a run by a constant. Late counts and continuity
+holes are comparable; p50 and p95 of arrival delay are not.
 
 ### A7 answered: both clock figures were right and the prediction crossed a boundary
 
@@ -174,13 +190,14 @@ A7.1  clock rate audit       host device-position against QPC, Mac sampleTime
                              against hostTime, and samples produced against
                              samples consumed; all three must close and agree
                              in sign
-A6.2  only if A6.1 shows a defect: the cadence fix, then a clean 600 s, then
-                             read what lateness is left
+A6.2  SKIPPED - A6.1 found no cadence defect, so there is nothing to fix
 A8    5, 10, 15 and 20 ms on a link that holds, with the occupancy instrument
 ```
 
-A6.1 and A7.1 are independent of each other and can run in either order or together. Nothing after
-them starts until both have answered.
+Both audits have answered. A6.1 cleared the sender at -4.996 ms per pair against a required -4.956,
+and A7 closed to +238.4 samples predicted against +238 +-75 observed once the QPC-to-mach term was
+measured rather than assumed away. A8 is the next thing to run, and it needs `tools/radio-preflight.sh`
+to pass first.
 
 ### What stays out until the data asks for it
 
