@@ -7,16 +7,20 @@ already been decided, so that none of it has to be reconstructed from the commit
 findings that shaped the code, and `tools/gates.toml` says which gates can run where.
 `docs/reports/2026-08-15-audio-and-ci.md` is how the phase reached the state below.
 
-## Where the phase stands, and why the audio code is frozen
+## Where the phase stands, after the first clean-link run
 
-**There is no current evidence of a defect in capture, the codec, RTP, the jitter buffer or
-CoreAudio that explains the continuity failure. The failure observed is quantitatively explained
-by frames arriving after their deadline. A7 and A8 stay blocked until a run exists on a stable
-radio with negligible lateness.**
+**The continuity failure is exactly and only the arrival tail.** On the clean arm the three counts
+are not close, they are identical: 4587 frames late, 4587 buffer underruns, 4587 concealments, and
+4587 times 240 samples is 1100880, which is the hole to the sample. Every underrun is a late frame
+and every late frame is an underrun, so nothing else in this pipeline ever starves the buffer -
+the `min occupancy 0.0` that appears in all sixty windows is those moments and nothing more.
 
-The arithmetic that says so, from A6's ten-minute arm: 2499 late frames times 240 samples is
-599760, against a continuity hole of 600960 - one window's rounding apart. Device underruns zero,
-RTP loss zero, buffer overruns zero. Nothing is hiding anywhere else.
+That closes the question the phase opened. There is no defect in capture, the codec, RTP, the
+jitter buffer or CoreAudio, and there is no longer a suspicion of one.
+
+It also removes the radio as the explanation. The clean arm ran at -58 to -59 dBm on one channel
+with the preflight passing, and its hole is **3.82 per cent against the contaminated run's 2.09**.
+A better link produced a worse figure, so link instability was never what the hole was made of.
 
 ```
 A0  contract and telemetry                     done
@@ -26,14 +30,49 @@ A3  RTP audio, with its radio figure and control done
 A4  receiver and jitter buffer                  done
 A5  CoreAudio                                   done
 A6  Windows to Mac, functional                  works
-A6  the continuity criterion                    fails, 2.09 % under the current radio
-A7  drift                                       not interpretable while lateness exists
-A8  jitter target                               refused, no candidate holds
+A6  the continuity criterion                    fails, 3.82 % on a link that held
+A7  drift                                       measurable now, and it disagrees with the table
+A8  jitter target                               the question has changed, see below
 ```
 
-So the next block is not more audio. It is a reproducible radio condition, and until one exists
-every comparison - 5 against 10 ms, 10 against 15, drift, continuity - is contaminated by an
-external variable that moves more than the one under study.
+### The two contributions, and only one of them is free
+
+The margin is thin by construction before the link does anything. The sender takes a 480-frame
+WASAPI packet - 10 ms of audio - and sends both of its 5 ms frames at once, 44 microseconds apart,
+so the stream lands as a pair every 10 ms rather than one frame every 5. The second frame of each
+pair has its moment 5 ms after the first, so relative to its own moment it arrives 5 ms later than
+its partner. At the measured p95 of -4.25 ms that puts the second of each pair at +0.75 ms - past
+its moment - which is where the tail crosses zero, and the observed 3.82 per cent sits just beyond
+it.
+
+**Pacing the second frame 5 ms after the first would return that margin at no latency cost.** It
+is not buying continuity with delay; it is declining to spend margin on a burst this end creates.
+
+But the burst is not all of it, and the natural experiment in the same run says so. Drift deepened
+the buffer by 5 ms across the ten minutes and the hole fell by **41 per cent, not by all of it** -
+134880 samples in the first minute against 78960 in the last. Had the pair structure been the whole
+cause, five milliseconds would have removed essentially every late frame. So a real tail remains
+underneath: p99 at +12.2 ms and a worst arrival at +85.0 ms on a link that was not moving.
+
+That tail is delay and not loss - zero packets lost of 120005 - so nothing recovers it. Only more
+buffer or less burst helps, which is why FEC and NACK stay out: there is nothing for them to
+retransmit.
+
+### What A8's question became
+
+Not "which of 5, 10, 15 and 20 ms holds", which the sweep answered with none. It is now: **pace the
+sender, then find the smallest target that holds.** The order matters, because measuring targets
+against a stream that wastes 5 ms of every second frame ranks the burst rather than the buffer.
+
+### The A7 discrepancy, recorded and not resolved
+
+Occupancy rose monotonically from 10.0 to 15.0 ms at p50, +0.737 ms/min, with zero overruns. That
+is 12.3 ppm of relative rate with **the source faster than the sink**. The table below has the host
+audio clock at -15 ppm and this Mac's output at +5 ppm, which predicts the sink draining 20 ppm
+faster and a buffer that empties. It fills. Thirty-two parts per million and a reversed sign
+between two established figures and a joined run, and it is A7's subject rather than a footnote.
+
+Neither of those two rows is safe to keep using until A7 settles which is wrong.
 
 ### The order when a stable link exists
 
