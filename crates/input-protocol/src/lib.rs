@@ -203,6 +203,16 @@ impl GamepadStateV1 {
     }
 }
 
+/// Latest rumble feedback for one virtual controller.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct GamepadFeedbackV1 {
+    pub session_generation: u32,
+    pub controller_slot: u8,
+    pub sequence: u32,
+    pub low_frequency: u16,
+    pub high_frequency: u16,
+}
+
 /// Which keys are held, by scan code.
 ///
 /// A bitset rather than a list, so a snapshot is a fixed 32 bytes whatever
@@ -256,7 +266,10 @@ impl fmt::Debug for KeyBitset {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Message {
     /// Relative pointer movement since the last motion message. Additive.
-    Motion { dx: i32, dy: i32 },
+    Motion {
+        dx: i32,
+        dy: i32,
+    },
     Button {
         id: EventId,
         button: Button,
@@ -274,7 +287,11 @@ pub enum Message {
     },
     /// Wheel detents. Reliable: losing one can change weapon or tool, which
     /// is a state change and not a smoothed motion.
-    Wheel { id: EventId, dx: i16, dy: i16 },
+    Wheel {
+        id: EventId,
+        dx: i16,
+        dy: i16,
+    },
     /// Everything the client believes is held, so a lost release can be
     /// repaired without waiting for the user to press the key again.
     ///
@@ -287,7 +304,9 @@ pub enum Message {
     },
     /// Release everything. Sent on focus loss, capture release and
     /// disconnect, and reliable because it is the safety invariant.
-    ReleaseAll { id: EventId },
+    ReleaseAll {
+        id: EventId,
+    },
     /// Keeps the host's idea of liveness fresh while the user is idle, so a
     /// silent client can be told apart from a departed one.
     Heartbeat,
@@ -305,7 +324,10 @@ pub enum Message {
     /// window below `top` has outlived the client's retransmission ladder, so
     /// it is beyond repair by retransmission and the periodic snapshot is what
     /// fixes the state.
-    Ack { top: EventId, missing: u32 },
+    Ack {
+        top: EventId,
+        missing: u32,
+    },
     /// Creates one virtual controller. The control plane retries this until
     /// the host acknowledges it; no controller state is accepted before it.
     GamepadAttach {
@@ -323,19 +345,18 @@ pub enum Message {
     /// A complete, newest-wins controller state. It is never retransmitted:
     /// preserving a stale stick position is worse than losing it.
     GamepadState(GamepadStateV1),
+    GamepadFeedback(GamepadFeedbackV1),
 }
 
 impl Message {
     pub fn reliability(&self) -> Reliability {
         match self {
-            // Motion is superseded by the next motion and additive with it,
-            // so a retransmission would apply movement the user has already
-            // continued past.
             Message::Motion { .. }
             | Message::Heartbeat
             | Message::Ack { .. }
             | Message::Snapshot { .. }
-            | Message::GamepadState(_) => Reliability::Unreliable,
+            | Message::GamepadState(_)
+            | Message::GamepadFeedback(_) => Reliability::Unreliable,
             Message::Button { .. }
             | Message::Key { .. }
             | Message::Wheel { .. }
@@ -371,6 +392,7 @@ impl Message {
             Message::GamepadAttach { .. } => 9,
             Message::GamepadDetach { .. } => 10,
             Message::GamepadState(_) => 11,
+            Message::GamepadFeedback(_) => 12,
         }
     }
 }
@@ -518,6 +540,13 @@ pub fn encode(datagram: &Datagram, out: &mut [u8]) -> Option<usize> {
             body[20..22].copy_from_slice(&state.left_trigger.to_be_bytes());
             body[22..24].copy_from_slice(&state.right_trigger.to_be_bytes());
         }
+        Message::GamepadFeedback(feedback) => {
+            body[0..4].copy_from_slice(&feedback.session_generation.to_be_bytes());
+            body[4] = feedback.controller_slot;
+            body[5..9].copy_from_slice(&feedback.sequence.to_be_bytes());
+            body[9..11].copy_from_slice(&feedback.low_frequency.to_be_bytes());
+            body[11..13].copy_from_slice(&feedback.high_frequency.to_be_bytes());
+        }
     }
     Some(HEADER_LEN + payload_len)
 }
@@ -533,6 +562,7 @@ fn payload_len(message: &Message) -> usize {
         Message::Ack { .. } => 12,
         Message::GamepadAttach { .. } | Message::GamepadDetach { .. } => 13,
         Message::GamepadState(_) => 24,
+        Message::GamepadFeedback(_) => 13,
     }
 }
 
@@ -665,6 +695,18 @@ pub fn decode(bytes: &[u8]) -> Result<Datagram, DecodeError> {
                 right_trigger: u16::from_be_bytes([body[22], body[23]]),
             })
         }
+        12 => {
+            if body.len() < 13 {
+                return Err(short(13));
+            }
+            Message::GamepadFeedback(GamepadFeedbackV1 {
+                session_generation: u32::from_be_bytes([body[0], body[1], body[2], body[3]]),
+                controller_slot: body[4],
+                sequence: u32::from_be_bytes([body[5], body[6], body[7], body[8]]),
+                low_frequency: u16::from_be_bytes([body[9], body[10]]),
+                high_frequency: u16::from_be_bytes([body[11], body[12]]),
+            })
+        }
         other => return Err(DecodeError::UnknownKind { kind: other }),
     };
 
@@ -764,6 +806,13 @@ mod tests {
                 left_trigger: 0,
                 right_trigger: u16::MAX,
             }),
+            Message::GamepadFeedback(GamepadFeedbackV1 {
+                session_generation: 7,
+                controller_slot: 0,
+                sequence: 21,
+                low_frequency: 0x1234,
+                high_frequency: 0xABCD,
+            }),
         ] {
             round_trip(message);
         }
@@ -779,6 +828,13 @@ mod tests {
                 buttons: 0,
             },
             Message::GamepadState(GamepadStateV1::NEUTRAL),
+            Message::GamepadFeedback(GamepadFeedbackV1 {
+                session_generation: 1,
+                controller_slot: 0,
+                sequence: 1,
+                low_frequency: 1,
+                high_frequency: 2,
+            }),
         ] {
             assert_eq!(droppable.reliability(), Reliability::Unreliable);
         }
