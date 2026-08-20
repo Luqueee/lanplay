@@ -76,6 +76,23 @@ contention. A stall rate alone cannot tell those apart, and they need different 
 `fresh_tick_ratio` does not exist and has to be defined: the fraction of display ticks that presented
 a frame newer than the one presented at the tick before.
 
+And the tiers are not a new idea imposed on this client - they are already its shape.
+`macos/client/src/report.rs` separates `network`, `delivery`, `decode` and `display` into their own
+structs, with `delivery` carrying the comment *the link's own cadence, independent of everything after
+it*, and it keeps `Delivery` apart from `Display` deliberately because delivery cadence used to be read
+off the display. `gate.rs` already holds a `lanplay_link_metrics::Window`, and `Report.windows` is
+already a vector of per-window rows. So N1 extends an existing separation rather than introducing one,
+and any design that has to flatten those structs to work is the wrong design.
+
+`Run.invalidated` and `invalidating_events` are the client's existing way of saying a run's numbers
+cannot be trusted because something moved underneath it. A monitor that detects a condition the run
+was not measuring belongs there rather than in a new mechanism.
+
+`tools/net-bench` is the traffic generator N2 needs, with `send` and `receive` subcommands and pacing,
+already used by `tools/link-pacer.sh` and the channel matrix. N2 shapes a probe out of it rather than
+writing a generator, because a probe whose traffic does not look like the product's traffic measures
+the wrong link.
+
 ### Two constraints with measured numbers behind them
 
 **The radio sampler runs at 1 Hz on its own thread and nowhere near a deadline.** One CoreWLAN
