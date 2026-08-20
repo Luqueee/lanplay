@@ -229,30 +229,67 @@ p10-p90 intervals intersect at exactly -68 to -68 dBm, a degenerate band, and th
 288 to 576 Mbps, a factor of 2.00 against a limit of 2.0. That sweep's conclusion stands and it was
 never robust.
 
-### A8 answered: no target at or below 20 ms holds, and the tail is the reason
+### A8 refused to select, and the reason is measured
+
+```
+A8 fixed-arm sweep: REFUSED TO SELECT
+
+No candidate at or below 20 ms passed reproducibly in the sampled arms.
+Cause: between-arm heavy-tail variance dominates the 5 ms target spacing.
+```
+
+That wording is deliberate and replaces an earlier line here that said *no target at or below 20 ms
+holds*. The stronger claim was not demonstrated: what these arms show is that this design cannot
+separate these targets, not that no such target exists. A sweep that cannot rank has refused, and a
+refusal is not a proof of absence - which is this repository's own rule, applied to its author.
 
 Thirty-four minutes, eleven arms, on the steadiest link this project has measured: channel 36 at
 80 MHz with median signal -40 to -43 dBm and **every arm negotiating a median 1200 Mbps**, a factor of
 1.00 across the sweep. Evidence in `results/audio/jitter-target-a8/`.
 
-| target | arms | continuity hole |
+| target | arms | concealment ratio |
 |---|---|---|
 | 5 ms | 2 | 0.196, 2.087 % |
 | 10 ms | 2 | 2.267, 7.442 % |
 | 15 ms | 3 | 0.258, 0.838, 2.179 % |
 | 20 ms | 2 | 1.179, 7.142 % |
 
-**No candidate at or below 20 ms**, and the targets are not extended to 30, 40 or 80 ms - that is a
-decision about the latency budget and not this gate's to take.
+The targets are not extended to 30, 40 or 80 ms as a consequence: that is a decision about the latency
+budget, taken elsewhere and not by a gate that just failed to rank.
 
-What makes the answer trustworthy is what did not vary. The margins ascended with the nominal targets
+What makes the refusal trustworthy is what did not vary. The margins ascended with the nominal targets
 in every pass - 8.45, 11.87, 16.86, 21.90 and 7.64, 11.89, 18.22, 21.94 ms - so no anchor draw
 shuffled the effective targets and the sweep swept what it meant to. The arms were comparable by the
-mechanism that produces the tail. And the holes still refuse to order by target, because what varies
+mechanism that produces the tail. And the ratios still refuse to order by target, because what varies
 is **burst incidence per window**: worst arrivals of 78, 61, 76 and 221 ms in one pass against 24, 79,
-19 and 91 in another. The worst was 221 ms, **eleven times the largest target under test**. A quantity
-whose sampling noise exceeds the effect being measured cannot rank the effect, and no target inside
-this phase's budget is within reach of a 221 ms arrival.
+19 and 91 in another. A quantity whose sampling noise exceeds the effect being measured cannot rank
+the effect.
+
+The 221 ms arrival is worth stating carefully rather than dramatically. It is eleven times the largest
+target under test, so **that event** is out of reach of anything in this phase's budget. It does not
+follow that the targets under test are useless: absorbing a rare 221 ms stall is not what a target is
+for, and a curve is what says how much a target does absorb.
+
+### The metric was carrying the wrong name, and the evidence says so
+
+Two quantities have been reported as one, and the split changes what A8 is choosing between.
+
+**Playout continuity** is `render_underruns`: the device was handed nothing and a listener heard a
+click. It is **zero in 40 of 40 committed envelopes** - every audio run this project has ever recorded,
+including the control arm that lost a fifth of its samples on purpose. The device has never been
+starved here.
+
+**Source fidelity** is `plc_frames`: a frame of source audio replaced by the concealer, 240 samples
+at a time. The timeline stayed fed; what was lost is the original content. This is the quantity that
+has been called a *continuity hole*, and the name overstates it - it describes a playout failure that
+has never once occurred.
+
+So the observation key becomes `concealed_samples` and every ratio from it is a **concealment ratio**.
+The consequence is not cosmetic: the target of A8 was implicitly `PLC = 0`, and that target is not
+obviously right. Absorbing a 221 ms stall needs a buffer no interactive streamer would pay for, while
+0.1 per cent of concealment spread over isolated frames may be inaudible. Which of those two costs
+less is a question about what concealment sounds like, and this project has never listened - a short
+qualitative check belongs on the list, and it needs no instrument beyond ears.
 
 ### What A8 says about how to ask the question
 
@@ -260,17 +297,66 @@ Not "run longer arms". If a 120 s arm sees between zero and three bursts, averag
 arms an order of magnitude longer - four targets by three passes by twenty minutes is four hours per
 sweep - and it would still rank one draw of a heavy tail against another.
 
-The distribution is the primitive and the target is a function of it. One long clean run gives the
-whole arrival-delay curve, and the late fraction at any candidate target is read off that curve
-without an arm each: `late(T) = P(arrival delay > T)`. Every target in the same population, no
-between-arm comparability problem to solve, and the burst structure visible instead of averaged away.
-`Derive before building` is this repository's own rule and a sweep of four targets is the built
-version of an arithmetic question.
+The distribution is the primitive and the target is a function of it. One number per datagram, taken
+once, independent of any target:
 
-What that curve is also the right instrument for is the question A8 could not reach: whether the
-bursts are a tail of one distribution or a second mechanism arriving occasionally. Three arms with a
-worst arrival near 80 ms and one at 221 ms is the shape of two mechanisms, and if it is, the target
-that absorbs the first has nothing to do with the one that would absorb the second.
+```
+excess_i = (arrival_i - arrival_ref) - (rtp_i - rtp_ref) / 48000
+late(T)  <=>  excess_i > T
+```
+
+Every candidate target read off one population, with no anchor differing between arms, no radio change
+between arms, and no drift confounding a ranking. `Derive before building` is this repository's own
+rule, and four arms per target is the built version of an arithmetic question.
+
+Three decisions about that primitive, each of them paid for by something measured today.
+
+**The reference is not the first packet.** The playout anchor is the first admitted packet's own
+arrival plus the target, so a first packet that landed badly shifts every delay in a run by a
+constant - which is exactly why a 90 s arm read p50 -10.9 ms and a 1200 s arm -36.3 ms on the same
+link, and why that pair could not be used as evidence of drift. `excess` is referred to the minimum
+over the run, so the fastest observed path defines zero and every value is queueing delay above best
+case.
+
+**Drift is subtracted, and it is not small.** A7 measured +9.29 ppm referred to this Mac's timebase,
+closing to +238 samples predicted against +238 +-75 observed. Over 600 s that is 5.6 ms - larger than
+the 5 ms spacing the curve exists to resolve. The fitted drift is reported in ppm beside A7's figure
+and the uncorrected curve is kept beside the corrected one, so the size of the correction is visible
+rather than trusted.
+
+**Zero loss is required rather than hoped for.** A frame that never arrived has no excess, so a run
+with loss cannot produce this curve. Refused, naming the loss.
+
+### A CDF is not enough, because the events arrive in bursts
+
+A hundred isolated late frames and twenty bursts of five have the same late ratio and sound nothing
+alike. So at each threshold, alongside `late(T)`: clusters per minute, frames per cluster at p50, p95
+and max, the worst excess inside a cluster, and the gap between clusters. A cluster is a maximal run of
+consecutive late frames in sequence order, closed by one on-time frame.
+
+Where uncertainty is quoted it comes from time blocks. A binomial interval over individual frames
+would be wrong by the amount the frames are correlated, and the correlated unit here is the cluster.
+
+The curve runs to 100 ms because its **shape** above 20 ms is the diagnostic: one heavy distribution,
+or a normal regime plus a second class of stall. Three arms with a worst arrival near 80 ms and one at
+221 is the shape of two mechanisms, and if it is two, the target that absorbs the first has nothing to
+do with the one that would absorb the second. Reporting a figure at 30, 50 or 80 ms authorises no
+target there.
+
+### What A8's decision becomes
+
+Not "which buffer gives zero concealment". It is: **the smallest target whose concealment ratio and
+burst structure are acceptable for an interactive streamer** - a product judgement, not a mathematical
+one, and it cannot be made before the curve exists. If the curve reads 0.20 per cent at 15 ms and 0.09
+at 30, then fifteen more milliseconds on every frame forever buys a tenth of a per cent and is a bad
+purchase. If it reads 2 per cent at 15 and 0.2 at 20, then 20 ms justifies itself. Nobody knows which
+shape this tail has.
+
+Opus in-band FEC becomes conceptually interesting at that point and not before, because a packet that
+arrives past its deadline is a loss as far as the decoder is concerned even when the radio delivered
+it. Two reasons not to reach for it yet: RFC 7587 describes it particularly for the voice mode, and it
+carries information about the immediately preceding frame, so it addresses isolated misses and not a
+burst of 80 to 200 ms. If the curve shows many recoverable isolated misses, it earns an experiment.
 
 ### Three instrument defects, each found by a refusal rather than by review
 
@@ -355,17 +441,20 @@ identity rather than as an assumption.
 
 ### The order from here
 
-A6.1, A7 and A8 have all answered. What is left is not another sweep.
+A6.1, A7 and A8 have all answered, and what is left is not another sweep.
 
 ```
-A8.1  the arrival-delay distribution over one long clean run, from which
-      late(T) is read for every candidate target at once
-A8.2  and whether the 221 ms arrivals are the tail of that distribution or a
-      second mechanism, because the answer changes what a target can buy
+A8.1  the excess-delay survival curve and its cluster structure, one long clean run
+A8.2  the latency-against-concealment tradeoff read off that curve, and a listen:
+      what does 0.1 per cent of isolated concealment actually sound like
+      -> choose a fixed baseline target, as a product decision with the curve in hand
+A9    fault injection at the chosen target
+A10   video, audio and input together
+A11   A/V relative sync
 ```
 
-Nothing else starts until A8.1 exists. A target chosen without that curve is a target chosen from one
-draw of a heavy tail.
+Adaptive jitter and Opus FEC stay closed until A8.1 shows a distribution whose shape gives either one
+something to do.
 
 ### What stays out until the data asks for it
 
