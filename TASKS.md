@@ -238,6 +238,27 @@ nunca usa no protege la corrida, se protege a sí misma, y su negativa se lee ig
       puerto de medio. Verificar que lo que caza un camino de medio bloqueado es el refusal de población
       cero aguas abajo, y no esta precondición.
 
+### Q4 — Unidades mezcladas en una misma struct
+
+`macos/client/src/report.rs` cuenta en la struct `Stream`: `expected`, `reconstructed` y `au_loss` en
+**access units**, y `packet_loss`, `reordered` y `duplicates` en **datagramas**. `ch116-return-r1.json`
+tiene `expected` 14400, que son 120 fps por 120 s, así que no hay duda de cuál es cuál.
+
+A 44.7 datagramas por access unit medidos en N2, dividir un contador de datagramas por una población de
+access units infla la tasa unas cuarenta y cinco veces: N3 estaba imprimiendo 30.8 % de reordenamiento
+donde había 0.69 %.
+
+- [x] Detectado por N2 y verificado de forma independiente.
+- [ ] `au_loss / expected` **sí** es una tasa honesta y es la que debe usarse, nombrada como tasa de
+      pérdida de access units y no de paquetes: un datagrama perdido puede recuperarse por reordenación,
+      una access unit perdida es un frame que nadie vio.
+- [ ] `reordered`, `packet_loss` y `duplicates` **no tienen población de datagramas** en el corpus
+      comprometido. Se reportan como cuentas con su span al lado y no se convierten en tasa. La rama que
+      necesite una tasa de datagramas queda no disponible sobre este corpus y lo dice.
+- [ ] Revalidar las 30 sesiones de N3 tras el arreglo y reportar el antes y el después, no sólo el
+      después.
+- [ ] Considerar separar las dos unidades en structs distintas para que el error no se pueda repetir.
+
 ---
 
 # 5. FASE N — NETWORK ROBUSTNESS & ADAPTATION
@@ -286,50 +307,144 @@ nunca usa no protege la corrida, se protege a sí misma, y su negativa se lee ig
 - [ ] Registrar band changes.
 - [ ] Registrar PHY changes.
 
-### Gate N1-A — Neutralidad del monitor
+### Gate N1-A — Neutralidad del monitor — **REFUSED (sin potencia)**
 
-A/B:
+Evidencia: `results/network/monitor-neutrality-90s-3x/`. Nueve brazos de 90 s sobre la radio real,
+cuadrado latino rotante, más un brazo de memoria de 600 s.
 
-- [ ] monitor OFF.
-- [ ] monitor ON.
-- [ ] mismo stream.
-- [ ] comparar AU cadence.
-- [ ] comparar clusters.
-- [ ] comparar fresh tick.
-- [ ] monitor no debe inducir stalls medibles.
+- [x] monitor OFF.
+- [x] monitor ON.
+- [x] mismo stream.
+- [x] comparar AU cadence.
+- [x] comparar clusters.
+- [x] comparar fresh tick.
+- [ ] monitor no debe inducir stalls medibles — **no demostrado, y por falta de potencia.**
 
-### Gate N1-B — Soak
+El control positivo no separó del brazo limpio, así que la comparación no puede detectar una
+perturbación y la ausencia de diferencia entre ON y OFF no dice nada. Eso es el resultado.
 
-- [ ] 10 min.
-- [ ] memoria plana.
-- [ ] muestras radio presentes.
-- [ ] métricas stream presentes.
-- [ ] active scans = 0.
+| métrica | off | on | expensive | separado |
+|---|---|---|---|---|
+| delivery p99 ms | 11.93 / 17.37 / 17.79 | 13.24 / 17.86 / 18.04 | 83.82 / 18.61 / 17.15 | no |
+| >2T por minuto | 20.62 a 182.66 | 33.25 a 274.26 | 93.18 a 525.10 | no |
+| presented Hz | 119.97 | 119.97 | 119.97 | spread **0.00** |
+| fresh tick % | 96.97 | 90.07 | 87.44 | no |
+
+**Dónde se fue la potencia, medido y no supuesto.** Los brazos con nada corriendo abarcaron 20.62 a
+182.66 cruces por minuto — un spread de 162 en la métrica misma — y delivery p99 de 11.93 a 17.79 ms.
+Esa varianza es la radio a −72 dBm entre brazos separados por minutos, la misma varianza de cola pesada
+entre brazos que hizo que A8 se negara a rankear cuatro targets, y no tiene nada que ver con la
+pregunta.
+
+**La pregunta es local.** Un muestreador en su propio hilo no puede perturbar el aire; lo que cueste lo
+cuesta por contención de CPU en este Mac. Medir un efecto local a través del canal más ruidoso
+disponible es el defecto de diseño, y el rediseño es correr la comparación en loopback, donde la
+varianza de cadencia se derrumba y los brazos son comparables por construcción. Seis pasadas en vez de
+tres dejan cada brazo dos veces en cada posición y bajan la probabilidad nula de la separación completa
+de 0.1 a 0.0022.
+
+Riesgo del rediseño, anotado antes de correrlo: en loopback se quita el ruido pero puede quitarse
+también la señal. Con diez núcleos, un hilo que despierta más a menudo no contiende con nada, y un
+control positivo caro sólo en frecuencia volvería a no disparar — por holgura de máquina y no por
+baratura del monitor. El control tiene que atacar un mecanismo nombrado: `crates/link-metrics` protege
+su estado con un `parking_lot::Mutex` que el hilo de recepción toma en cada access unit, y un
+muestreador que tome ese lock contiende por una ruta señalable. Los dos fallos significan cosas
+distintas y deben decirse distinto: un control por frecuencia que no dispara dice que hay holgura; uno
+por lock que no dispara dice que la comparación está ciega.
+
+**Dos hechos que sí quedan de esta corrida**, y valen por sí mismos:
+
+- `presented Hz` leyó 119.971 con spread **0.00** en los nueve brazos, incluidos los tres caros. Ni el
+  muestreador deliberadamente caro costó un solo frame presentado.
+- `fresh tick %` ordenó 96.97 / 90.07 / 87.44 — monótono en la dirección que predice la hipótesis, tres
+  de tres. No es separación y no se reporta como detección; es sugestivo y queda por confirmar en
+  loopback.
+
+### Gate N1-B — Soak — **PASS parcial**
+
+- [x] 10 min.
+- [x] memoria plana: pendiente −0.280 MB/min sobre 2340 muestras, en régimen estacionario. Independiente
+      del problema de potencia y por eso se declara aparte del veredicto rehusado.
+- [x] muestras radio presentes.
+- [x] métricas stream presentes.
+- [x] active scans = 0, comprobado y no prometido.
 
 ---
 
-## N2 — Startup Network Preflight
+## N2 — Startup Network Preflight — **PASS**
 
-- [ ] Crear `NetworkPreflightReport`.
-- [ ] Capturar snapshot radio inicial.
-- [ ] Ejecutar probe UDP parecido al tráfico real del stream.
-- [ ] Evitar Speedtest como sustituto.
-- [ ] Probe corto solo selecciona modo inicial; no certifica toda la sesión.
-- [ ] Guardar:
-  - [ ] loss.
-  - [ ] cadence.
-  - [ ] clusters.
-  - [ ] PHY.
-  - [ ] RSSI.
-  - [ ] band/channel.
-- [ ] Si información radio no está disponible, no bloquear: usar observaciones de tráfico.
+Evidencia: `results/network/preflight-20260820-r1/`, `-r2/`, `-r3/`. Gate
+`tools/net-preflight-gate.sh`, crate `tools/net-preflight`.
 
-### Gate N2
+- [x] Crear `NetworkPreflightReport`.
+- [x] Capturar snapshot radio inicial: dos lecturas pasivas de CoreWLAN, antes y después, con el bucle
+      parado. Nunca un scan.
+- [x] Ejecutar probe UDP parecido al tráfico real: `net-bench send --pacer burst` con fixture H.264 real
+      a 120 fps y MTU 1200, una access unit entera al kernel de golpe. Medido: 44.7 datagramas por
+      access unit de 1187 B a 50.9 Mbps.
+- [x] Evitar Speedtest como sustituto.
+- [x] Probe corto solo selecciona modo inicial; no certifica toda la sesión — el report **no clasifica
+      nada** y la razón va con números en su doc comment.
+- [x] Guardar loss, cadence, clusters, PHY, RSSI, band/channel.
 
-- [ ] good-known link produce reporte completo.
-- [ ] missing radio still yields usable stream-level report.
-- [ ] missing stream observations → REFUSED.
-- [ ] probe no deja sockets/threads/resources vivos.
+Brazo limpio y brazo con falla en la misma sesión, tres sesiones:
+
+| | clean r1/r2/r3 | faults r1/r2/r3 |
+|---|---|---|
+| datagramas perdidos | 0 / 0 / 0 | 284 / 280 / 281 |
+| access units entregadas | 600/600 las tres | 399/588, 401/588, 407/591 |
+| intervalo p99 ms | 11.94 / 11.57 / 11.71 | 104.46 / 104.66 / 99.94 |
+| cruces de 2T | 1 / 0 / 2 | 64 / 65 / 65 |
+| separación cruces/min | | **772 a 796** contra los 162 exigidos |
+
+Seis juicios por sesión y los seis en su sitio: `refusal` REFUSED, `faults` PASS, `faults-as-clean`
+FAIL, `clean` PASS, `clean-as-faults` FAIL. El control negativo son **dos cruces y no un brazo**: los
+criterios del brazo con falla son must-not-be-zero, así que aprobarlos no falla nada, y cada brazo se
+juzga además con los criterios del otro. Misma disposición que `tools/audio-rtp-gate.sh`.
+
+**La inyección se dimensionó contra la varianza del enlace y no contra el gusto**: 60 ms retenidos cada
+150 ms dan unos 400 cruces/min contra los 162 que N1 midió entre brazos con nada corriendo. El borrador
+anterior — 120 ms cada 1500 — habría quedado dentro del ruido. Rechazado el control de A6 de 400 ms cada
+2 s: a 50 Mbps encola 2000 datagramas y 2.4 MB, y lo que llega al otro lado es el burst del relay y no
+el enlace.
+
+### Hallazgos que ningún criterio vota
+
+- **El probe de 5 s es una tirada de una distribución ancha, y lo demuestran sus propias tiradas.** Tres
+  brazos limpios consecutivos sobre un enlace que nadie tocó dieron peor intervalo 99.811, 12.911 y
+  83.952 ms, y 1, 0 y 2 cruces. Por eso el report describe y no adjetiva.
+- **`tx_rate_mbps` cayó de 432 a 103 Mbps entre las dos lecturas de un brazo limpio de cinco segundos**,
+  sin que canal ni ancho se movieran. Un factor de cuatro dentro de la ventana de un probe. Consecuencia
+  para N0 anotada aparte, más abajo.
+- El `stall_gap` del brazo con falla salió p50 75.96 y p95 101.58 ms — distribución estrecha, que es lo
+  que este proyecto lee como *un temporizador*, y lo que había detrás era literalmente un temporizador
+  de 150 ms. El discriminador de N3 quedó validado contra una causa conocida por la corrida de otro.
+- En `clean r1` el peor intervalo fue 99.811 ms contra un límite de 120 ms derivado de los cuatro brazos
+  de 120 s ya comprometidos en este canal (26.07, 50.59, 68.62, 98.57). A 0.19 ms del peor brazo
+  histórico y a 20 ms de fallar. **El límite no se movió después de ver el brazo.**
+
+### Defectos del instrumento encontrados
+
+1. Contar access units esperadas por `fps * span` o por el rango de ids *vistos* reportó 600 de 601 en un
+   self-test que no perdió nada: el probe se detiene en mitad de una unidad. Acotado con ids de unidades
+   *completadas*, con tres tests que lo defienden.
+2. Primer intento colgado 900 s: un `udp-fault` de otro worktree tenía tomado el 5106, el brazo de
+   refusal salió 1 sin ser detectado y el gate esperó para siempre un banner que nunca llegó. Puertos
+   propios, toda espera acotada, y un brazo de refusal que aborta el gate si no pudo ni correr.
+3. Segundo intento rehusó ambos brazos: el `net-bench.exe` del host estaba **bloqueado por Device
+   Guard**, y esa frase estaba en un log que nadie miraba. El harness ahora imprime lo que dijo el emisor
+   cuando un brazo no recibe nada.
+4. `macos/client/src/report.rs` cuenta `expected`, `reconstructed` y `au_loss` en access units y
+   `packet_loss`, `reordered` y `duplicates` en datagramas, todo en la misma struct. El cociente no es una
+   tasa. Ver Q4.
+5. La primera sesión no dejó log combinado. Cada sesión guarda ya su `gate.out`.
+
+### Sin criterio, y dicho
+
+- Cruces y clusters no son criterio a esta duración: los brazos comprometidos están en 2.0 a 18.5
+  clusters/min, o sea 0.17 a 1.5 en cinco segundos.
+- Sin criterio de bitrate: su tolerancia tendría que cubrir la variación de contenido del fixture y la
+  pérdida del brazo con falla, y entonces sólo podría fallar si no llegó nada, que ya está rehusado.
 
 ---
 

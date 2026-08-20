@@ -46,6 +46,23 @@ disagreeing with its proxies in the same run.
 The hints are worth keeping because they are what turns a report into a diagnosis - a user on 2.4 GHz
 can be told so - but they answer *why*, never *whether*.
 
+### And a rate *reading* is not a characterisation either
+
+Measured by N2 and worth stating separately, because it constrains how the hints may be used even for
+diagnosis. During one five-second clean probe, with neither channel nor width moving, `tx_rate_mbps`
+read 432 Mbps before the arm and 103 Mbps after it. A factor of four inside the window of a single
+probe.
+
+That does not weaken the claim that rate is the mechanism - airtime per datagram is inversely
+proportional to it, and airtime is what produces the tail. It weakens something narrower and more
+useful: **one reading cannot characterise a link.** So the comparability criterion that survived A8 -
+the ratio between the extreme per-arm median rates against a factor of two - needs a population per
+arm and not a reading per arm, and any figure quoted from a single association read carries the time it
+was taken at or it means nothing.
+
+It is also why N1 samples the radio at the boundaries of an arm rather than inside it, and why an arm
+whose two boundary reads disagree by more than the criterion has to say so instead of averaging them.
+
 ### Why experience may not decide either, which is less obvious
 
 `fresh_tick_ratio` is measured at presentation, and `crates/link-metrics` exists because measuring a
