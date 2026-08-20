@@ -8,7 +8,7 @@ use std::{
 use hidapi::{HidApi, HidDevice};
 use lanplay_input_capture::{INPUT_PORT, ds4::parse_bluetooth_input};
 use lanplay_input_protocol::{
-    Datagram, EventId, GamepadStateV1, MAX_DATAGRAM, Message, Sequence, SessionId, encode,
+    Datagram, EventId, GamepadStateV1, MAX_DATAGRAM, Message, Sequence, SessionId, decode, encode,
 };
 
 const SONY_VENDOR: u16 = 0x054c;
@@ -28,6 +28,8 @@ struct Cli {
     slot: u8,
     #[arg(long, default_value_t = 60)]
     seconds: u64,
+    #[arg(long, default_value = "0.0.0.0:5007")]
+    feedback_listen: String,
 }
 
 fn main() -> ExitCode {
@@ -51,6 +53,13 @@ fn main() -> ExitCode {
         Ok(socket) => socket,
         Err(error) => return fail(error.to_string(), 2),
     };
+    let feedback_socket = match UdpSocket::bind(&cli.feedback_listen) {
+        Ok(socket) => socket,
+        Err(error) => return fail(error.to_string(), 2),
+    };
+    if let Err(error) = feedback_socket.set_nonblocking(true) {
+        return fail(error.to_string(), 2);
+    }
     if !send_control_until_ack(&socket, target, cli.session, &mut sequence, attach) {
         return fail("initial attach was not acknowledged".to_owned(), 3);
     }
@@ -59,6 +68,8 @@ fn main() -> ExitCode {
     let mut sent = 0u64;
     let mut recoveries = 0u64;
     let mut buffer = [0; 128];
+    let mut feedback_sequence = None;
+    let mut rumble_reports = 0u64;
     while Instant::now() < deadline {
         match device.read_timeout(&mut buffer, 100) {
             Ok(0) => {}
@@ -77,6 +88,17 @@ fn main() -> ExitCode {
                         return ExitCode::from(3);
                     }
                     sent += 1;
+                    if let Err(error) = drain_feedback(
+                        &feedback_socket,
+                        &device,
+                        cli.session,
+                        cli.generation,
+                        cli.slot,
+                        &mut feedback_sequence,
+                        &mut rumble_reports,
+                    ) {
+                        return fail(error, 3);
+                    }
                 }
             }
             Err(error) => {
@@ -114,13 +136,72 @@ fn main() -> ExitCode {
     {
         return ExitCode::from(3);
     }
-    println!("raw_reports {reports} states_sent {sent} recoveries {recoveries}");
+    println!(
+        "raw_reports {reports} states_sent {sent} recoveries {recoveries} rumble_reports {rumble_reports}"
+    );
     if sent == 0 {
         return ExitCode::from(4);
     }
     ExitCode::SUCCESS
 }
 
+fn drain_feedback(
+    socket: &UdpSocket,
+    device: &HidDevice,
+    session: u32,
+    generation: u32,
+    slot: u8,
+    last_sequence: &mut Option<u32>,
+    applied: &mut u64,
+) -> Result<(), String> {
+    let mut buffer = [0; MAX_DATAGRAM];
+    loop {
+        let (length, _) = match socket.recv_from(&mut buffer) {
+            Ok(packet) => packet,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
+            Err(error) => return Err(format!("rumble feedback receive failed: {error}")),
+        };
+        let Ok(datagram) = decode(&buffer[..length]) else {
+            continue;
+        };
+        if datagram.session != SessionId(session) {
+            continue;
+        }
+        let Message::GamepadFeedback(feedback) = datagram.message else {
+            continue;
+        };
+        if feedback.session_generation != generation || feedback.controller_slot != slot {
+            continue;
+        }
+        if last_sequence.is_some_and(|previous| !is_newer(feedback.sequence, previous)) {
+            continue;
+        }
+        apply_usb_rumble(device, feedback.low_frequency, feedback.high_frequency)?;
+        *last_sequence = Some(feedback.sequence);
+        *applied += 1;
+    }
+}
+
+fn is_newer(candidate: u32, previous: u32) -> bool {
+    let distance = candidate.wrapping_sub(previous);
+    distance != 0 && distance < (1 << 31)
+}
+
+fn apply_usb_rumble(
+    device: &HidDevice,
+    low_frequency: u16,
+    high_frequency: u16,
+) -> Result<(), String> {
+    let mut report = [0u8; 32];
+    report[0] = 0x05;
+    report[1] = 0xFF;
+    report[4] = (low_frequency / 257) as u8;
+    report[5] = (high_frequency / 257) as u8;
+    device
+        .write(&report)
+        .map(|_| ())
+        .map_err(|error| format!("DS4 USB rumble write failed: {error}"))
+}
 fn send_control_until_ack(
     socket: &UdpSocket,
     target: SocketAddr,
