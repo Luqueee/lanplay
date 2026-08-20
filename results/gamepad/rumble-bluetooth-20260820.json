@@ -1,0 +1,23 @@
+{
+  "schema": "lanplay.gamepad.rumble.v1",
+  "transport": "Bluetooth",
+  "xinput_commands": 5,
+  "xinput_stop_command": 1,
+  "xinput_results": [0, 0, 0, 0, 0, 0],
+  "windows_feedback": {
+    "udp": 2138,
+    "decode_errors": 0,
+    "wrong_session": 0,
+    "stale": 79,
+    "neutral": 1
+  },
+  "mac_sender": {
+    "raw_reports": 1975,
+    "states_sent": 1975,
+    "recoveries": 0,
+    "rumble_reports": 234,
+    "output_transport": "DualShock 4 Bluetooth report 0x11 with CRC32"
+  },
+  "physical_observation": "operator confirmed the rumble level changed on the Bluetooth-connected DS4",
+  "verdict": "pass"
+}
