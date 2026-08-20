@@ -1,11 +1,11 @@
+use clap::Parser;
 use std::{
     net::{SocketAddr, ToSocketAddrs, UdpSocket},
     process::ExitCode,
     time::{Duration, Instant},
 };
 
-use clap::Parser;
-use hidapi::HidApi;
+use hidapi::{HidApi, HidDevice};
 use lanplay_input_capture::{INPUT_PORT, ds4::parse_bluetooth_input};
 use lanplay_input_protocol::{
     Datagram, EventId, GamepadStateV1, MAX_DATAGRAM, Message, Sequence, SessionId, encode,
@@ -40,14 +40,9 @@ fn main() -> ExitCode {
         Ok(api) => api,
         Err(error) => return fail(error.to_string(), 2),
     };
-    let Some(info) = api.device_list().find(|device| {
-        device.vendor_id() == SONY_VENDOR && device.product_id() == DS4_BLUETOOTH_PRODUCT
-    }) else {
-        return fail("DS4 Bluetooth 054c:09cc not found".to_owned(), 3);
-    };
-    let device = match info.open_device(&api) {
+    let device = match open_ds4(&api, Duration::from_secs(15)) {
         Ok(device) => device,
-        Err(error) => return fail(error.to_string(), 3),
+        Err(error) => return fail(error, 3),
     };
     let socket = match UdpSocket::bind("0.0.0.0:0") {
         Ok(socket) => socket,
@@ -142,6 +137,20 @@ fn send_control_until_ack(
         }
     }
     false
+}
+fn open_ds4(api: &HidApi, wait: Duration) -> Result<HidDevice, String> {
+    let deadline = Instant::now() + wait;
+    loop {
+        if let Some(info) = api.device_list().find(|device| {
+            device.vendor_id() == SONY_VENDOR && device.product_id() == DS4_BLUETOOTH_PRODUCT
+        }) {
+            return info.open_device(api).map_err(|error| error.to_string());
+        }
+        if Instant::now() >= deadline {
+            return Err("DS4 Bluetooth 054c:09cc not found after retry window".to_owned());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
 }
 
 fn send(
