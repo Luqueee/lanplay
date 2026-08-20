@@ -1,6 +1,8 @@
 use clap::Parser;
 use lanplay_input_inject::{GamepadAction, GamepadHost, GamepadOutcome, deliver};
-use lanplay_input_protocol::{MAX_DATAGRAM, Message, SessionId, decode};
+use lanplay_input_protocol::{
+    Datagram, MAX_DATAGRAM, Message, Sequence, SessionId, decode, encode,
+};
 use std::{
     io::{BufRead, BufReader, BufWriter, Write},
     net::UdpSocket,
@@ -18,6 +20,8 @@ struct Cli {
     bridge: String,
     #[arg(long, default_value_t = 10)]
     seconds: u64,
+    #[arg(long, default_value_t = 1_000)]
+    idle_timeout_ms: u64,
 }
 
 #[derive(Default)]
@@ -30,6 +34,7 @@ struct Counts {
     detach: u64,
     stale: u64,
     neutral: u64,
+    expired: u64,
 }
 struct Bridge {
     child: Child,
@@ -128,9 +133,22 @@ fn main() -> Result<(), String> {
     println!("ready");
     let mut buffer = [0; MAX_DATAGRAM];
     let mut counts = Counts::default();
+    let mut ack_sequence = 0;
+    let idle_timeout = Duration::from_millis(cli.idle_timeout_ms);
+    let mut last_gamepad_activity: Option<Instant> = None;
 
     while Instant::now() < deadline {
-        let (length, _) = match socket.recv_from(&mut buffer) {
+        if host.attached_slots() != 0
+            && last_gamepad_activity.is_some_and(|last| last.elapsed() >= idle_timeout)
+        {
+            host.neutralize_all(|action| {
+                counts.neutral += matches!(action, GamepadAction::Submit(_)) as u64;
+                deliver(&mut bridge, action).expect("bridge expiration")
+            });
+            counts.expired += 1;
+            last_gamepad_activity = None;
+        }
+        let (length, from) = match socket.recv_from(&mut buffer) {
             Ok(packet) => packet,
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => continue,
             Err(error) if error.kind() == std::io::ErrorKind::TimedOut => continue,
@@ -154,6 +172,7 @@ fn main() -> Result<(), String> {
             Message::GamepadState(_) => counts.state += 1,
             _ => continue,
         }
+        let control_id = datagram.message.event_id();
         let outcome = match datagram.message {
             Message::GamepadAttach {
                 controller_slot,
@@ -175,6 +194,24 @@ fn main() -> Result<(), String> {
             }),
             _ => continue,
         };
+        if outcome == GamepadOutcome::Applied {
+            last_gamepad_activity = Some(Instant::now());
+        }
+        if let Some(top) = control_id {
+            let reply = Datagram {
+                session: datagram.session,
+                sequence: Sequence(ack_sequence),
+                sent_at_ns: 0,
+                message: Message::Ack { top, missing: 0 },
+            };
+            ack_sequence = ack_sequence.wrapping_add(1);
+            let mut reply_bytes = [0; MAX_DATAGRAM];
+            let length =
+                encode(&reply, &mut reply_bytes).expect("ack fits the input datagram bound");
+            socket
+                .send_to(&reply_bytes[..length], from)
+                .map_err(|error| error.to_string())?;
+        }
         if outcome == GamepadOutcome::Stale {
             counts.stale += 1;
             eprintln!("gamepad-inject-probe: stale controller state discarded");
@@ -185,7 +222,7 @@ fn main() -> Result<(), String> {
         deliver(&mut bridge, action).expect("bridge neutralization")
     });
     println!(
-        "udp {} decode {} wrong-session {} attach {} state {} detach {} stale {} neutral {}",
+        "udp {} decode {} wrong-session {} attach {} state {} detach {} stale {} neutral {} expired {}",
         counts.udp,
         counts.decode,
         counts.wrong_session,
@@ -194,8 +231,13 @@ fn main() -> Result<(), String> {
         counts.detach,
         counts.stale,
         counts.neutral,
+        counts.expired,
     );
-    if counts.attach == 0 || counts.state == 0 || counts.detach == 0 || counts.neutral == 0 {
+    if counts.attach == 0
+        || counts.state == 0
+        || counts.neutral == 0
+        || (counts.detach == 0 && counts.expired == 0)
+    {
         return Err("gamepad evidence was incomplete".to_owned());
     }
     Ok(())

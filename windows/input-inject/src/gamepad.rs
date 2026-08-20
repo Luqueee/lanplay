@@ -179,6 +179,9 @@ impl GamepadHost {
     pub fn stale_states(&self) -> u64 {
         self.stale_states
     }
+    pub fn attached_slots(&self) -> usize {
+        self.slots.iter().filter(|slot| slot.attached).count()
+    }
 
     fn neutralize(
         &mut self,
