@@ -165,6 +165,164 @@ row "audio/e2e-corrected/broken-link.receiver.json" REFUSED \
     "$AUDIO_WHY. broken-link.relay states the same injected 400 ms hold every 2000 ms at loss 0.0 per cent"
 
 # ---------------------------------------------------------------------------
+# N4-B, the FPS shootout. Two sessions on channel 36 at 80 MHz, six arms each.
+#
+# The `hold` arms carry a diagnosis that does not come from this classifier, which is
+# the only kind that can be used on it: the harness injected a known cadence
+# disturbance, 60 ms held every 150 through udp-fault, sized in d66294a against the
+# 162 crossings a minute of natural variance N1 had measured. The condition is what
+# was done to the arm, not what anything read off it.
+#
+# The `clean` arms are UNESTABLISHED and it would be easy to pretend otherwise. They
+# ran undisturbed, but this link sat at -71 to -73 dBm and their own normalised
+# crossings ran 36 to 68 a minute against a clear band of 20, so calling them Healthy
+# would be asserting a diagnosis nobody recorded in order to gain rows. Nothing has
+# characterised this link independently of the runs themselves.
+row "network/fps-shootout-120s-3x/arms/clean120-r2.json" UNESTABLISHED \
+    "d66294a: undisturbed on a link at -71 to -73 dBm whose own crossings run 36 to 68 a minute; no independent diagnosis exists for it"
+row "network/fps-shootout-120s-3x/arms/clean120-r3.json" UNESTABLISHED \
+    "d66294a: undisturbed on a link at -71 to -73 dBm whose own crossings run 36 to 68 a minute; no independent diagnosis exists for it"
+row "network/fps-shootout-120s-3x/arms/clean60-r1.json" UNESTABLISHED \
+    "d66294a: undisturbed on a link at -71 to -73 dBm whose own crossings run 36 to 68 a minute; no independent diagnosis exists for it"
+row "network/fps-shootout-120s-3x/arms/clean60-r2.json" UNESTABLISHED \
+    "d66294a: undisturbed on a link at -71 to -73 dBm whose own crossings run 36 to 68 a minute; no independent diagnosis exists for it"
+row "network/fps-shootout-120s-3x/arms/clean60-r3.json" UNESTABLISHED \
+    "d66294a: undisturbed on a link at -71 to -73 dBm whose own crossings run 36 to 68 a minute; no independent diagnosis exists for it"
+row "network/fps-shootout-120s-3x/arms/clean90-r2.json" UNESTABLISHED \
+    "d66294a: undisturbed on a link at -71 to -73 dBm whose own crossings run 36 to 68 a minute; no independent diagnosis exists for it"
+row "network/fps-shootout-120s-3x/arms/clean90-r3.json" UNESTABLISHED \
+    "d66294a: undisturbed on a link at -71 to -73 dBm whose own crossings run 36 to 68 a minute; no independent diagnosis exists for it"
+row "network/fps-shootout-120s-3x/arms/hold120-r1.json" CadenceDegraded \
+    "d66294a: 60 ms held every 150 ms at seed 20250815, injected and not inferred; the disturbance is the arm's definition"
+row "network/fps-shootout-120s-3x/arms/hold120-r2.json" CadenceDegraded \
+    "d66294a: 60 ms held every 150 ms at seed 20250815, injected and not inferred; the disturbance is the arm's definition"
+row "network/fps-shootout-120s-3x/arms/hold120-r3.json" CadenceDegraded \
+    "d66294a: 60 ms held every 150 ms at seed 20250815, injected and not inferred; the disturbance is the arm's definition"
+row "network/fps-shootout-120s-3x/arms/hold60-r1.json" CadenceDegraded \
+    "d66294a: 60 ms held every 150 ms at seed 20250815, injected and not inferred; the disturbance is the arm's definition"
+row "network/fps-shootout-120s-3x/arms/hold60-r2.json" CadenceDegraded \
+    "d66294a: 60 ms held every 150 ms at seed 20250815, injected and not inferred; the disturbance is the arm's definition"
+row "network/fps-shootout-120s-3x/arms/hold60-r3.json" CadenceDegraded \
+    "d66294a: 60 ms held every 150 ms at seed 20250815, injected and not inferred; the disturbance is the arm's definition"
+row "network/fps-shootout-120s-3x/arms/hold90-r1.json" CadenceDegraded \
+    "d66294a: 60 ms held every 150 ms at seed 20250815, injected and not inferred; the disturbance is the arm's definition"
+row "network/fps-shootout-120s-3x/arms/hold90-r2.json" CadenceDegraded \
+    "d66294a: 60 ms held every 150 ms at seed 20250815, injected and not inferred; the disturbance is the arm's definition"
+row "network/fps-shootout-120s-3x/arms/hold90-r3.json" CadenceDegraded \
+    "d66294a: 60 ms held every 150 ms at seed 20250815, injected and not inferred; the disturbance is the arm's definition"
+row "network/fps-shootout-120s-3x-25m/arms/clean120-r1.json" UNESTABLISHED \
+    "d66294a: undisturbed on a link at -71 to -73 dBm whose own crossings run 36 to 68 a minute; no independent diagnosis exists for it"
+row "network/fps-shootout-120s-3x-25m/arms/clean120-r2.json" UNESTABLISHED \
+    "d66294a: undisturbed on a link at -71 to -73 dBm whose own crossings run 36 to 68 a minute; no independent diagnosis exists for it"
+row "network/fps-shootout-120s-3x-25m/arms/clean120-r3.json" UNESTABLISHED \
+    "d66294a: undisturbed on a link at -71 to -73 dBm whose own crossings run 36 to 68 a minute; no independent diagnosis exists for it"
+row "network/fps-shootout-120s-3x-25m/arms/clean60-r1.json" UNESTABLISHED \
+    "d66294a: undisturbed on a link at -71 to -73 dBm whose own crossings run 36 to 68 a minute; no independent diagnosis exists for it"
+row "network/fps-shootout-120s-3x-25m/arms/clean60-r2.json" UNESTABLISHED \
+    "d66294a: undisturbed on a link at -71 to -73 dBm whose own crossings run 36 to 68 a minute; no independent diagnosis exists for it"
+row "network/fps-shootout-120s-3x-25m/arms/clean60-r3.json" UNESTABLISHED \
+    "d66294a: undisturbed on a link at -71 to -73 dBm whose own crossings run 36 to 68 a minute; no independent diagnosis exists for it"
+row "network/fps-shootout-120s-3x-25m/arms/clean90-r1.json" UNESTABLISHED \
+    "d66294a: undisturbed on a link at -71 to -73 dBm whose own crossings run 36 to 68 a minute; no independent diagnosis exists for it"
+row "network/fps-shootout-120s-3x-25m/arms/clean90-r2.json" UNESTABLISHED \
+    "d66294a: undisturbed on a link at -71 to -73 dBm whose own crossings run 36 to 68 a minute; no independent diagnosis exists for it"
+row "network/fps-shootout-120s-3x-25m/arms/clean90-r3.json" UNESTABLISHED \
+    "d66294a: undisturbed on a link at -71 to -73 dBm whose own crossings run 36 to 68 a minute; no independent diagnosis exists for it"
+# Injected like its siblings and not readable for it: the host delivered 2.94 per cent
+# short of the nominal 120 access units a second, so the reader refuses it and is right
+# to. An arm whose sender did not keep the rate cannot be read for cadence whatever was
+# done to it, and recording CadenceDegraded here was this table asserting an injection
+# it could not see the effect of. The classifier caught it.
+row "network/fps-shootout-120s-3x-25m/arms/hold120-r1.json" UNESTABLISHED \
+    "d66294a: injected, but the host under-produced by 2.94 per cent so nothing can be read off it"
+row "network/fps-shootout-120s-3x-25m/arms/hold120-r2.json" CadenceDegraded \
+    "d66294a: 60 ms held every 150 ms at seed 20250815, injected and not inferred; the disturbance is the arm's definition"
+# Injected like its siblings and not readable for it: the host delivered 2.16 per cent
+# short of the nominal 120 access units a second, so the reader refuses it and is right
+# to. An arm whose sender did not keep the rate cannot be read for cadence whatever was
+# done to it, and recording CadenceDegraded here was this table asserting an injection
+# it could not see the effect of. The classifier caught it.
+row "network/fps-shootout-120s-3x-25m/arms/hold120-r3.json" UNESTABLISHED \
+    "d66294a: injected, but the host under-produced by 2.16 per cent so nothing can be read off it"
+row "network/fps-shootout-120s-3x-25m/arms/hold60-r1.json" CadenceDegraded \
+    "d66294a: 60 ms held every 150 ms at seed 20250815, injected and not inferred; the disturbance is the arm's definition"
+row "network/fps-shootout-120s-3x-25m/arms/hold60-r2.json" CadenceDegraded \
+    "d66294a: 60 ms held every 150 ms at seed 20250815, injected and not inferred; the disturbance is the arm's definition"
+row "network/fps-shootout-120s-3x-25m/arms/hold60-r3.json" CadenceDegraded \
+    "d66294a: 60 ms held every 150 ms at seed 20250815, injected and not inferred; the disturbance is the arm's definition"
+row "network/fps-shootout-120s-3x-25m/arms/hold90-r1.json" CadenceDegraded \
+    "d66294a: 60 ms held every 150 ms at seed 20250815, injected and not inferred; the disturbance is the arm's definition"
+row "network/fps-shootout-120s-3x-25m/arms/hold90-r2.json" CadenceDegraded \
+    "d66294a: 60 ms held every 150 ms at seed 20250815, injected and not inferred; the disturbance is the arm's definition"
+row "network/fps-shootout-120s-3x-25m/arms/hold90-r3.json" CadenceDegraded \
+    "d66294a: 60 ms held every 150 ms at seed 20250815, injected and not inferred; the disturbance is the arm's definition"
+
+# ---------------------------------------------------------------------------
+# N1's own runs, all UNESTABLISHED, and the reason is the point rather than an
+# omission. These arms exist to measure the monitor, not to characterise a link: the
+# nine radio arms had their host deliver 101 to 120 access units a second against a
+# nominal 120, so their apparent loss is under-production and the reader refuses them
+# on exactly that; the loopback arms ran against this machine's own loopback, which is
+# not a link anybody needs a diagnosis of. Giving any of them a condition would be
+# inventing field evidence out of instrument development.
+row "network/monitor-cost/loopback-120s-monitor-on.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-cost/loopback-90s-monitor-on.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-90s-3x/expensive-r1.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-90s-3x/expensive-r2.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-90s-3x/expensive-r3.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-90s-3x/memory.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-90s-3x/off-r1.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-90s-3x/off-r2.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-90s-3x/off-r3.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-90s-3x/on-r1.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-90s-3x/on-r2.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-90s-3x/on-r3.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-loopback-90s-4x/contend-r1.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-loopback-90s-4x/contend-r2.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-loopback-90s-4x/contend-r3.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-loopback-90s-4x/contend-r4.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-loopback-90s-4x/expensive-r1.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-loopback-90s-4x/expensive-r2.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-loopback-90s-4x/expensive-r3.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-loopback-90s-4x/expensive-r4.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-loopback-90s-4x/off-r1.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-loopback-90s-4x/off-r2.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-loopback-90s-4x/off-r3.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-loopback-90s-4x/off-r4.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-loopback-90s-4x/on-r1.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-loopback-90s-4x/on-r2.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-loopback-90s-4x/on-r3.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+row "network/monitor-neutrality-loopback-90s-4x/on-r4.json" UNESTABLISHED \
+    "b58e2c7: produced to measure the instrument, not to characterise a link"
+
+# ---------------------------------------------------------------------------
 # The pass
 # ---------------------------------------------------------------------------
 

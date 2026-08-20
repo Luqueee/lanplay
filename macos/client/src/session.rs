@@ -288,8 +288,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     println!(
         "monitor: {}",
         match cli.monitor {
-            crate::monitor::Cost::Off =>
-                "off, no radio sampler and no rolling windows".to_string(),
+            crate::monitor::Cost::Off => "off, no radio sampler and no rolling windows".to_string(),
             crate::monitor::Cost::Cheap => format!(
                 "association read every {:.0} s, rolling {:.0} s and {:.0} s windows",
                 crate::monitor::RADIO_INTERVAL.as_secs_f64(),
@@ -776,7 +775,11 @@ fn print_monitor(cadence: crate::monitor::Cost, trace: &crate::monitor::Trace) {
             span_s,
             radio.cpu_ns as f64 * 100.0 / radio.span_ns as f64,
             radio.wakeups,
-            if radio.wakeups > 0 { radio.cpu_ns as f64 / radio.wakeups as f64 / 1e3 } else { 0.0 }
+            if radio.wakeups > 0 {
+                radio.cpu_ns as f64 / radio.wakeups as f64 / 1e3
+            } else {
+                0.0
+            }
         );
         println!(
             "  read        p50 {:.0} us  p95 {:.0} us  p99 {:.0} us  max {:.0} us over {} reads",
@@ -839,8 +842,16 @@ fn print_monitor(cadence: crate::monitor::Cost, trace: &crate::monitor::Trace) {
     for event in &trace.radio.moved {
         println!("  moved       {event}");
     }
-    print_slices("short", crate::monitor::SHORT_WINDOW.as_secs_f64(), &trace.short);
-    print_slices("long", crate::monitor::LONG_WINDOW.as_secs_f64(), &trace.long);
+    print_slices(
+        "short",
+        crate::monitor::SHORT_WINDOW.as_secs_f64(),
+        &trace.short,
+    );
+    print_slices(
+        "long",
+        crate::monitor::LONG_WINDOW.as_secs_f64(),
+        &trace.long,
+    );
 }
 
 /// One length of rolling window, as the tier that decides sees it.
@@ -1412,19 +1423,11 @@ fn build_report(
     // section above states - read 30.8 per cent reorder where the datagram
     // fraction is nearer one per cent.
     let observe = |window: Option<lanplay_link_metrics::Window>| {
-        crate::monitor::observe(
-            window,
-            radio,
-            rx.lost,
-            rx.packets,
-            rx.reordered,
-            experience,
-        )
+        crate::monitor::observe(window, radio, rx.lost, rx.packets, rx.reordered, experience)
     };
-    let observation = observe(monitor_trace.newest_short().map(|slice| slice.window))
-        .and_then(|short| {
-            observe(monitor_trace.newest_long().map(|slice| slice.window))
-                .map(|long| (short, long))
+    let observation =
+        observe(monitor_trace.newest_short().map(|slice| slice.window)).and_then(|short| {
+            observe(monitor_trace.newest_long().map(|slice| slice.window)).map(|long| (short, long))
         });
 
     crate::report::Report {
@@ -1513,9 +1516,7 @@ fn build_report(
             // `crates/network-health`'s corpus reader divides it by a hundred.
             // Zero for a run with no tick, which is what this field has always
             // said; the honest absence is in the experience tier below.
-            fresh_tick_ratio: fresh
-                .map(|fraction| fraction * 100.0)
-                .unwrap_or(0.0),
+            fresh_tick_ratio: fresh.map(|fraction| fraction * 100.0).unwrap_or(0.0),
             callback_interval_p50_ms: render.callback_interval.p50.as_millis_f64(),
             callback_interval_p95_ms: render.callback_interval.p95.as_millis_f64(),
             callback_interval_p99_ms: render.callback_interval.p99.as_millis_f64(),
@@ -1533,31 +1534,32 @@ fn build_report(
             link_pauses: render.link_pauses,
             app_nap_protection: true,
         },
-        observation: observation.as_ref().ok().map(|(short, long)| {
-            crate::report::Observation {
-            radio: short.radio.map(|hint| crate::report::RadioHint {
-                rssi_dbm: hint.rssi_dbm,
-                noise_dbm: hint.noise_dbm,
-                tx_rate_mbps: hint.tx_rate_mbps,
-                channel: hint.channel,
-                width_mhz: hint.width_mhz,
+        observation: observation
+            .as_ref()
+            .ok()
+            .map(|(short, long)| crate::report::Observation {
+                radio: short.radio.map(|hint| crate::report::RadioHint {
+                    rssi_dbm: hint.rssi_dbm,
+                    noise_dbm: hint.noise_dbm,
+                    tx_rate_mbps: hint.tx_rate_mbps,
+                    channel: hint.channel,
+                    width_mhz: hint.width_mhz,
+                }),
+                stream_short: behaviour(
+                    "short",
+                    crate::monitor::SHORT_WINDOW.as_secs_f64(),
+                    &short.stream,
+                ),
+                stream_long: behaviour(
+                    "long",
+                    crate::monitor::LONG_WINDOW.as_secs_f64(),
+                    &long.stream,
+                ),
+                experience: crate::report::Experience {
+                    fresh_tick_ratio: short.experience.fresh_tick_ratio,
+                    frame_age_p99_ms: short.experience.frame_age_p99_ms,
+                },
             }),
-            stream_short: behaviour(
-                "short",
-                crate::monitor::SHORT_WINDOW.as_secs_f64(),
-                &short.stream,
-            ),
-            stream_long: behaviour(
-                "long",
-                crate::monitor::LONG_WINDOW.as_secs_f64(),
-                &long.stream,
-            ),
-            experience: crate::report::Experience {
-                fresh_tick_ratio: short.experience.fresh_tick_ratio,
-                frame_age_p99_ms: short.experience.frame_age_p99_ms,
-            },
-            }
-        }),
         observation_refused: observation.as_ref().err().cloned(),
         monitor: crate::report::Monitor {
             cadence: monitor_cadence.label(),
@@ -1572,8 +1574,8 @@ fn build_report(
                 let span_s = radio.span_ns as f64 / 1e9;
                 let period_ms = 1000.0 / feed_fps.max(1.0);
                 let delivered = link.delivered;
-                let bound_us = (delivered > 0)
-                    .then(|| radio.lock_hold_ns as f64 / delivered as f64 / 1e3);
+                let bound_us =
+                    (delivered > 0).then(|| radio.lock_hold_ns as f64 / delivered as f64 / 1e3);
                 crate::report::MonitorCost {
                     span_s,
                     wakeups: radio.wakeups,
@@ -1597,8 +1599,7 @@ fn build_report(
                     },
                     max_mean_delay_us_per_unit: bound_us,
                     source_period_ms: period_ms,
-                    max_mean_delay_share_of_period: bound_us
-                        .map(|us| us / 1e3 / period_ms),
+                    max_mean_delay_share_of_period: bound_us.map(|us| us / 1e3 / period_ms),
                     read_us: span_of(radio.read),
                     lock_path_us: span_of(radio.lock_path),
                 }

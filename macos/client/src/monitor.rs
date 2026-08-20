@@ -561,30 +561,26 @@ fn sample(
             long_index += 1;
         }
 
-        match cadence.interval() {
-            // Absolute deadlines, not a sleep after the work: a sleep of one
-            // second after a 15.5 ms read is a 1.0155 s cadence, and over ten
-            // minutes that is a sample missing from the trace.
-            Some(interval) => {
-                let mut next = start.add(Nanos(interval.as_nanos() as u64 * (trace.count() + 1)));
-                let now = Timestamp::now();
-                // A sampler that fell behind catches up to the grid rather
-                // than sprinting through the backlog, which would turn one
-                // late read into a burst of them.
-                while next.saturating_since(now).get() == 0 {
-                    next = next.add(Nanos(interval.as_nanos() as u64));
-                }
-                // Woken often enough that stopping is prompt: a one-second
-                // sampler joined at the end of a run must not add a second to
-                // it.
-                let tick = now.add(Nanos(TICK.as_nanos() as u64));
-                wait_until(if tick.saturating_since(next).get() == 0 {
-                    tick
-                } else {
-                    next
-                });
+        // Absolute deadlines, not a sleep after the work: a sleep of one second
+        // after a 15.5 ms read is a 1.0155 s cadence, and over ten minutes that is
+        // a sample missing from the trace.
+        if let Some(interval) = cadence.interval() {
+            let mut next = start.add(Nanos(interval.as_nanos() as u64 * (trace.count() + 1)));
+            let now = Timestamp::now();
+            // A sampler that fell behind catches up to the grid rather than
+            // sprinting through the backlog, which would turn one late read into a
+            // burst of them.
+            while next.saturating_since(now).get() == 0 {
+                next = next.add(Nanos(interval.as_nanos() as u64));
             }
-            None => {}
+            // Woken often enough that stopping is prompt: a one-second sampler
+            // joined at the end of a run must not add a second to it.
+            let tick = now.add(Nanos(TICK.as_nanos() as u64));
+            wait_until(if tick.saturating_since(next).get() == 0 {
+                tick
+            } else {
+                next
+            });
         }
     }
 
@@ -685,10 +681,11 @@ pub fn observe(
     experience: Experience,
 ) -> Result<NetworkObservation, String> {
     let Some(delivery) = delivery else {
-        return Err(format!(
+        return Err(
             "no rolling window closed, so no tail was counted; a window of \
-             every counter at zero would read as a flawless link"
-        ));
+                    every counter at zero would read as a flawless link"
+                .to_string(),
+        );
     };
     let population = lost + received;
     let loss = Fraction::new(lost, population).ok_or_else(|| {
@@ -698,7 +695,7 @@ pub fn observe(
         )
     })?;
     let reorder = Fraction::new(reordered, received).ok_or_else(|| {
-        format!("the run accepted no datagrams, so nothing could have arrived out of order")
+        "the run accepted no datagrams, so nothing could have arrived out of order".to_string()
     })?;
     Ok(NetworkObservation {
         radio,
@@ -775,7 +772,10 @@ mod tests {
         // section costs microseconds, not the milliseconds an association read
         // costs. A hold anywhere near a frame period would mean the read had
         // got inside the lock.
-        assert!(engaged > 0, "a percentile query over 200 samples took no time");
+        assert!(
+            engaged > 0,
+            "a percentile query over 200 samples took no time"
+        );
         assert!(
             engaged < 3_000_000,
             "entering the shared section took {engaged} ns, which is frame-sized"
@@ -868,8 +868,8 @@ mod tests {
     /// link.
     #[test]
     fn a_window_that_never_closed_is_refused_and_says_why() {
-        let refusal = observe(None, None, 0, 14_400, 0, Experience::default())
-            .expect_err("no window closed");
+        let refusal =
+            observe(None, None, 0, 14_400, 0, Experience::default()).expect_err("no window closed");
         assert!(refusal.contains("no rolling window closed"), "{refusal}");
     }
 
@@ -905,7 +905,10 @@ mod tests {
             Experience::default(),
         )
         .expect("a counted window over a non-empty population");
-        let loss = observation.stream.loss_ratio.expect("a live run holds both populations");
+        let loss = observation
+            .stream
+            .loss_ratio
+            .expect("a live run holds both populations");
         assert_eq!(loss.population(), 504_000, "datagrams, not access units");
         assert_eq!(loss.events(), 12);
         assert_eq!(observation.stream.reorder.population(), Some(503_988));

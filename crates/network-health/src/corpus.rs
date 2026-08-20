@@ -914,15 +914,29 @@ mod tests {
             .iter()
             .filter(|r| matches!(r, Reading::Unreadable(_)))
             .count();
+        // The partition and not the population, which is what the name promises. An
+        // earlier version asserted 21 classifiable and 38 unreadable, and committing
+        // N4's arms took the first to 104: a test that has to be edited every time
+        // evidence lands is a test that stops being read, and the count was never the
+        // contract. What must hold is that every session lands in exactly one side,
+        // that neither side is empty - an all-refused corpus and an all-classified one
+        // are both ways this reader could be broken while agreeing with itself - and
+        // that nothing sits outside both.
         assert_eq!(
-            classifiable, 21,
-            "24 committed sessions carry the tail counters, and three phase arms delivered \
-             105.32 to 117.96 access units a second against a target of 120"
+            classifiable + unreadable,
+            readings.len(),
+            "every reading is classifiable or unreadable and nothing is neither"
         );
-        assert_eq!(
-            unreadable, 38,
-            "17 audio envelopes, the 18 arms predating the tail counters, and the three arms \
-             whose host under-produced"
+        assert!(
+            classifiable > 0,
+            "no committed session carries the tail counters, so this reader would agree \
+             with itself over an empty population"
+        );
+        assert!(
+            unreadable > 0,
+            "every committed session read cleanly, which has never been true here: the \
+             audio envelopes carry no delivery tier and the older arms predate the tail \
+             counters, so a zero means the reader stopped noticing"
         );
     }
 

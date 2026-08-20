@@ -306,7 +306,10 @@ pub fn behaviour(measurement: &Measurement) -> StreamBehaviour {
     };
     StreamBehaviour {
         delivery: measurement.window,
-        loss: incidence(measurement.rx.lost),
+        // `Some` because this probe counts both sides in datagrams: it knows how many
+        // it accounted for, which is the population the committed corpus has nowhere
+        // and the reason the field is optional at all.
+        loss_ratio: Fraction::new(measurement.rx.lost, measurement.datagrams_accounted()),
         reorder: incidence(measurement.rx.reordered),
     }
 }
@@ -326,15 +329,15 @@ fn stream(measurement: &Measurement, behaviour: &StreamBehaviour) -> Stream {
     Stream {
         expected: measurement.access_units_expected(),
         reconstructed: measurement.window.delivered,
-        packet_loss: behaviour.loss.events(),
+        packet_loss: measurement.rx.lost,
         datagrams_accounted: measurement.datagrams_accounted(),
         // Both unwrapped against a population the probe has already refused a
         // run without, which is why neither of these is an `Option` in the
         // document: an `Incidence` that could not state its population would
         // mean the measured sections should not exist at all.
         loss_ratio: behaviour
-            .loss
-            .value()
+            .loss_ratio
+            .map(|ratio| ratio.value())
             .expect("a measured run states its datagram population"),
         au_loss: measurement.access_units_lost(),
         reordered: behaviour.reorder.events(),
