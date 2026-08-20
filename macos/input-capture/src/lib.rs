@@ -81,6 +81,7 @@
 
 pub mod capture;
 pub mod focus;
+pub mod gamepad;
 pub mod heartbeat;
 pub mod origin;
 pub mod reliable;

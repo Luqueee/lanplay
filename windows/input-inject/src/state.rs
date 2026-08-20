@@ -386,7 +386,10 @@ impl HostState {
                 self.release_all(&mut emit);
             }
             Message::Heartbeat => {}
-            Message::Ack { .. } => return Outcome::Ignored,
+            Message::Ack { .. }
+            | Message::GamepadAttach { .. }
+            | Message::GamepadDetach { .. }
+            | Message::GamepadState(_) => return Outcome::Ignored,
         }
         Outcome::Applied
     }

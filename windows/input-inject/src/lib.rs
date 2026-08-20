@@ -47,6 +47,7 @@
 //! else running, so the pair can be exercised from a shell without the video
 //! pipeline.
 
+pub mod gamepad;
 pub mod probe;
 pub mod state;
 
@@ -55,6 +56,10 @@ pub mod send;
 
 pub use state::{
     Acknowledgement, Action, HostState, Outcome, Releases, WheelAxis, key_slot, slot_key,
+};
+
+pub use gamepad::{
+    GamepadAction, GamepadHost, GamepadOutcome, MAX_GAMEPAD_SLOTS, VirtualGamepadBackend, deliver,
 };
 
 #[cfg(windows)]
