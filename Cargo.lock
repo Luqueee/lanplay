@@ -611,6 +611,7 @@ dependencies = [
 name = "lanplay-protocol"
 version = "0.1.0"
 dependencies = [
+ "getrandom",
  "mdns-sd",
  "serde",
  "serde_json",
