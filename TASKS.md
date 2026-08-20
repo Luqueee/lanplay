@@ -220,6 +220,24 @@ No construir Virtual HID para teclado/ratón por preferencia arquitectónica. So
 - [ ] Corregir documentación que mencione subcomandos inexistentes.
 - [ ] No bloquear v1.0 si no cambia seguridad/reproducibilidad de forma material.
 
+### Q3 — Precondiciones que rehúsan por el motivo equivocado
+
+Encontrado durante N1: `tools/e2e-gate.sh` rehusaba **todas** las corridas sobre este enlace porque su
+precondición de alcanzabilidad era un `ping`, y el host tiene los tres perfiles del firewall de Windows
+activos sin regla de entrada para ICMPv4. `ssh`, el plano de control y el medio funcionaban.
+
+Nada en este producto envía un echo ICMP. Una precondición que exige una capacidad que el producto
+nunca usa no protege la corrida, se protege a sí misma, y su negativa se lee igual que una real.
+
+- [x] Arreglado en N1: intenta ICMP y cae a un handshake TCP al 22 desde la misma dirección fijada,
+      rehusando sólo si fallan los dos.
+- [ ] Abrir ICMP en el host queda **rechazado** como arreglo: sería cambiar la máquina para que pase el
+      instrumento, y el host por defecto de cualquier usuario es exactamente el que tenemos.
+- [ ] Auditar el resto de precondiciones con la misma pregunta: ¿exige esto algo que el producto usa?
+- [ ] Un handshake TCP al 22 prueba que el host es alcanzable, **no** que un datagrama UDP llegue al
+      puerto de medio. Verificar que lo que caza un camino de medio bloqueado es el refusal de población
+      cero aguas abajo, y no esta precondición.
+
 ---
 
 # 5. FASE N — NETWORK ROBUSTNESS & ADAPTATION
