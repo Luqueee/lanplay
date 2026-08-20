@@ -277,6 +277,14 @@ minutes = 2
 negative_control = "not applicable"
 notes = "the only harness whose most important result is not a number; a person plays and says"
 
+[gates.gamepad-fault-gate]
+script = "tools/gamepad-fault-gate.sh"
+proves = "newest controller state wins across loss, duplication, reordering and stalls, then detach neutralizes the virtual Xbox device"
+phase = "G4"
+requires = ["windows-host"]
+minutes = 2
+negative_control = "the seeded fault relay injects loss, duplicates, reorder and stalls; the receiver must still observe attach, state, detach and neutralization while applying no stale state"
+
 # ---------------------------------------------------------------------------
 # Control plane
 # ---------------------------------------------------------------------------

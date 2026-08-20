@@ -17,6 +17,10 @@ platforms = ["macos"]
 name = "input-capture-probe"
 path = "src/bin/probe.rs"
 
+[[bin]]
+name = "gamepad-capture-probe"
+path = "src/bin/gamepad_probe.rs"
+
 [dependencies]
 clap = { workspace = true }
 hdrhistogram = { workspace = true }
@@ -28,4 +32,5 @@ block2 = { workspace = true }
 objc2 = { workspace = true }
 objc2-app-kit = { workspace = true }
 objc2-core-graphics = { workspace = true }
+objc2-game-controller = { workspace = true }
 objc2-foundation = { workspace = true }

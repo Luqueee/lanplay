@@ -36,7 +36,7 @@ use core::fmt;
 
 /// Bumped only for a change that an older peer would misread. The handshake
 /// carries it, so a mismatch is refused before any input is injected.
-pub const VERSION: u8 = 1;
+pub const VERSION: u8 = 2;
 
 /// Bytes before the payload. Fixed, so a decoder can reject a short datagram
 /// before looking at anything.
@@ -121,6 +121,85 @@ impl Button {
     /// Bit for this button in a snapshot's button field.
     pub fn mask(self) -> u8 {
         1 << self.index()
+    }
+}
+
+/// Which direction the directional pad is held.
+///
+/// A hat is one value rather than four buttons because XInput exposes it that
+/// way and diagonal positions are physical states, not two independent presses.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum Dpad {
+    Neutral = 0,
+    North = 1,
+    NorthEast = 2,
+    East = 3,
+    SouthEast = 4,
+    South = 5,
+    SouthWest = 6,
+    West = 7,
+    NorthWest = 8,
+}
+
+impl Dpad {
+    pub fn from_wire(value: u8) -> Option<Self> {
+        Some(match value {
+            0 => Self::Neutral,
+            1 => Self::North,
+            2 => Self::NorthEast,
+            3 => Self::East,
+            4 => Self::SouthEast,
+            5 => Self::South,
+            6 => Self::SouthWest,
+            7 => Self::West,
+            8 => Self::NorthWest,
+            _ => return None,
+        })
+    }
+}
+
+/// The complete state of one controller at one instant.
+///
+/// `sequence` belongs to a slot rather than the UDP datagram stream. A keyboard
+/// packet sharing the socket must not make an older controller state look new.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct GamepadStateV1 {
+    pub session_generation: u32,
+    pub controller_slot: u8,
+    pub sequence: u32,
+    pub buttons: u16,
+    pub dpad: Dpad,
+    pub left_x: i16,
+    pub left_y: i16,
+    pub right_x: i16,
+    pub right_y: i16,
+    pub left_trigger: u16,
+    pub right_trigger: u16,
+}
+
+impl GamepadStateV1 {
+    pub const NEUTRAL: Self = Self {
+        session_generation: 0,
+        controller_slot: 0,
+        sequence: 0,
+        buttons: 0,
+        dpad: Dpad::Neutral,
+        left_x: 0,
+        left_y: 0,
+        right_x: 0,
+        right_y: 0,
+        left_trigger: 0,
+        right_trigger: 0,
+    };
+
+    pub fn neutral_for(session_generation: u32, controller_slot: u8, sequence: u32) -> Self {
+        Self {
+            session_generation,
+            controller_slot,
+            sequence,
+            ..Self::NEUTRAL
+        }
     }
 }
 
@@ -227,6 +306,23 @@ pub enum Message {
     /// it is beyond repair by retransmission and the periodic snapshot is what
     /// fixes the state.
     Ack { top: EventId, missing: u32 },
+    /// Creates one virtual controller. The control plane retries this until
+    /// the host acknowledges it; no controller state is accepted before it.
+    GamepadAttach {
+        id: EventId,
+        controller_slot: u8,
+        session_generation: u32,
+    },
+    /// Destroys one virtual controller. The host first submits neutral state,
+    /// so a lost final state cannot leave an axis or button held.
+    GamepadDetach {
+        id: EventId,
+        controller_slot: u8,
+        session_generation: u32,
+    },
+    /// A complete, newest-wins controller state. It is never retransmitted:
+    /// preserving a stale stick position is worse than losing it.
+    GamepadState(GamepadStateV1),
 }
 
 impl Message {
@@ -235,17 +331,17 @@ impl Message {
             // Motion is superseded by the next motion and additive with it,
             // so a retransmission would apply movement the user has already
             // continued past.
-            Message::Motion { .. } | Message::Heartbeat | Message::Ack { .. } => {
-                Reliability::Unreliable
-            }
-            // A snapshot is unreliable by itself because the next one repairs
-            // whatever this one would have: it is the repair mechanism, not
-            // something needing repair.
-            Message::Snapshot { .. } => Reliability::Unreliable,
+            Message::Motion { .. }
+            | Message::Heartbeat
+            | Message::Ack { .. }
+            | Message::Snapshot { .. }
+            | Message::GamepadState(_) => Reliability::Unreliable,
             Message::Button { .. }
             | Message::Key { .. }
             | Message::Wheel { .. }
-            | Message::ReleaseAll { .. } => Reliability::Reliable,
+            | Message::ReleaseAll { .. }
+            | Message::GamepadAttach { .. }
+            | Message::GamepadDetach { .. } => Reliability::Reliable,
         }
     }
 
@@ -255,7 +351,9 @@ impl Message {
             Message::Button { id, .. }
             | Message::Key { id, .. }
             | Message::Wheel { id, .. }
-            | Message::ReleaseAll { id } => Some(*id),
+            | Message::ReleaseAll { id }
+            | Message::GamepadAttach { id, .. }
+            | Message::GamepadDetach { id, .. } => Some(*id),
             _ => None,
         }
     }
@@ -270,6 +368,9 @@ impl Message {
             Message::ReleaseAll { .. } => 6,
             Message::Heartbeat => 7,
             Message::Ack { .. } => 8,
+            Message::GamepadAttach { .. } => 9,
+            Message::GamepadDetach { .. } => 10,
+            Message::GamepadState(_) => 11,
         }
     }
 }
@@ -310,6 +411,9 @@ pub enum DecodeError {
     BadButton {
         index: u8,
     },
+    BadDpad {
+        value: u8,
+    },
 }
 
 impl fmt::Display for DecodeError {
@@ -322,6 +426,7 @@ impl fmt::Display for DecodeError {
                 write!(f, "kind {kind} cannot have a {len} byte payload")
             }
             DecodeError::BadButton { index } => write!(f, "no button {index}"),
+            DecodeError::BadDpad { value } => write!(f, "no d-pad position {value}"),
         }
     }
 }
@@ -386,10 +491,36 @@ pub fn encode(datagram: &Datagram, out: &mut [u8]) -> Option<usize> {
             body[0..8].copy_from_slice(&top.0.to_be_bytes());
             body[8..12].copy_from_slice(&missing.to_be_bytes());
         }
+        Message::GamepadAttach {
+            id,
+            controller_slot,
+            session_generation,
+        }
+        | Message::GamepadDetach {
+            id,
+            controller_slot,
+            session_generation,
+        } => {
+            body[0..8].copy_from_slice(&id.0.to_be_bytes());
+            body[8] = *controller_slot;
+            body[9..13].copy_from_slice(&session_generation.to_be_bytes());
+        }
+        Message::GamepadState(state) => {
+            body[0..4].copy_from_slice(&state.session_generation.to_be_bytes());
+            body[4] = state.controller_slot;
+            body[5..9].copy_from_slice(&state.sequence.to_be_bytes());
+            body[9..11].copy_from_slice(&state.buttons.to_be_bytes());
+            body[11] = state.dpad as u8;
+            body[12..14].copy_from_slice(&state.left_x.to_be_bytes());
+            body[14..16].copy_from_slice(&state.left_y.to_be_bytes());
+            body[16..18].copy_from_slice(&state.right_x.to_be_bytes());
+            body[18..20].copy_from_slice(&state.right_y.to_be_bytes());
+            body[20..22].copy_from_slice(&state.left_trigger.to_be_bytes());
+            body[22..24].copy_from_slice(&state.right_trigger.to_be_bytes());
+        }
     }
     Some(HEADER_LEN + payload_len)
 }
-
 fn payload_len(message: &Message) -> usize {
     match message {
         Message::Motion { .. } => 8,
@@ -400,6 +531,8 @@ fn payload_len(message: &Message) -> usize {
         Message::ReleaseAll { .. } => 8,
         Message::Heartbeat => 0,
         Message::Ack { .. } => 12,
+        Message::GamepadAttach { .. } | Message::GamepadDetach { .. } => 13,
+        Message::GamepadState(_) => 24,
     }
 }
 
@@ -493,6 +626,45 @@ pub fn decode(bytes: &[u8]) -> Result<Datagram, DecodeError> {
                 missing: u32::from_be_bytes([body[8], body[9], body[10], body[11]]),
             }
         }
+        9 | 10 => {
+            if body.len() < 13 {
+                return Err(short(13));
+            }
+            let id = id(body);
+            let controller_slot = body[8];
+            let session_generation = u32::from_be_bytes([body[9], body[10], body[11], body[12]]);
+            if kind == 9 {
+                Message::GamepadAttach {
+                    id,
+                    controller_slot,
+                    session_generation,
+                }
+            } else {
+                Message::GamepadDetach {
+                    id,
+                    controller_slot,
+                    session_generation,
+                }
+            }
+        }
+        11 => {
+            if body.len() < 24 {
+                return Err(short(24));
+            }
+            Message::GamepadState(GamepadStateV1 {
+                session_generation: u32::from_be_bytes([body[0], body[1], body[2], body[3]]),
+                controller_slot: body[4],
+                sequence: u32::from_be_bytes([body[5], body[6], body[7], body[8]]),
+                buttons: u16::from_be_bytes([body[9], body[10]]),
+                dpad: Dpad::from_wire(body[11]).ok_or(DecodeError::BadDpad { value: body[11] })?,
+                left_x: i16::from_be_bytes([body[12], body[13]]),
+                left_y: i16::from_be_bytes([body[14], body[15]]),
+                right_x: i16::from_be_bytes([body[16], body[17]]),
+                right_y: i16::from_be_bytes([body[18], body[19]]),
+                left_trigger: u16::from_be_bytes([body[20], body[21]]),
+                right_trigger: u16::from_be_bytes([body[22], body[23]]),
+            })
+        }
         other => return Err(DecodeError::UnknownKind { kind: other }),
     };
 
@@ -569,19 +741,47 @@ mod tests {
                 top: EventId(41),
                 missing: 0b1011,
             },
+            Message::GamepadAttach {
+                id: EventId(6),
+                controller_slot: 0,
+                session_generation: 7,
+            },
+            Message::GamepadDetach {
+                id: EventId(7),
+                controller_slot: 0,
+                session_generation: 7,
+            },
+            Message::GamepadState(GamepadStateV1 {
+                session_generation: 7,
+                controller_slot: 0,
+                sequence: 19,
+                buttons: 0xABCD,
+                dpad: Dpad::SouthWest,
+                left_x: i16::MIN,
+                left_y: -1,
+                right_x: 1,
+                right_y: i16::MAX,
+                left_trigger: 0,
+                right_trigger: u16::MAX,
+            }),
         ] {
             round_trip(message);
         }
     }
 
     #[test]
-    fn motion_is_the_only_thing_that_may_be_lost() {
-        // The whole point of the split. If this ever inverts, a lost key
-        // release becomes a player walking into a wall forever.
-        assert_eq!(
-            Message::Motion { dx: 1, dy: 1 }.reliability(),
-            Reliability::Unreliable
-        );
+    fn state_is_droppable_but_controller_lifecycle_is_not() {
+        for droppable in [
+            Message::Motion { dx: 1, dy: 1 },
+            Message::Snapshot {
+                generation: 1,
+                keys: KeyBitset::EMPTY,
+                buttons: 0,
+            },
+            Message::GamepadState(GamepadStateV1::NEUTRAL),
+        ] {
+            assert_eq!(droppable.reliability(), Reliability::Unreliable);
+        }
         for reliable in [
             Message::Key {
                 id: EventId(1),
@@ -600,6 +800,16 @@ mod tests {
                 dy: 1,
             },
             Message::ReleaseAll { id: EventId(1) },
+            Message::GamepadAttach {
+                id: EventId(2),
+                controller_slot: 0,
+                session_generation: 1,
+            },
+            Message::GamepadDetach {
+                id: EventId(3),
+                controller_slot: 0,
+                session_generation: 1,
+            },
         ] {
             assert_eq!(
                 reliable.reliability(),
@@ -691,6 +901,25 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_bad_dpad_is_refused_rather_than_reinterpreted() {
+        let mut buffer = [0u8; MAX_DATAGRAM];
+        let len = encode(
+            &Datagram {
+                session: SessionId(1),
+                sequence: Sequence(1),
+                sent_at_ns: 0,
+                message: Message::GamepadState(GamepadStateV1::NEUTRAL),
+            },
+            &mut buffer,
+        )
+        .expect("encodes");
+        buffer[HEADER_LEN + 11] = 9;
+        assert_eq!(
+            decode(&buffer[..len]),
+            Err(DecodeError::BadDpad { value: 9 })
+        );
+    }
     #[test]
     fn a_key_bitset_holds_every_scan_code() {
         let mut keys = KeyBitset::EMPTY;

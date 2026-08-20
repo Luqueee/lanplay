@@ -39,6 +39,7 @@ PY
 }
 
 paths=(Cargo.toml)
+paths+=(windows/hidmaestro-bridge)
 count=0
 for member in $(members); do
     paths+=("$member/Cargo.toml")
@@ -54,7 +55,7 @@ done
 # way entirely.
 "$REPO/tools/win-ssh.sh" --check >/dev/null
 
-tar -cz -C "$REPO" "${paths[@]}" |
+COPYFILE_DISABLE=1 tar -cz -C "$REPO" "${paths[@]}" |
     ssh -o BatchMode=yes "$HOST" "tar -xzf - -C $REMOTE" ||
     {
         echo "sync failed; the host may be refusing connections" >&2

@@ -246,7 +246,11 @@ impl Counts {
             // host-to-client traffic, counted as such where it is decided, and
             // a release is counted by the state machine, which is the only
             // place that knows what caused it.
-            Message::Ack { .. } | Message::ReleaseAll { .. } => {}
+            Message::Ack { .. }
+            | Message::ReleaseAll { .. }
+            | Message::GamepadAttach { .. }
+            | Message::GamepadDetach { .. }
+            | Message::GamepadState(_) => {}
         }
     }
 }
