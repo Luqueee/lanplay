@@ -15,5 +15,5 @@ pub use capabilities::{
 pub use frame::{FrameId, FrameIdSource};
 
 pub use negotiation::{CapabilitySelection, CapabilitySet, NegotiationError, negotiate};
-pub use session::{SessionEvent, SessionMachine, SessionState, TransitionError};
+pub use session::{SessionEvent, SessionMachine, SessionState, SessionTimeouts, TransitionError};
 pub use video::{VideoCodec, VideoMode};

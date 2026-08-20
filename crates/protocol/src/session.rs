@@ -45,6 +45,40 @@ pub struct SessionMachine {
     generation: u32,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SessionTimeouts {
+    pub connecting: std::time::Duration,
+    pub negotiating: std::time::Duration,
+    pub starting: std::time::Duration,
+    pub streaming_idle: std::time::Duration,
+    pub reconnecting: std::time::Duration,
+}
+
+impl Default for SessionTimeouts {
+    fn default() -> Self {
+        Self {
+            connecting: std::time::Duration::from_secs(60),
+            negotiating: std::time::Duration::from_secs(10),
+            starting: std::time::Duration::from_secs(10),
+            streaming_idle: std::time::Duration::from_secs(2),
+            reconnecting: std::time::Duration::from_secs(30),
+        }
+    }
+}
+
+impl SessionTimeouts {
+    pub const fn for_state(self, state: SessionState) -> Option<std::time::Duration> {
+        match state {
+            SessionState::Connecting => Some(self.connecting),
+            SessionState::Negotiating => Some(self.negotiating),
+            SessionState::Starting => Some(self.starting),
+            SessionState::Streaming => Some(self.streaming_idle),
+            SessionState::Reconnecting => Some(self.reconnecting),
+            SessionState::Disconnected | SessionState::Stopping | SessionState::Failed => None,
+        }
+    }
+}
+
 impl SessionMachine {
     pub const fn new() -> Self {
         Self {
@@ -62,7 +96,6 @@ impl SessionMachine {
     pub const fn accepts_generation(self, generation: u32) -> bool {
         generation != 0 && generation == self.generation
     }
-
     pub fn apply(&mut self, event: SessionEvent) -> Result<SessionState, TransitionError> {
         let next = match (self.state, event) {
             (SessionState::Disconnected, SessionEvent::ConnectRequested) => {
@@ -213,5 +246,15 @@ mod tests {
         assert_ne!(machine.generation(), first);
         assert!(!machine.accepts_generation(first));
         assert!(machine.accepts_generation(machine.generation()));
+    }
+
+    #[test]
+    fn timeout_policy_is_defined_only_for_live_states() {
+        let timeouts = SessionTimeouts::default();
+        assert_eq!(
+            timeouts.for_state(SessionState::Streaming),
+            Some(std::time::Duration::from_secs(2))
+        );
+        assert_eq!(timeouts.for_state(SessionState::Disconnected), None);
     }
 }
