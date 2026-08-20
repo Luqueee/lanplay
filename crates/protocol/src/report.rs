@@ -47,8 +47,41 @@ impl SessionReport {
             errors: Vec::new(),
         }
     }
-}
 
+    pub fn set_negotiated(&mut self, selection: crate::CapabilitySelection) {
+        self.negotiated = Some(NegotiatedMode {
+            generation: self.generation,
+            codec: selection.codec,
+            video_mode: selection.mode,
+            audio_sample_rate: selection.audio_sample_rate,
+            audio_channels: selection.audio_channels,
+            gamepad: selection.gamepad,
+        });
+    }
+
+    pub fn health_mut(&mut self, channel: crate::StartupChannel) -> &mut SubsystemHealth {
+        match channel {
+            crate::StartupChannel::Video => &mut self.video,
+            crate::StartupChannel::Audio => &mut self.audio,
+            crate::StartupChannel::Input => &mut self.input,
+            crate::StartupChannel::Gamepad => &mut self.gamepad,
+        }
+    }
+
+    pub fn record_adaptation(&mut self, adaptation: impl Into<String>) {
+        self.adaptations.push(adaptation.into());
+    }
+
+    pub fn record_error(&mut self, error: impl Into<String>) {
+        self.errors.push(error.into());
+    }
+    pub fn export_json(&self, path: impl AsRef<std::path::Path>) -> Result<(), String> {
+        let bytes = serde_json::to_vec_pretty(self)
+            .map_err(|error| format!("cannot encode session report: {error}"))?;
+        std::fs::write(path.as_ref(), bytes)
+            .map_err(|error| format!("cannot write session report: {error}"))
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
