@@ -179,6 +179,9 @@ impl GamepadHost {
     pub fn stale_states(&self) -> u64 {
         self.stale_states
     }
+    pub fn attached_slots(&self) -> usize {
+        self.slots.iter().filter(|slot| slot.attached).count()
+    }
 
     fn neutralize(
         &mut self,
@@ -280,5 +283,54 @@ mod tests {
         host.attach(0, 9, |_| {});
         host.attach(0, 10, |_| {});
         assert_eq!(host.detach(0, 9, |_| {}), GamepadOutcome::WrongGeneration);
+    }
+
+    #[test]
+    fn a_stale_generation_cannot_reenter_a_new_session() {
+        let mut host = GamepadHost::new();
+        host.attach(0, 9, |_| {});
+        host.submit(state(1), |_| {});
+        host.attach(0, 10, |_| {});
+        let mut stale = state(2);
+        stale.session_generation = 9;
+        let mut actions = Vec::new();
+        assert_eq!(
+            host.submit(stale, |action| actions.push(action)),
+            GamepadOutcome::WrongGeneration
+        );
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn a_short_tap_is_observed_when_down_and_up_states_arrive() {
+        let mut host = GamepadHost::new();
+        host.attach(0, 9, |_| {});
+        let mut actions = Vec::new();
+        host.submit(state(1), |action| actions.push(action));
+        let mut up = state(2);
+        up.buttons = 0;
+        host.submit(up, |action| actions.push(action));
+        assert_eq!(
+            actions
+                .iter()
+                .filter_map(|action| match action {
+                    GamepadAction::Submit(state) => Some(state.buttons),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            [1, 0]
+        );
+    }
+
+    #[test]
+    fn a_lost_down_state_cannot_be_recovered_by_latest_state() {
+        let mut host = GamepadHost::new();
+        host.attach(0, 9, |_| {});
+        let mut up = state(2);
+        up.buttons = 0;
+        let mut actions = Vec::new();
+        host.submit(up, |action| actions.push(action));
+        assert_eq!(actions, [GamepadAction::Submit(up)]);
+        assert_eq!(host.stale_states(), 0);
     }
 }

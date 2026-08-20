@@ -1,0 +1,26 @@
+{
+  "schema": "lanplay.gamepad.soak.v1",
+  "kind": "physical_ds4_usb",
+  "duration_seconds": 600,
+  "source": {
+    "vendor_id": "0x054c",
+    "product_id": "0x09cc",
+    "transport": "USB",
+    "raw_reports": 150033,
+    "states_sent": 150033,
+    "hid_recoveries": 0
+  },
+  "receiver": {
+    "udp": 150190,
+    "decode_errors": 0,
+    "wrong_session": 0,
+    "attach": 76,
+    "states": 150034,
+    "detach": 80,
+    "stale": 75,
+    "neutral": 1,
+    "expired": 0
+  },
+  "verdict": "pass",
+  "scope": "Physical DS4 USB capture through HIDAPI over Mac Wi-Fi to Windows Ethernet, virtual Xbox lifecycle and state transport. XInput/GameInput conformance was verified separately."
+}

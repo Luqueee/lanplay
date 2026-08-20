@@ -1,0 +1,23 @@
+{
+  "schema": "lanplay.gamepad.soak.v1",
+  "kind": "synthetic_state_transport",
+  "duration_seconds": 600,
+  "sender": {
+    "states_sent": 71999,
+    "rate_hz": 120,
+    "detach_retries": 20
+  },
+  "receiver": {
+    "udp": 72020,
+    "decode_errors": 0,
+    "wrong_session": 0,
+    "attach": 1,
+    "states": 71999,
+    "detach": 20,
+    "stale": 0,
+    "neutral": 1,
+    "expired": 0
+  },
+  "verdict": "pass",
+  "scope": "Validates synthetic state transport, lifecycle and neutralization over Mac Wi-Fi to Windows Ethernet. Does not validate DS4 HIDAPI availability during the entire run."
+}

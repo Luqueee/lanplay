@@ -80,6 +80,7 @@
 //! ```
 
 pub mod capture;
+pub mod ds4;
 pub mod focus;
 pub mod gamepad;
 pub mod heartbeat;

@@ -1,0 +1,47 @@
+{
+  "schema": "lanplay.gamepad.evidence.v1",
+  "branch": "feature/gamepad-observer-lifecycle",
+  "transport": {
+    "source": "DualShock 4 Bluetooth HIDAPI",
+    "destination": "Windows Ethernet host",
+    "network": "Mac Wi-Fi to Windows Ethernet"
+  },
+  "physical_capture": {
+    "raw_reports": 2063,
+    "states_sent": 2063,
+    "note": "Rocket League Bluetooth run"
+  },
+  "windows_receiver": {
+    "udp": 2066,
+    "decode_errors": 0,
+    "wrong_session": 0,
+    "attach": 1,
+    "states": 2064,
+    "detach": 1,
+    "stale": 0,
+    "neutral": 1
+  },
+  "xinput_conformance": {
+    "states": 5,
+    "matched": 5,
+    "mismatched": 0,
+    "verdict": "pass"
+  },
+  "gameinput": {
+    "readings": 641,
+    "changed": 1,
+    "verdict": "pass"
+  },
+  "crash_lifecycle": {
+    "attach": 19,
+    "states": 54,
+    "detach": 0,
+    "neutral": 1,
+    "expired": 1,
+    "verdict": "pass"
+  },
+  "soak_600_seconds": {
+    "verdict": "refused",
+    "reason": "HIDAPI reported zero DS4 reports when the sender started; no valid population existed"
+  }
+}
