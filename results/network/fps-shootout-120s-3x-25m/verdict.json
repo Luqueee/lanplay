@@ -1,0 +1,575 @@
+{
+  "gate": "fps-shootout",
+  "phase": "N4-B",
+  "verdict": "REFUSED",
+  "finding": null,
+  "why": "3 arm(s) delivered more than 1 per cent under their own nominal, so their crossings are counted against a period the host was not holding and measure the producer rather than the link: clean120-r1 at 118.7/120, hold120-r1 at 116.5/120, hold120-r3 at 117.4/120",
+  "question": "does reducing the frame rate fix cadence degradation",
+  "decides_on": "normalised crossings of two source periods a minute, and stall clusters a minute; the raw millisecond percentiles are reported and read by no criterion",
+  "separation_rule": "separated(A,B) = min(A) > max(B) or min(B) > max(A), complete separation of the value sets; exact and distribution-free, p = 1/20 one-directional for three against three",
+  "arm_order": "pass k runs the arm list rotated left by k-1; six arms and three passes is a partial square, and the position each arm ran in is in positions.tsv",
+  "display": "IDD-LAB held at 1920x1080 120 Hz throughout; the sender chose which frames to transmit with --mode paced below 120 and --mode uncapped at 120",
+  "injection": {
+    "hold_ms": 60.0,
+    "every_ms": 150.0,
+    "predicted_crossings_per_min": 400.0,
+    "floor": 300.0,
+    "reached": true,
+    "separated_from_clean": true
+  },
+  "production_tolerance": 0.01,
+  "under_production": [
+    {
+      "run": "clean120-r1",
+      "rate": 118.68243085586778,
+      "nominal": 120.0,
+      "short": 0.010979742867768483
+    },
+    {
+      "run": "hold120-r1",
+      "rate": 116.4687543796119,
+      "nominal": 120.0,
+      "short": 0.029427046836567494
+    },
+    {
+      "run": "hold120-r3",
+      "rate": 117.4060889315286,
+      "nominal": 120.0,
+      "short": 0.021615925570594996
+    }
+  ],
+  "comparable": true,
+  "rate_ratio": 1.3333333333333333,
+  "rate_ratio_limit": 2.0,
+  "rate_median_mbps": {
+    "clean120": 432.0,
+    "clean90": 544.0,
+    "clean60": 576.0,
+    "hold120": 576.0,
+    "hold90": 488.0,
+    "hold60": 432.0
+  },
+  "rssi_median_dbm": {
+    "clean120": -71.0,
+    "clean90": -69.0,
+    "clean60": -69.0,
+    "hold120": -69.0,
+    "hold90": -69.0,
+    "hold60": -69.0
+  },
+  "labels": {
+    "clean120-r1": "REFUSED",
+    "clean120-r2": "CadenceDegraded",
+    "clean120-r3": "CadenceDegraded",
+    "clean60-r1": "CadenceDegraded",
+    "clean60-r2": "CadenceDegraded",
+    "clean60-r3": "CadenceDegraded",
+    "clean90-r1": "CadenceDegraded",
+    "clean90-r2": "CadenceDegraded",
+    "clean90-r3": "CadenceDegraded",
+    "hold120-r1": "REFUSED",
+    "hold120-r2": "CadenceDegraded",
+    "hold120-r3": "REFUSED",
+    "hold60-r1": "CadenceDegraded",
+    "hold60-r2": "CadenceDegraded",
+    "hold60-r3": "CadenceDegraded",
+    "hold90-r1": "CadenceDegraded",
+    "hold90-r2": "CadenceDegraded",
+    "hold90-r3": "CadenceDegraded"
+  },
+  "positions": {
+    "clean120-r1": {
+      "pass": 1,
+      "position": 1
+    },
+    "clean90-r1": {
+      "pass": 1,
+      "position": 2
+    },
+    "clean60-r1": {
+      "pass": 1,
+      "position": 3
+    },
+    "hold120-r1": {
+      "pass": 1,
+      "position": 4
+    },
+    "hold90-r1": {
+      "pass": 1,
+      "position": 5
+    },
+    "hold60-r1": {
+      "pass": 1,
+      "position": 6
+    },
+    "clean90-r2": {
+      "pass": 2,
+      "position": 1
+    },
+    "clean60-r2": {
+      "pass": 2,
+      "position": 2
+    },
+    "hold120-r2": {
+      "pass": 2,
+      "position": 3
+    },
+    "hold90-r2": {
+      "pass": 2,
+      "position": 4
+    },
+    "hold60-r2": {
+      "pass": 2,
+      "position": 5
+    },
+    "clean120-r2": {
+      "pass": 2,
+      "position": 6
+    },
+    "clean60-r3": {
+      "pass": 3,
+      "position": 1
+    },
+    "hold120-r3": {
+      "pass": 3,
+      "position": 2
+    },
+    "hold90-r3": {
+      "pass": 3,
+      "position": 3
+    },
+    "hold60-r3": {
+      "pass": 3,
+      "position": 4
+    },
+    "clean120-r3": {
+      "pass": 3,
+      "position": 5
+    },
+    "clean90-r3": {
+      "pass": 3,
+      "position": 6
+    }
+  },
+  "deciding": {
+    "clean120": {
+      ">2T/min": {
+        "median": 67.7947942445839,
+        "min": 66.51954827093822,
+        "max": 102.51462121875727,
+        "values": [
+          67.7947942445839,
+          102.51462121875727,
+          66.51954827093822
+        ]
+      },
+      "clusters/min": {
+        "median": 60.51778451716936,
+        "min": 59.32044496401092,
+        "max": 102.01454989573894,
+        "values": [
+          59.32044496401092,
+          102.01454989573894,
+          60.51778451716936
+        ]
+      }
+    },
+    "clean90": {
+      ">2T/min": {
+        "median": 49.50481750603522,
+        "min": 48.506178508441835,
+        "max": 175.51068476140574,
+        "values": [
+          175.51068476140574,
+          49.50481750603522,
+          48.506178508441835
+        ]
+      },
+      "clusters/min": {
+        "median": 48.00611481247852,
+        "min": 46.504525535972476,
+        "max": 173.510562997743,
+        "values": [
+          173.510562997743,
+          46.504525535972476,
+          48.00611481247852
+        ]
+      }
+    },
+    "clean60": {
+      ">2T/min": {
+        "median": 36.50315692746438,
+        "min": 35.504192502808046,
+        "max": 86.00857914648232,
+        "values": [
+          86.00857914648232,
+          36.50315692746438,
+          35.504192502808046
+        ]
+      },
+      "clusters/min": {
+        "median": 36.00311368188268,
+        "min": 35.00413345347272,
+        "max": 86.00857914648232,
+        "values": [
+          86.00857914648232,
+          36.00311368188268,
+          35.00413345347272
+        ]
+      }
+    },
+    "hold120": {
+      ">2T/min": {
+        "median": 458.2228017896721,
+        "min": 420.0026902047313,
+        "max": 477.4712218629265,
+        "values": [
+          477.4712218629265,
+          420.0026902047313,
+          458.2228017896721
+        ]
+      },
+      "clusters/min": {
+        "median": 445.25893579779887,
+        "min": 419.002683799482,
+        "max": 463.01750011551013,
+        "values": [
+          463.01750011551013,
+          419.002683799482,
+          445.25893579779887
+        ]
+      }
+    },
+    "hold90": {
+      ">2T/min": {
+        "median": 424.402751204165,
+        "min": 419.6784227841265,
+        "max": 440.907860669894,
+        "values": [
+          419.6784227841265,
+          440.907860669894,
+          424.402751204165
+        ]
+      },
+      "clusters/min": {
+        "median": 422.4032093845929,
+        "min": 419.178210122882,
+        "max": 433.90932319894324,
+        "values": [
+          419.178210122882,
+          433.90932319894324,
+          422.4032093845929
+        ]
+      }
+    },
+    "hold60": {
+      ">2T/min": {
+        "median": 424.7819690923135,
+        "min": 407.0338303047465,
+        "max": 425.4422630532135,
+        "values": [
+          407.0338303047465,
+          425.4422630532135,
+          424.7819690923135
+        ]
+      },
+      "clusters/min": {
+        "median": 416.776655187158,
+        "min": 407.0338303047465,
+        "max": 418.9431450512255,
+        "values": [
+          407.0338303047465,
+          418.9431450512255,
+          416.776655187158
+        ]
+      }
+    }
+  },
+  "raw_ms": {
+    "clean120": {
+      "p50 ms": {
+        "median": 8.126463,
+        "min": 8.069119,
+        "max": 8.138751,
+        "values": [
+          8.126463,
+          8.069119,
+          8.138751
+        ]
+      },
+      "p99 ms": {
+        "median": 16.523263,
+        "min": 15.892479,
+        "max": 36.569087,
+        "values": [
+          16.523263,
+          36.569087,
+          15.892479
+        ]
+      },
+      "max ms": {
+        "median": 117.178367,
+        "min": 45.678591,
+        "max": 194.772991,
+        "values": [
+          45.678591,
+          194.772991,
+          117.178367
+        ]
+      },
+      "stall gap p50 ms": {
+        "median": 224.133119,
+        "min": 223.215615,
+        "max": 261.619711,
+        "values": [
+          224.133119,
+          223.215615,
+          261.619711
+        ]
+      }
+    },
+    "clean90": {
+      "p50 ms": {
+        "median": 9.224191,
+        "min": 8.609791,
+        "max": 10.371071,
+        "values": [
+          8.609791,
+          10.371071,
+          9.224191
+        ]
+      },
+      "p99 ms": {
+        "median": 21.151743,
+        "min": 19.939327,
+        "max": 24.002559,
+        "values": [
+          24.002559,
+          19.939327,
+          21.151743
+        ]
+      },
+      "max ms": {
+        "median": 50.200575,
+        "min": 47.841279,
+        "max": 57.671679,
+        "values": [
+          57.671679,
+          47.841279,
+          50.200575
+        ]
+      },
+      "stall gap p50 ms": {
+        "median": 224.002047,
+        "min": 167.378943,
+        "max": 228.196351,
+        "values": [
+          167.378943,
+          224.002047,
+          228.196351
+        ]
+      }
+    },
+    "clean60": {
+      "p50 ms": {
+        "median": 16.482303,
+        "min": 16.367615,
+        "max": 16.482303,
+        "values": [
+          16.367615,
+          16.482303,
+          16.482303
+        ]
+      },
+      "p99 ms": {
+        "median": 33.685503,
+        "min": 33.193983,
+        "max": 92.078079,
+        "values": [
+          92.078079,
+          33.685503,
+          33.193983
+        ]
+      },
+      "max ms": {
+        "median": 78.184447,
+        "min": 71.827455,
+        "max": 131.792895,
+        "values": [
+          131.792895,
+          71.827455,
+          78.184447
+        ]
+      },
+      "stall gap p50 ms": {
+        "median": 357.826559,
+        "min": 222.953471,
+        "max": 441.188351,
+        "values": [
+          222.953471,
+          441.188351,
+          357.826559
+        ]
+      }
+    },
+    "hold120": {
+      "p50 ms": {
+        "median": 6.008831,
+        "min": 5.582847,
+        "max": 6.918143,
+        "values": [
+          5.582847,
+          6.918143,
+          6.008831
+        ]
+      },
+      "p99 ms": {
+        "median": 72.482815,
+        "min": 71.172095,
+        "max": 74.055679,
+        "values": [
+          74.055679,
+          71.172095,
+          72.482815
+        ]
+      },
+      "max ms": {
+        "median": 149.946367,
+        "min": 149.159935,
+        "max": 151.126015,
+        "values": [
+          151.126015,
+          149.159935,
+          149.946367
+        ]
+      },
+      "stall gap p50 ms": {
+        "median": 150.077439,
+        "min": 149.815295,
+        "max": 150.601727,
+        "values": [
+          149.815295,
+          150.601727,
+          150.077439
+        ]
+      }
+    },
+    "hold90": {
+      "p50 ms": {
+        "median": 7.753727,
+        "min": 7.077887,
+        "max": 7.872511,
+        "values": [
+          7.753727,
+          7.077887,
+          7.872511
+        ]
+      },
+      "p99 ms": {
+        "median": 76.677119,
+        "min": 74.711039,
+        "max": 82.116607,
+        "values": [
+          76.677119,
+          82.116607,
+          74.711039
+        ]
+      },
+      "max ms": {
+        "median": 103.284735,
+        "min": 100.532223,
+        "max": 151.912447,
+        "values": [
+          103.284735,
+          151.912447,
+          100.532223
+        ]
+      },
+      "stall gap p50 ms": {
+        "median": 150.863871,
+        "min": 150.470655,
+        "max": 150.863871,
+        "values": [
+          150.863871,
+          150.470655,
+          150.863871
+        ]
+      }
+    },
+    "hold60": {
+      "p50 ms": {
+        "median": 14.270463,
+        "min": 12.771327,
+        "max": 15.499263,
+        "values": [
+          15.499263,
+          12.771327,
+          14.270463
+        ]
+      },
+      "p99 ms": {
+        "median": 88.604671,
+        "min": 79.953919,
+        "max": 94.896127,
+        "values": [
+          79.953919,
+          88.604671,
+          94.896127
+        ]
+      },
+      "max ms": {
+        "median": 151.257087,
+        "min": 102.105087,
+        "max": 250.085375,
+        "values": [
+          102.105087,
+          250.085375,
+          151.257087
+        ]
+      },
+      "stall gap p50 ms": {
+        "median": 150.470655,
+        "min": 150.339583,
+        "max": 150.601727,
+        "values": [
+          150.601727,
+          150.339583,
+          150.470655
+        ]
+      }
+    }
+  },
+  "findings": [
+    {
+      "arm": "hold90",
+      "improved": {
+        ">2T/min": false,
+        "clusters/min": false
+      },
+      "mitigates": false,
+      "labels": [
+        "CadenceDegraded",
+        "CadenceDegraded",
+        "CadenceDegraded"
+      ]
+    },
+    {
+      "arm": "hold60",
+      "improved": {
+        ">2T/min": false,
+        "clusters/min": true
+      },
+      "mitigates": false,
+      "labels": [
+        "CadenceDegraded",
+        "CadenceDegraded",
+        "CadenceDegraded"
+      ]
+    }
+  ],
+  "mitigates": [],
+  "new_cost": [],
+  "excluded_empty": [],
+  "radio_before": "0.000,1787234465.753,-69,-94,432,36,80,0",
+  "radio_after": "0.000,1787237008.645,-71,-94,544,36,80,0"
+}

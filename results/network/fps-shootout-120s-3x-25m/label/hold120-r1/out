@@ -1,0 +1,45 @@
+1 sessions under /Users/adria/Documents/programacion/projects/lanplay/results/network/fps-shootout-120s-3x-25m/label/hold120-r1, as found on disk, which is not the committed corpus.
+
+condition           session                                           span  2T/min clu/min  sgapp50   loss aushort   reord  radio
+ REFUSED            hold120-r1.json                                  120.4       -       -        -      -       -       -  absent
+                    a source cadence to measure against: the host delivered 116.47 access units a second against a target of 120, 2.94 per cent short, so the crossings below are counted against a period it was not holding - 14021 of 14400 delivered over 120.38 s, au shortfall 379, 0 datagrams lost, 2239 reordered
+
+  X disagrees with the recorded diagnosis, ~ no diagnosis is recorded, blank agrees
+
+0 sessions could be turned into a middle tier and were classified. 1 could not,
+and were refused with the missing tier named, which is not a verdict about their links.
+1 of the 1 were held against a recorded diagnosis. The other 0 are read and
+printed with no diagnosis to check them against, which is a different reason for being excluded
+than being unreadable. 1 was read with the radio tier absent, which is what
+NetworkObservation.radio being an Option is for. 0 of the 0 classified carry
+no loss tier at all, so their verdicts were taken on cadence alone - see the limit below.
+
+what standing this corpus gives each condition
+  Healthy             UNCONFIRMED, waiting on a committed session of this shape; unit tests exercise it
+  CapacityPressure    UNCONFIRMED, waiting on a session that ever exhibited it, and tools/bitrate-sweep.sh output that NETWORK.md records as not in results/
+  CadenceDegraded     UNCONFIRMED, waiting on a committed session of this shape; unit tests exercise it
+  SevereLoss          UNCONFIRMED, waiting on a session recorded with a loss tier; the committed corpus has none, and macos/client now emits one
+  TransientStall      UNCONFIRMED, waiting on a committed session of this shape; unit tests exercise it
+  UnknownDegradation  UNCONFIRMED, waiting on a committed session of this shape; unit tests exercise it
+
+0 of the 6 conditions are confirmed against a recorded diagnosis and 6 are not. The two
+unconfirmed loss conditions are owed different debts and it matters which: SevereLoss is
+wired and waits only on a session recorded with a loss tier that now exists, while
+CapacityPressure waits on a session that has ever exhibited it, and a lab that has never
+been throughput-limited may never produce one.
+
+THE LIMIT ON THIS PHASE, general rather than three special cases. No envelope in the
+committed corpus states what the sender produced or sent, and that single absence is why
+no loss rate is derivable from any of them. The datagram counters - packet_loss,
+reordered, duplicates - have no datagram population anywhere; and au_loss is expected
+minus reconstructed where expected is target_fps times the nominal run length, a number
+nothing produced, fed by three unrelated mechanisms all measured here: link loss, which
+would show in packet_loss; run truncation, which is pcap-parallel/parallel-r2 at 21.00 s
+short of its nominal 120 with 2528 units that are 21.07 s at 120 fps; and host
+under-production, which is why the three phase arms delivering 105.32 to 117.96 access
+units a second against a target of 120 are refused rather than classified. Dividing by
+the nearest available number is what once read a 0.69 per cent reorder figure as 30.8.
+So those counts are carried, printed above as loss, aushort and reord, and read by no
+rule. Three agents reached this independently in one session - from the field units,
+from a reorder figure that could not be right, and from building the tier - which is why
+it is a property of the envelopes rather than one reader's arithmetic.

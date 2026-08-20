@@ -22,6 +22,12 @@
 #                 `expensive` is the positive control of
 #                 tools/monitor-neutrality-gate.sh and no other caller has any
 #                 reason to pass it.
+#   SOURCE_MODE=uncapped  how the sender picks frames off the capture source.
+#                 `paced` transmits on a grid of 1/FPS instead of following the
+#                 source, which is how a run streams below the virtual
+#                 display's own rate without changing the display's mode.
+#   SEND_PORT=$PORT  where the host is told to send, when it is not where the
+#                 client listens. Only a relay in the media path needs this.
 #
 # Everything the run needs on the Windows side must already be up: the
 # IDD-LAB controller (LanPlayIddLabCtl) and, for a synthetic source, a
@@ -39,6 +45,20 @@ BITRATE="${BITRATE:-50}"
 # stay quiet about a real disagreement, so there is only one.
 FPS="${FPS:-120}"
 PORT="${PORT:-5004}"
+# Where the host sends, which is the port the client listens on unless
+# something is deliberately in the way. `tools/fps-shootout.sh` puts udp-fault
+# between the two for its negative control, and a relay that had to share the
+# receiver's port could not be inserted at all.
+SEND_PORT="${SEND_PORT:-$PORT}"
+# Uncapped follows the capture source, which is what the product does. `paced`
+# exists because a run below the source's rate has to choose which of its
+# frames to transmit, and choosing here rather than changing the virtual
+# display's mode keeps a network experiment and an IddCx mode switch out of one
+# test. Pacing at the source's own rate is a closed decision against - two
+# clocks at one nominal rate beat, which reads as a capture p50 of exactly one
+# frame period and a throughput near 110 - so a caller that wants 120 fps off a
+# 120 Hz source leaves this alone.
+SOURCE_MODE="${SOURCE_MODE:-uncapped}"
 CONTROL_PORT="${CONTROL_PORT:-5005}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CLIENT="$REPO/target/release/lanplay-client"
@@ -226,18 +246,20 @@ Get-Process lanplay-nvenc-probe -ErrorAction SilentlyContinue | Stop-Process -Fo
 # One line: PowerShell continues with a backtick, not a backslash, and a
 # wrapped command that silently loses its tail is a run that measures nothing.
 #
-# Uncapped, not paced: a live capture source already has a clock, and adding
-# a second one at the same nominal rate makes the two beat. That shows up as
-# a capture p50 of exactly one frame period and a throughput near 110, with
-# nothing downstream at fault. Uncapped follows the source, which is what the
-# product does anyway.
-& \$probe --mode uncapped --input nv12 --source dda --output-name IDD-LAB --send-to $LOCAL_IP:$PORT --control-port $CONTROL_PORT --service-class ${SERVICE_CLASS:-best-effort} --mtu ${MTU:-1200} --seconds $SECONDS_TO_RUN --warmup 0 --fps $FPS --width 1920 --height 1080 --bitrate-mbps $BITRATE --preset p1 --tuning ll --idr-interval 120 --window-seconds 10
+# Uncapped by default, and never paced at the source's own rate: a live capture
+# source already has a clock, and adding a second one at the same nominal rate
+# makes the two beat. That shows up as a capture p50 of exactly one frame period
+# and a throughput near 110, with nothing downstream at fault. Uncapped follows
+# the source, which is what the product does anyway. `SOURCE_MODE=paced` is for
+# a run deliberately below the source's rate, where the pacing period is longer
+# than the source period and the two cannot beat.
+& \$probe --mode ${SOURCE_MODE} --input nv12 --source dda --output-name IDD-LAB --send-to $LOCAL_IP:$SEND_PORT --control-port $CONTROL_PORT --service-class ${SERVICE_CLASS:-best-effort} --mtu ${MTU:-1200} --seconds $SECONDS_TO_RUN --warmup 0 --fps $FPS --width 1920 --height 1080 --bitrate-mbps $BITRATE --preset p1 --tuning ll --idr-interval 120 --window-seconds 10
 exit \$LASTEXITCODE
 PS1
 scp -q "$LOCAL_RUNNER" "windows:$(printf '%s' "$RUNNER" | tr '\\' '/')"
 rm -f "$LOCAL_RUNNER"
 
-echo "sender    1080p120 NV12 -> NVENC ${BITRATE} Mbps -> RTP burst for ${SECONDS_TO_RUN} s"
+echo "sender    1080p ${FPS} fps ${SOURCE_MODE} NV12 -> NVENC ${BITRATE} Mbps -> RTP burst to :${SEND_PORT} for ${SECONDS_TO_RUN} s"
 echo
 host_status=0
 WIN_TIMEOUT=$((SECONDS_TO_RUN + 120)) "$REPO/tools/win-session.sh" \

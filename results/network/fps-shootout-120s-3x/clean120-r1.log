@@ -1,0 +1,6 @@
+link      en0 192.168.1.108, autoselect
+route     192.168.1.70 reachable from 192.168.1.108 on tcp/22; ICMP is filtered
+clocks    host GPU locked to 2000-2700 MHz core, 9001 MHz memory
+win-session: timed out waiting for C:\Users\luque\ensure-lab-source.log.done
+monitor 1920x1080@120
+e2e-gate: could not bring up the laboratory source

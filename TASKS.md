@@ -344,7 +344,68 @@ no es una auditoría.
 - [ ] Registrar band changes.
 - [ ] Registrar PHY changes.
 
-### Gate N1-A — Neutralidad del monitor — **REFUSED (sin potencia)**
+### Gate N1-A — **RETIRADO. No reconstruir.**
+
+> **No reconstruyas el A/B de cadencia para la neutralidad del monitor.** El spread mínimo observable
+> del experimento es unas **19 veces mayor** que el coste estimado del monitor: 0.500 ms de dispersión
+> natural en los brazos limpios contra 3.2 ms/s de trabajo del muestreador repartidos sobre 120 frames.
+> No puede contestar la pregunta con ningún número de pasadas. La neutralidad se acota desde las
+> mediciones directas de muestreador, lock y despertares; los brazos viejos establecen únicamente que
+> cualquier efecto sobre la cadencia queda **por debajo de la resolución de ese experimento**.
+
+Dos controles independientes no dispararon: el de frecuencia y el de contención de lock. El brazo
+`contend` dio 8.462 ms de p99 contra 8.442 del limpio — **veinte microsegundos contra un suelo de
+quinientos**. Los controles no estaban mal construidos; el observable no puede resolver el efecto, y
+haberlo demostrado dos veces con dos mecanismos distintos vale más que un tercer intento.
+
+La distinción que hay que conservar, porque es lo defendible:
+
+> El monitor **no está demostrado como neutral**. Su efecto sobre la cadencia **está demostrado como
+> inferior a la resolución del observable usado.**
+
+Evidencia de los dos experimentos, que se quedan: `results/network/monitor-neutrality-90s-3x/` (nueve
+brazos sobre radio) y `results/network/monitor-neutrality-loopback-90s-4x/` (loopback, con el brazo de
+contención).
+
+### Gate N1-A' — Presupuesto de sobrecarga del monitor — **▶ EN CURSO**
+
+Sustituye al anterior. Y una corrección al primer borrador de esta sustitución, que era insuficiente:
+**el CPU medio no acota la interferencia temporal.** Un muestreador que consuma 3.2 ms/s podría hacer
+una llamada bloqueante de 3 ms una vez por segundo justo sobre un camino compartido y ser invisible en
+un duty cycle mientras cuesta un frame cada vez. Lo que hace de esto una derivación no es cuánto
+consume sino **demostrar dónde puede interferir**.
+
+```
+muestreador CoreWLAN   CPU/muestra, CPU/corrida, duración de pared por muestra
+                       p50/p95/p99/max, despertares/s
+camino de métricas     lock hold p50/p95/p99/max, lock wait p50/p95/p99/max,
+compartido             cuenta de contención, esperas en el camino crítico
+radio                  active scans = 0, aseverado
+brazos de cadencia     efecto < resolución, y NO usado para probar neutralidad
+```
+
+El peor caso de 15.5 ms por lectura es lo que hace que la instrumentación del lock sea la parte
+portante: si esa lectura ocurre alguna vez mientras se tiene algo que el camino de entrega necesita,
+cuesta dos frames a 120 Hz por pequeño que sea el promedio.
+
+Controles negativos **sobre las métricas directas**, que es la escala donde el instrumento nuevo puede
+ver:
+
+- **A**: retener el lock de métricas una duración conocida. La instrumentación de contención y de espera
+  **debe** disparar, y por aproximadamente lo retenido. Si no, está ciega.
+- **B**: inyectar una cantidad conocida de trabajo de CPU en el muestreador. La contabilidad de CPU y
+  despertares **debe** moverse en consecuencia.
+
+### Evidencia secundaria fuerte, y sólo eso
+
+`presented Hz` leyó **119.971 con spread 0.00** en todos los brazos corridos — radio y loopback, caros y
+contendidos. Dice que la cadencia de presentación quedó sin perturbar. **No** dice que nada aguas arriba
+sufriera: un planificador de display puede seguir perfectamente relojado mientras algo que esa métrica
+no observa se está dañando.
+
+### Lo que el A/B viejo sí midió, y se queda
+
+
 
 Evidencia: `results/network/monitor-neutrality-90s-3x/`. Nueve brazos de 90 s sobre la radio real,
 cuadrado latino rotante, más un brazo de memoria de 600 s.
@@ -549,21 +610,132 @@ Decidir:
 - [ ] dónde está knee de integridad.
 - [ ] confirmar que no se vende bitrate reduction como solución universal de cadence.
 
-### N4-B FPS
+### N4-B FPS — **REJECTED como mitigación de red**
 
-Comparar, idealmente con mismo display source para no mezclar decisiones:
+**La lectura más aguda, verificada sobre los dos veredictos.** No es que la mejora fuera pequeña: es
+que cada sesión separó en **una** métrica y las dos sesiones **discrepan en cuál**.
 
-- [ ] 120 fps.
-- [ ] 90 fps.
-- [ ] 60 fps.
-- [ ] normalizar thresholds respecto al periodo correspondiente.
-- [ ] medir:
-  - [ ] loss.
-  - [ ] clusters.
-  - [ ] AU cadence.
-  - [ ] freshness.
-  - [ ] host cost.
-  - [ ] subjective responsiveness.
+```
+50 Mbps    hold60 separa en >2T/min      por 2.9    y NO en clusters/min
+25 Mbps    hold60 separa en clusters/min por 0.1    y NO en >2T/min
+```
+
+Márgenes de 2.9 y 0.1 sobre poblaciones que rondan 400 cruces por minuto, y la métrica que separa
+cambia entre sesiones. Eso es ruido, y el desacuerdo entre sesiones es lo que lo demuestra: un efecto
+real no cambia de métrica cuando cambia el bitrate.
+
+**Y el hallazgo que convierte esto en un rechazo y no en un «no probado»:** en los brazos **limpios**,
+donde no hay nada que mitigar, bajar la tasa **sí** reduce los cruces normalizados, y monótonamente.
+
+```
+50 Mbps    clean120  62.0   clean90  40.0   clean60  41.0    cruces >2T/min
+25 Mbps    clean120  67.8   clean90  49.5   clean60  36.5
+```
+
+Así que bajar fps ayuda cuando no hay fallo y no hace nada cuando lo hay. Eso es exactamente lo
+contrario de una mitigación: una mitigación tiene que funcionar **con el fallo presente**. Ésta sólo
+funciona con el fallo ausente, lo que la vuelve inútil precisamente en el momento en que un controlador
+la invocaría.
+
+El clasificador de N3 lo confirma sin leer una palabra de la prosa del arnés: etiquetó los **dieciocho**
+brazos perturbados como `CadenceDegraded` en las dos sesiones. Bajar la tasa no le quitó la etiqueta a
+ninguno.
+
+
+Evidencia: `results/network/fps-shootout-120s-3x/` (50 Mbps) y
+`results/network/fps-shootout-120s-3x-25m/` (25 Mbps). Gate `tools/fps-shootout.sh`.
+
+- [x] 120 fps.
+- [x] 90 fps.
+- [x] 60 fps.
+- [x] normalizar thresholds respecto al periodo correspondiente — el cliente construye su
+      `Delivery` con `1000/feed_fps`, así que los `THRESHOLDS` de `crates/link-metrics` se aplican
+      sin un segundo juego de múltiplos en ninguna parte.
+- [x] medir loss, clusters, AU cadence, freshness.
+- [x] host cost — medido y es el hallazgo lateral más útil de la tarea, ver abajo.
+- [ ] subjective responsiveness — DEFERRED: nadie miró. Con la respuesta en negativo, una
+      escucha subjetiva no cambiaría la decisión y `TASKS.md` 0.3 prohíbe fabricar cobertura.
+
+**La matriz se derivó antes de correr nada**, y está en la cabecera del arnés con la evidencia
+de cada celda. Resumen:
+
+| condición | bajar bitrate | bajar fps | bajar resolución |
+|---|---|---|---|
+| Healthy | nada que arreglar | nada que arreglar | nada que arreglar |
+| TransientStall | no debe actuar | no debe actuar | no debe actuar |
+| CadenceDegraded | ya falsificada en gran parte | **esta tarea** | espera a esta celda |
+| CapacityPressure | una deuda, no un experimento | INALCANZABLE | INALCANZABLE |
+| SevereLoss | INALCANZABLE | INALCANZABLE | INALCANZABLE |
+
+`CapacityPressure` no se ha observado nunca aquí: la tabla de verdad de
+`tools/classify-sessions.sh` la nombra **cero veces**, y la corrida de N3 imprime la deuda con
+palabras - «CapacityPressure UNCONFIRMED, waiting on a session that ever exhibited it, and
+tools/bitrate-sweep.sh output that NETWORK.md records as not in results/». Ninguna celda de esa
+fila la puede correr nadie, y decirlo es mejor que omitirlo. La celda de bitrate contra capacidad
+es **una deuda que se paga comprometiendo la salida de un sweep que ya existe**, no un
+experimento que haya que diseñar. La de bitrate contra cadencia se queda cerrada: pasar del canal
+116 al 36 llevó las unidades de acceso con más de dos periodos de retraso de 69 a 5.5 por minuto a
+bitrate fijo, registrado en `crates/capabilities/src/wifi.rs`, y la sección 2.1 ya lista «reducir
+bitrate como solución automática a cualquier stall» entre lo que no se reabre.
+
+**El experimento.** Seis brazos - 120/90/60 limpios y los mismos tres detrás de una perturbación
+absoluta idéntica, `udp-fault` reteniendo 60 ms cada 150 ms con semilla 20250815 - tres pasadas
+rotadas, el display virtual quieto en 1920x1080 a 120 Hz de principio a fin y el emisor eligiendo
+qué frames transmitir con `--mode paced`. Los brazos limpios no deciden nada del efecto; el brazo
+`hold120` contra `clean120` es el control negativo y los `hold90`/`hold60` contra `hold120` son el
+experimento, con el mismo relay, la misma semilla y la misma perturbación en milisegundos.
+
+**El resultado, normalizado por el periodo propio de cada brazo, que es lo que decide.** Mediana y
+rango completo de tres corridas por brazo:
+
+| | hold120 | hold90 | hold60 |
+|---|---|---|---|
+| >2T/min, 50 Mbps | 416.5 [414.0, 469.0] | 435.5 [406.6, 439.5] | 410.1 [397.6, 411.1] |
+| clusters/min, 50 Mbps | 403.5 [395.0, 440.0] | 429.0 [406.1, 434.5] | 409.6 [397.6, 410.6] |
+| >2T/min, 25 Mbps | 458.2 [420.0, 477.5] | 424.4 [419.7, 440.9] | 424.8 [407.0, 425.4] |
+| clusters/min, 25 Mbps | 445.3 [419.0, 463.0] | 422.4 [419.2, 433.9] | 416.8 [407.0, 418.9] |
+
+Ni una sola separación completa por debajo en las dos métricas que **definen** la condición, en
+ninguna de las dos sesiones. Y `crates/network-health` etiquetó **CadenceDegraded las dieciocho
+corridas con perturbación**, en las dos sesiones, sin excepción: bajar el frame rate no le quitó
+la etiqueta a nada.
+
+**El mecanismo, que es lo que hace la respuesta general y no una anécdota.** La perturbación
+recurre cada 150 ms y cada aparición es un hueco de al menos 60 ms, que son 7.2 periodos a 120 fps,
+5.4 a 90 y 3.6 a 60. Así que produce **un cruce por aparición pase lo que pase**, y la tasa de
+cruces la fija el periodo de la perturbación y no el del stream: 60000/150 son 400 por minuto
+predichos desde la configuración y antes de correr nada, y lo medido fue 1.04x, 1.09x y 1.03x a
+50 Mbps y 1.15x, 1.06x y 1.06x a 25.
+
+De ahí sale el enunciado falsificable: **bajar el frame rate sólo puede ayudar cuando la
+perturbación cae entre dos periodos viejos y dos nuevos**, que de 120 a 60 es una ventana de 16.7
+a 33.3 ms. El único mecanismo de cadencia que este proyecto ha medido en el campo son los 34 ms
+cada 220 ms de `crates/capabilities/src/wifi.rs`, que son 4.08 periodos a 120 fps, 3.06 a 90 y
+**2.04 a 60**: sigue cruzando dos periodos a los tres ritmos, y a 60 fps por cuarenta
+microsegundos. Esa predicción se escribió en la cabecera del arnés antes de correrlo.
+
+**Y en milisegundos crudos empeoró**, que se reporta aparte y no vota nada: el p99 de intervalo
+subió 72.5 → 76.7 → 88.6 ms a 25 Mbps y 70.9 → 76-79 → 80.3-80.6 a 50. No hay un p99 que baje
+porque T subió; sube en absoluto y no baja en relativo.
+
+**El coste es grande y real.** Frames frescos por segundo, que es lo que recibe el ojo: 62.5 →
+52.8 → 37.4 a 25 Mbps. El techo es `min(fps, display Hz)`, así que el ratio de fresh ticks se
+reporta contra lo que el brazo podía alcanzar y la tasa absoluta al lado, porque el ratio solo
+esconde que la intervención cuesta exactamente lo que compra.
+
+**Veredicto: FPS no es una mitigación de red.** Queda fuera del controlador, y N8 no tiene
+permiso de N4 para bajar frame rate ante una degradación de cadencia. Es una respuesta y se
+reporta con la misma confianza que una positiva.
+
+**Lo que sí arregla bajar fps, y no es la red.** Los tres brazos de 120 fps que subprodujeron lo
+hicieron en la etapa de captura del host: el host declaró `frames completed 14400 of 14400` con
+`paced rate held 116.56 of 120 fps` y una `cap p99` de 16.583 y 16.840 ms - exactamente dos
+periodos de vblank - contra 9.065 en las ventanas buenas. Produjo todos sus frames y tardó más de
+120 s en producirlos. Los doce brazos pacificados a 90 y 60 fps mantuvieron su nominal dentro del
+0.07 % **sin una sola excepción en las dos sesiones**, porque un deadline más largo que el periodo
+de la fuente absorbe un tropiezo de captura y seguir a la fuente no. Así que bajar el frame rate
+ayuda al **productor**, de forma medible y reproducible, y no al enlace. Es una distinción que
+N4-D y la fase V tienen que heredar entera.
 
 ### N4-C Resolución
 
@@ -584,13 +756,121 @@ Solo combinaciones justificadas:
 
 ### Resultado N4
 
-Crear tabla:
+Tabla, con lo que cada celda tiene detrás. Una acción sin mejora reproducible queda fuera del
+controlador, y «fuera» es una entrada tan válida como una intervención:
 
 ```text
 degradation type -> proven intervention
+
+CadenceDegraded   -> ninguna del lado del stream. FPS REJECTED por N4-B con dos sesiones
+                     independientes; bitrate cerrado desde antes. Lo único demostrado que
+                     arregla cadencia en este repositorio es del lado del enlace: canal 116
+                     a canal 36, de 69 a 5.5 cruces de 2T por minuto.
+CapacityPressure  -> no decidible. Nunca observada aquí, así que ninguna intervención puede
+                     probarse contra ella. La celda de bitrate es una deuda: comprometer la
+                     salida de tools/bitrate-sweep.sh, que NETWORK.md registra como ausente
+                     de results/.
+SevereLoss        -> no decidible. El corpus comprometido no tiene tier de pérdida.
+Healthy           -> ninguna, por definición.
+TransientStall    -> ninguna, y es un requisito: no actuar ante un stall aislado es la
+                     falla que esta fase existe para evitar.
 ```
 
-Si una acción no demuestra mejora reproducible, queda fuera del controlador.
+Consecuencia para N8: **no tiene permiso de N4 para bajar frame rate ante una degradación de
+cadencia.** Si N8 se construye, se construye para otra condición o con evidencia nueva.
+
+### Reporte N4-B
+
+**Estado:** REJECTED la hipótesis; el gate no ha dado PASS todavía y las dos razones están abajo.
+
+**Qué se cambió**
+- Nuevo `tools/fps-shootout.sh`, con la matriz derivada en su cabecera celda por celda y la
+  evidencia de cada una.
+- `tools/e2e-gate.sh` gana dos perillas aditivas, las dos por defecto en el comportamiento de hoy:
+  `SOURCE_MODE` para elegir cómo el emisor toma frames de la fuente, y `SEND_PORT` para poder
+  meter un relay en el camino de medio sin que comparta puerto con el receptor.
+- Registrado en `tools/gates.toml` como fase N4-B, 50 minutos, con control negativo.
+
+**Qué se midió**
+- Dos sesiones completas de seis brazos x tres pasadas rotadas x 120 s, a 50 y a 25 Mbps.
+  Radio en canal 36 a 80 MHz, `radar_band` 0, -67 a -71 dBm, medianas por brazo de 432 a 576 Mbps.
+- Comparabilidad: razón entre las medianas extremas de PHY por brazo **1.33** contra un límite de
+  2, en las dos sesiones, sobre 360 muestras por brazo tomadas a 1 Hz **dentro** de cada corrida.
+  Señal registrada al lado y sin votar.
+- Producción: los doce brazos pacificados a 90 y 60 fps dentro del 0.07 % de su nominal en las dos
+  sesiones. Tres brazos de 120 fps sin pacer subprodujeron 1.08, 2.16 y 2.94 %.
+- Las dos tablas, normalizada y cruda, en la sección N4-B de arriba.
+
+**Control negativo**
+- `udp-fault --stall-ms 60 --stall-every-ms 150 --seed 20250815`, dimensionado por N2 contra la
+  varianza de este enlace y no contra el gusto. Predice 400 cruces por minuto desde su propio
+  periodo, antes de correr nada.
+- Disparó, y en las dos formas que se comprueban por separado: `hold120` midió 458.2 [420.0,
+  477.5] contra un suelo de 300, y se separó completamente de `clean120` en 67.8 [66.5, 102.5].
+  A 50 Mbps, 416.5 [414.0, 469.0] contra 62.0 [44.0, 80.0].
+- El `stall_gap_p50` de los nueve brazos con perturbación leyó 149.8 a 151.0 ms: el discriminador
+  de N3 devolvió el temporizador de 150 ms que se le inyectó, en los tres ritmos.
+- Que el suelo sea de un solo lado es por construcción: la inyección no puede producir menos
+  apariciones que su propio ritmo salvo que algo las absorba, y de más ya se encarga la separación.
+  El suelo se aplica sólo a `hold120`, porque los otros dos brazos son el experimento y tienen que
+  poder salir donde salgan - un suelo sobre ellos habría rehusado justamente el resultado positivo.
+
+**Refusals ejercitados, los dos por defectos reales y ninguno inventado**
+- Sesión de 50 Mbps: **FAIL**. La ráfaga de liberación del relay perdió datagramas en los brazos de
+  mayor tasa de aire - 183 y 225 en dos corridas de `hold120` a 44.1 Mbit/s, 730 en una de
+  `hold90` a 40.0, cero en las tres de `hold60` a 26.5. El relay reportó `dropped 0` y `seen`
+  prácticamente idéntico en las tres corridas de `hold120` (572617, 572782, 572359, y la que no
+  perdió nada es la de `seen` más alto), así que la pérdida es aguas abajo del relay y no del aire.
+  Es la falla que N2 nombró al rechazar el control de 400 ms cada 2 s, en versión pequeña.
+- Sesión de 25 Mbps: **REFUSED**. Tres brazos de 120 fps subprodujeron más del 1 %, y
+  `crates/network-health` rehusó **exactamente esas tres corridas** por su cuenta - dos
+  implementaciones de la misma regla coincidiendo sin haberse consultado.
+- La corrección de 50 a 25 Mbps no movió ningún umbral: redimensionó la inyección para que su
+  ráfaga quedara por debajo de la mayor que demostradamente no perdió nada (166 datagramas contra
+  250 y 276), y se verificó con una corrida de 30 s antes de gastar cuarenta minutos.
+
+**El hallazgo sobrevive a las dos contaminaciones, y eso se comprueba en vez de afirmarse**
+- A 50 Mbps, restringiendo a las corridas que no perdieron nada: `hold120-r2` 414.0/403.5,
+  `hold90-r1` 406.6/406.1 y `-r3` 439.5/434.5, `hold60` 397.6, 411.1 y 410.1. Planas.
+- A 25 Mbps, la única corrida de `hold120` con producción válida, `-r2`, leyó 420.0/419.0, que cae
+  **dentro** del rango de `hold90` y de `hold60`. Sigue sin haber separación.
+- Y la contaminación de 50 Mbps sesgaba **a favor** de encontrar mejora, porque la pérdida estaba
+  en los brazos de 120 y 90 y no en los de 60. Aun así 60 fps no mejoró las dos métricas.
+
+**Defectos del instrumento encontrados**
+1. `classify-sessions` no puede ser preguntado por una sesión suelta que lleve traza de radio: rehúsa
+   cuando ninguna sesión del corpus ejerce el `Option` de radio, lo cual es correcto para la
+   validación de corpus para la que se escribió y deja sin respuesta a un sondeo de una sola
+   sesión. Rodeado dejando la traza fuera del directorio que lee el sondeo, que pregunta sólo por
+   el tier medio - el único que `classify` puede leer.
+2. `tools/classify-sessions.sh` rehúsa hoy en el árbol de trabajo: N1 comprometió 28 sesiones
+   nuevas bajo `results/network/` y su tabla de verdad no las nombra. No se tocó; es de N3.
+3. La subproducción del brazo de 120 fps sin pacer no es del enlace ni del encoder: el host declaró
+   `frames completed 14400 of 14400` con `cap p99` de 16.583 y 16.840 ms contra 9.065 en las
+   ventanas buenas, o sea dos periodos de vblank. Produjo todo y tardó más. Q5 sigue abierta y es
+   por lo que `expected` es nominal: el arnés de vídeo no recupera el envelope del emisor, así que
+   distinguir «el host produjo menos» de «el enlace perdió» depende de que la pérdida sea cero.
+4. El objetivo de bitrate no es carga constante: el encoder quedó limitado por contenido y dio
+   44.1/40.0/26.5 Mbit/s a un objetivo de 50 y unos 10.5 a los tres ritmos con objetivo 25. Se
+   reporta; a 25 Mbps los brazos quedaron **más** parecidos en carga, no menos.
+5. Matar una corrida a mitad dejó el arranque de la fuente del host inconsistente y costó los dos
+   primeros brazos de la sesión de 50 Mbps, que se recuperó sola en el tercero.
+
+**Decisiones**
+- FPS fuera del controlador. La ventana en la que podría servir está enunciada y es estrecha:
+  perturbaciones entre 16.7 y 33.3 ms para 120 a 60, y nada del corpus cae dentro.
+- El display virtual no se toca nunca en un experimento de red. El emisor elige qué frames manda.
+- El brazo de 120 fps va sin pacer porque pacificar al ritmo de la fuente es una decisión cerrada,
+  y esa asimetría es la correcta: la línea base tiene que ser lo que el producto hace de verdad.
+- Pendiente para que este gate pueda dar PASS en este host: una línea base de 120 fps que el host
+  sostenga dentro del 1 %, o la aceptación explícita de que la comparación se hace contra la única
+  corrida válida y por tanto sin dispersión.
+
+**Evidencia**
+- `results/network/fps-shootout-120s-3x/` — 50 Mbps, 16 de 18 brazos, veredicto FAIL
+- `results/network/fps-shootout-120s-3x-25m/` — 25 Mbps, 18 de 18 brazos, veredicto REFUSED
+- gate: `tools/fps-shootout.sh 120 3`, dos corridas de unos 45 minutos
+- commit: sin comprometer; el árbol lo comparten varios agentes
 
 ---
 
