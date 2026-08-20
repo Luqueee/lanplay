@@ -1,0 +1,21 @@
+[package]
+name = "lanplay-network-health"
+publish.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Nothing platform-specific: the observation contract is arithmetic over counters
+# and the offline harness reads committed JSON, so this builds and is checked on
+# both halves of the workspace. No `[package.metadata.lanplay] platforms`, which
+# is how a crate in this repository says portable.
+
+[dependencies]
+lanplay-link-metrics = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[[bin]]
+name = "classify-sessions"
+path = "src/bin/classify_sessions.rs"

@@ -1,0 +1,12 @@
+arm       faults (faults)
+relay     loss 2%, 60 ms held every 150 ms
+listening 0.0.0.0:5004 for 5.0 s at 120 fps, mtu 1200
+radio before channel 36 at 80 MHz, -71 dBm over -93 dBm, 408 Mbps negotiated
+radio after  channel 36 at 80 MHz, -72 dBm over -93 dBm, 432 Mbps negotiated
+shape     26553 datagrams, 1187 B mean, 66.2 per access unit, 50.4 Mbps
+stream    401 of 588 access units, 280 datagrams lost of 26833 accounted, 16219 reordered
+cadence   p50 0.191 ms, p99 104.661 ms, max 108.462 ms over 4.90 s
+tail      65 over two periods, 58 stall clusters, gaps p50 71.4 ms p95 104.9 ms
+wrote     results/network/preflight-20260820-r2/faults.report.json
+wrote     results/network/preflight-20260820-r2/faults.envelope.json
+wrote     results/network/preflight-20260820-r2/faults-as-clean.envelope.json

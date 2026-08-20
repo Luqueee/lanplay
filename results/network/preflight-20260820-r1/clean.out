@@ -1,0 +1,11 @@
+arm       clean (clean)
+listening 0.0.0.0:5004 for 5.0 s at 120 fps, mtu 1200
+radio before channel 36 at 80 MHz, -72 dBm over -95 dBm, 432 Mbps negotiated
+radio after  channel 36 at 80 MHz, -71 dBm over -95 dBm, 103 Mbps negotiated
+shape     26819 datagrams, 1187 B mean, 44.7 per access unit, 50.9 Mbps
+stream    600 of 600 access units, 0 datagrams lost of 26819 accounted, 86 reordered
+cadence   p50 8.237 ms, p99 11.936 ms, max 99.811 ms over 4.99 s
+tail      1 over two periods, 1 stall clusters, gaps p50 0.0 ms p95 0.0 ms
+wrote     /tmp/n2/gate-run-3/clean.report.json
+wrote     /tmp/n2/gate-run-3/clean.envelope.json
+wrote     /tmp/n2/gate-run-3/clean-as-faults.envelope.json

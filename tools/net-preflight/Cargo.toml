@@ -1,0 +1,29 @@
+[package]
+name = "lanplay-net-preflight"
+publish.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# The conditions half reads the Wi-Fi association through CoreWLAN, which only
+# exists on macOS, and the probe is the client's own side of the link. A report
+# that could not say which channel it was taken on would be a report nobody can
+# compare with another, so the platform dependency is load-bearing rather than
+# incidental and is declared instead of discovered at link time.
+[package.metadata.lanplay]
+platforms = ["macos"]
+
+[[bin]]
+name = "net-preflight"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+lanplay-capabilities = { workspace = true }
+lanplay-link-metrics = { workspace = true }
+lanplay-network-health = { workspace = true }
+lanplay-telemetry = { workspace = true }
+lanplay-transport = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

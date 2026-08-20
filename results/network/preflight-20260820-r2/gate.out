@@ -1,0 +1,59 @@
+results   results/network/preflight-20260820-r2
+
+arm       refusal: nothing is sending, and the probe must say so
+radio before channel 36 at 80 MHz, -72 dBm over -93 dBm, 408 Mbps negotiated
+radio after  channel 36 at 80 MHz, -72 dBm over -93 dBm, 408 Mbps negotiated
+REFUSED   no datagram arrived in 3 s of waiting, so nothing here says anything about the link: a loss of zero over a population of zero is the shape of an instrument that was never presented with any traffic
+
+link      en0 192.168.1.108 -> 192.168.1.70
+route     tcp/22 answered; ICMP is filtered
+
+arm       faults: the same traffic through udp-fault, which must be seen
+udp-fault: 0.0.0.0:5116 -> 127.0.0.1:5004, loss 2.0%, duplicate 0.0%, reorder 0.0% held 8 ms, stall 60 ms every 150 ms, seed 20250815
+udp-fault: scheduled as time constraint, period 2.000 ms computation 0.250 ms constraint 1.000 ms
+radio before channel 36 at 80 MHz, -71 dBm over -93 dBm, 408 Mbps negotiated
+radio after  channel 36 at 80 MHz, -72 dBm over -93 dBm, 432 Mbps negotiated
+shape     26553 datagrams, 1187 B mean, 66.2 per access unit, 50.4 Mbps
+stream    401 of 588 access units, 280 datagrams lost of 26833 accounted, 16219 reordered
+cadence   p50 0.191 ms, p99 104.661 ms, max 108.462 ms over 4.90 s
+tail      65 over two periods, 58 stall clusters, gaps p50 71.4 ms p95 104.9 ms
+    5s  seen   21522  dropped    231 (1.07%)  duplicated      0 (0.00%)  reordered      0 (0.00%)  stalls   33  holding 160
+
+arm       clean: the link as it is
+radio before channel 36 at 80 MHz, -72 dBm over -93 dBm, 408 Mbps negotiated
+radio after  channel 36 at 80 MHz, -73 dBm over -93 dBm, 432 Mbps negotiated
+shape     26819 datagrams, 1187 B mean, 44.7 per access unit, 50.9 Mbps
+stream    600 of 600 access units, 0 datagrams lost of 26819 accounted, 100 reordered
+cadence   p50 8.196 ms, p99 11.567 ms, max 12.911 ms over 4.99 s
+tail      0 over two periods, 0 stall clusters, gaps p50 0.0 ms p95 0.0 ms
+
+judgements
+
+  ok     refusal            REFUSED, as it had to be
+  ok     faults             PASS, as it had to be
+  ok     faults-as-clean    FAIL, as it had to be
+  ok     clean              PASS, as it had to be
+  ok     clean-as-faults    FAIL, as it had to be
+
+                                              clean         faults
+  datagrams accounted                         26819          26833
+  datagrams lost                                  0            280
+  access units delivered                        600            401
+  access units lost                               0            187
+  datagrams per access unit          44.69833333333333 66.21695760598504
+  megabits per second                50.88965096316761 50.39608231586974
+  complete interval p50 ms                 8.196095       0.191487
+  complete interval p99 ms                11.567103     104.660991
+  worst interval ms                       12.910591     108.462079
+  crossings of two periods                        0             65
+  crossings per minute                            0 796.0267176301096
+  stall clusters                                  0             58
+  stall clusters per minute                       0 710.30076342379
+
+  separation in crossings/min                 796.0    needs > 162
+  ok     the injected fault stands clear of what this link does on its own
+
+PASS the probe refuses an empty population, reads the injected fault as a link it
+     must not call good, and reads the link as it is without crying wolf; each arm
+     fails the other arm's criteria, and the two stand apart by more than this
+     link's own between-arm variance, which is what makes either one evidence

@@ -1,0 +1,105 @@
+{
+  "checks": [
+    {
+      "kind": "must_not_be_zero",
+      "name": "access units completed",
+      "reads": "access_units_delivered",
+      "why": "the population under every zero in this arm. A probe that completed no access unit measured nothing, and zero datagrams lost out of zero sent is the most common way an instrument in this project has lied"
+    },
+    {
+      "kind": "must_not_be_zero",
+      "name": "datagrams accounted for",
+      "reads": "datagrams_accounted",
+      "why": "the population under the loss figure: datagrams the sequence machine accepted plus the gaps it saw. A loss ratio over nothing is not a small loss"
+    },
+    {
+      "kind": "must_not_be_zero",
+      "name": "the radio said what it was",
+      "reads": "conditions_reads",
+      "why": "a run whose conditions were not recorded cannot be compared with any other run, which is what happened to thirteen arms of the A8 sweep. This decides whether the run is comparable and never whether the link is good - the radio tier is barred from that, because -48 dBm at 1200 Mbps produced concealment from 0.196 to 7.442 per cent across ten arms"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "the channel held still",
+      "population": "conditions_reads",
+      "reads": "conditions_channel_moves",
+      "why": "the association is read before the probe and after it, and a channel or width that moved between the two means one report describes two links. Signal is deliberately not part of it: two reads seconds apart differ by a decibel or two on a link nobody touched, and a criterion that fires on that refuses every run"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "the traffic was video shaped",
+      "population": "access_units_delivered",
+      "reads": "access_units_under_one_datagram",
+      "why": "this product hands a whole access unit to the kernel at once, some tens of datagrams with no gap between them, and the burst is the part a link fails at. An access unit that would have fitted in one datagram is a probe pointed at traffic this link is never asked to carry, and every number beside it would then be about the wrong stream while looking reasonable"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "nothing was lost",
+      "population": "datagrams_accounted",
+      "reads": "datagrams_lost",
+      "why": "the four 120 s arms committed on this channel - results/b3-channel ch36-r1, r2, r3 and ch36-return-r1 - each report stream.packet_loss 0, so on this link a lost datagram in five seconds is news. The companion that keeps this from being unfalsifiable is the fault arm, where the same observation must not be zero"
+    },
+    {
+      "bound": 120.0,
+      "kind": "must_be_below",
+      "name": "the worst gap between access units",
+      "reads": "au_interval_max_ms",
+      "why": "the same four arms report worst complete-intervals of 26.07, 50.59, 68.62 and 98.57 ms over 120 s each, so the bound sits above every clean arm this repository has recorded here and a five-second probe has a twenty-fourth of their opportunities to reach it. Crossing counts are deliberately not a criterion at this length: those arms cluster at 2.0 to 18.5 a minute, which is 0.17 to 1.5 clusters in five seconds, and a count expected to be small but non-zero separates nothing"
+    }
+  ],
+  "declared": [
+    "link-delivery"
+  ],
+  "environment": {
+    "radio_after": "channel 36 at 80 MHz, -73 dBm over -93 dBm noise, 432 Mbps negotiated",
+    "radio_before": "channel 36 at 80 MHz, -72 dBm over -93 dBm noise, 408 Mbps negotiated",
+    "radio_signal_drift_db": -1.0
+  },
+  "exercised": [
+    "link-delivery"
+  ],
+  "findings": [
+    "600 access units over 5.00 s at 50.9 Mbps, 44.7 datagrams per unit of 1187 bytes mean",
+    "complete-interval p50 8.196 ms, p99 11.567 ms, max 12.911 ms; first-datagram interval p99 13.156 ms, which separates a unit that starts late from one that finishes badly",
+    "0 crossings of two source periods and 0 stall clusters counted, which over 4.99 s is 0.0 and 0.0 a minute - the counts are what this window supports and the rates are what it can be compared on"
+  ],
+  "gate": "net-preflight",
+  "observations": {
+    "access_units_delivered": 600.0,
+    "access_units_expected": 600.0,
+    "access_units_lost": 0.0,
+    "access_units_under_one_datagram": 0.0,
+    "au_interval_max_ms": 12.910591,
+    "au_interval_p50_ms": 8.196095,
+    "au_interval_p99_ms": 11.567103,
+    "conditions_channel_moves": 0.0,
+    "conditions_reads": 2.0,
+    "datagrams": 26819.0,
+    "datagrams_accounted": 26819.0,
+    "datagrams_lost": 0.0,
+    "datagrams_per_access_unit": 44.69833333333333,
+    "datagrams_reordered": 100.0,
+    "delivery_over_2t": 0.0,
+    "delivery_over_2t_per_min": 0.0,
+    "delivery_stall_clusters": 0.0,
+    "delivery_stall_clusters_per_min": 0.0,
+    "first_interval_p99_ms": 13.156351,
+    "mbps": 50.88965096316761,
+    "mean_datagram_bytes": 1186.666318654685
+  },
+  "run": {
+    "args": {
+      "expect": "clean",
+      "faults": null,
+      "fps": 120.0,
+      "mtu": 1200,
+      "pacer": "burst",
+      "seconds": 5.0
+    },
+    "arm": "clean",
+    "commit": "06b654b",
+    "seed": null,
+    "span_s": 5.003013917,
+    "started_unix_ms": 1787227675095
+  }
+}

@@ -1,0 +1,12 @@
+arm       faults (faults)
+relay     loss 2%, 60 ms held every 150 ms
+listening 0.0.0.0:5004 for 5.0 s at 120 fps, mtu 1200
+radio before channel 36 at 80 MHz, -72 dBm over -95 dBm, 408 Mbps negotiated
+radio after  channel 36 at 80 MHz, -72 dBm over -95 dBm, 432 Mbps negotiated
+shape     26546 datagrams, 1187 B mean, 66.5 per access unit, 50.4 Mbps
+stream    399 of 588 access units, 284 datagrams lost of 26830 accounted, 15948 reordered
+cadence   p50 0.177 ms, p99 104.464 ms, max 151.126 ms over 4.90 s
+tail      64 over two periods, 60 stall clusters, gaps p50 81.1 ms p95 105.3 ms
+wrote     /tmp/n2/gate-run-3/faults.report.json
+wrote     /tmp/n2/gate-run-3/faults.envelope.json
+wrote     /tmp/n2/gate-run-3/faults-as-clean.envelope.json

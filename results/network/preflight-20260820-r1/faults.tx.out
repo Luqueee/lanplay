@@ -1,0 +1,56 @@
+== configuration ==
+mode      send
+fixture   fixtures\motion-1920x1080@120-10s-50M.h264
+stream    120 fps for 7 s, mtu 1200 B
+pacer     burst
+faults    none
+digests   1200 entries in fixtures\motion-1920x1080@120-10s-50M.h264.sha256 (reused)
+== tx ==
+SO_SNDBUF  granted     65536 B  (system default)
+ssrc e98cdedd
+tx  840 au, 37627 pkt (44.8/au), 44.7 MB
+    single-nal 1, fu-a 37626, send errors 0
+wire: 37627 datagrams, 44650232 bytes handed to send_to, 5381.57 pkt/s, 51.09 Mbps
+faults: dropped 0, duplicated 0, reordered 0 (declined 0), corrupted 0 header + 0 payload
+== per-packet series ==
+series                     count       mean        p50        p95        p99      p99.9        max
+pacing error             37627     98.49µ     91.65µ    167.17µ    211.71µ    396.03µ   5967.87µ
+send syscall             37627      4.50µ      2.80µ      5.20µ     20.51µ     32.51µ   5681.15µ
+au start error             840     24.29µ     22.34µ     33.95µ     51.45µ    148.09µ    148.09µ
+== transport cost ==
+access unit: 51816 B of bitstream -> 53155 B of RTP (+2.58%, 44.79 packets)
+largest access unit 83774 B in a 1200-unit fixture; 1 single-NAL and 37626 FU-A packets
+pacing error p50 91.65µs / p99 211.71µs / max 5967.87µs; send syscall p50 2.80µs / p99 20.51µs
+== telemetry ==
+clock domain: local-windows
+
+segment              count       p50       p95       p99       max  kind
+capture                  0
+preprocess wait          0
+gpu preprocess           0
+admission wait           0
+encode                   0
+packetize wait           0
+packetization          840   0.00 ms   0.00 ms   0.01 ms   0.02 ms  work
+transit                  0
+reassembly               0
+decoder wait             0
+decode                   0
+presentation wait        0
+render                   0
+serialisation          840   0.16 ms   0.21 ms   0.40 ms   5.96 ms  diag
+arrival                  0
+
+frame age                0
+local age                0
+unattributed gap         0
+present interval         0
+source interval        839   8.36 ms   8.36 ms   8.36 ms   8.36 ms  
+
+presented 0 frames in 0.00 s (0.0/s), started 840, incomplete 840
+events 3360 recorded, 0 dropped, 0 duplicate, 0 late, 0 clipped, 0 cross-domain
+p99 backed by only 0 tail observations from 0 frames; soak 3600+ before trusting it
+note: nothing decodes or presents here, so every frame retires as incomplete and `frame age`, `present interval` and the decode/render segments are empty by construction. `capture interval` is also unreliable: without a present mark, frames retire when the collector's ring evicts them, and the final flush retires the last ring's worth out of order.
+== memory ==
+resident 9.1 -> 72.8 MB (peak 72.8 MB) over 71 samples
+second-half slope +0.0 kB/min over 35 samples: flat

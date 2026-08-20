@@ -4,6 +4,7 @@ members = [
     "crates/audio-codec",
     "crates/input-protocol",
     "crates/link-metrics",
+    "crates/network-health",
     "crates/protocol",
     "crates/telemetry",
     "crates/transport",
@@ -20,6 +21,7 @@ members = [
     "tools/radio-sample",
     "tools/capture-bench",
     "tools/net-bench",
+    "tools/net-preflight",
     "tools/present-source",
     "tools/tone-source",
     "tools/nvenc-probe",
@@ -52,6 +54,7 @@ lanplay-encoder-nvenc = { path = "windows/encoder-nvenc" }
 lanplay-decoder-videotoolbox = { path = "macos/decoder-videotoolbox" }
 lanplay-input-protocol = { path = "crates/input-protocol" }
 lanplay-link-metrics = { path = "crates/link-metrics" }
+lanplay-network-health = { path = "crates/network-health" }
 lanplay-protocol = { path = "crates/protocol" }
 lanplay-renderer-metal = { path = "macos/renderer-metal" }
 lanplay-present-source = { path = "tools/present-source" }

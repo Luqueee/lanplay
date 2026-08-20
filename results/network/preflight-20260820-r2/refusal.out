@@ -1,0 +1,8 @@
+arm       refusal (clean)
+listening 127.0.0.1:5117 for 5.0 s at 120 fps, mtu 1200
+radio before channel 36 at 80 MHz, -72 dBm over -93 dBm, 408 Mbps negotiated
+radio after  channel 36 at 80 MHz, -72 dBm over -93 dBm, 408 Mbps negotiated
+wrote     results/network/preflight-20260820-r2/refusal.report.json
+wrote     results/network/preflight-20260820-r2/refusal.envelope.json
+
+REFUSED   no datagram arrived in 3 s of waiting, so nothing here says anything about the link: a loss of zero over a population of zero is the shape of an instrument that was never presented with any traffic

@@ -1,0 +1,51 @@
+gate      net-preflight   arm refusal   span 0.0 s   commit 06b654b
+started   1787227657763 unix ms
+args      expect clean, faults null, fps 120.0, mtu 1200, pacer burst, seconds 5.0
+covers    
+
+environment
+
+  radio_after                              channel 36 at 80 MHz, -72 dBm over -93 dBm noise, 408 Mbps negotiated
+  radio_before                             channel 36 at 80 MHz, -72 dBm over -93 dBm noise, 408 Mbps negotiated
+  radio_signal_drift_db                    0.0
+
+observations
+
+  conditions_channel_moves                 0
+  conditions_reads                         2
+  datagrams                                0
+
+what must not be zero
+
+  PASS  the radio said what it was               2
+        a run whose conditions were not recorded cannot be compared with any other run, which is what happened to thirteen arms of the A8 sweep. This decides whether the run is comparable and never whether the link is good - the radio tier is barred from that, because -48 dBm at 1200 Mbps produced concealment from 0.196 to 7.442 per cent across ten arms
+
+what must be zero
+
+  PASS  the channel held still                   0 over 2 conditions_reads
+        the association is read before the probe and after it, and a channel or width that moved between the two means one report describes two links. Signal is deliberately not part of it: two reads seconds apart differ by a decibel or two on a link nobody touched, and a criterion that fires on that refuses every run
+
+what could not be tested
+
+        access units completed                   nothing named access_units_delivered was observed, so there is no number to decide on
+        the population under every zero in this arm. A probe that completed no access unit measured nothing, and zero datagrams lost out of zero sent is the most common way an instrument in this project has lied
+        datagrams accounted for                  nothing named datagrams_accounted was observed, so there is no number to decide on
+        the population under the loss figure: datagrams the sequence machine accepted plus the gaps it saw. A loss ratio over nothing is not a small loss
+        the traffic was video shaped             nothing named access_units_under_one_datagram was observed, so there is no number to decide on
+        this product hands a whole access unit to the kernel at once, some tens of datagrams with no gap between them, and the burst is the part a link fails at. An access unit that would have fitted in one datagram is a probe pointed at traffic this link is never asked to carry, and every number beside it would then be about the wrong stream while looking reasonable
+        nothing was lost                         nothing named datagrams_lost was observed, so there is no number to decide on
+        the four 120 s arms committed on this channel - results/b3-channel ch36-r1, r2, r3 and ch36-return-r1 - each report stream.packet_loss 0, so on this link a lost datagram in five seconds is news. The companion that keeps this from being unfalsifiable is the fault arm, where the same observation must not be zero
+        the worst gap between access units       nothing named au_interval_max_ms was observed, so there is no number to decide on
+        the same four arms report worst complete-intervals of 26.07, 50.59, 68.62 and 98.57 ms over 120 s each, so the bound sits above every clean arm this repository has recorded here and a five-second probe has a twenty-fourth of their opportunities to reach it. Crossing counts are deliberately not a criterion at this length: those arms cluster at 2.0 to 18.5 a minute, which is 0.17 to 1.5 clusters in five seconds, and a count expected to be small but non-zero separates nothing
+
+REFUSE access units completed: nothing named access_units_delivered was observed, so there is no number to decide on
+       the population under every zero in this arm. A probe that completed no access unit measured nothing, and zero datagrams lost out of zero sent is the most common way an instrument in this project has lied
+REFUSE datagrams accounted for: nothing named datagrams_accounted was observed, so there is no number to decide on
+       the population under the loss figure: datagrams the sequence machine accepted plus the gaps it saw. A loss ratio over nothing is not a small loss
+REFUSE the traffic was video shaped: nothing named access_units_under_one_datagram was observed, so there is no number to decide on
+       this product hands a whole access unit to the kernel at once, some tens of datagrams with no gap between them, and the burst is the part a link fails at. An access unit that would have fitted in one datagram is a probe pointed at traffic this link is never asked to carry, and every number beside it would then be about the wrong stream while looking reasonable
+REFUSE nothing was lost: nothing named datagrams_lost was observed, so there is no number to decide on
+       the four 120 s arms committed on this channel - results/b3-channel ch36-r1, r2, r3 and ch36-return-r1 - each report stream.packet_loss 0, so on this link a lost datagram in five seconds is news. The companion that keeps this from being unfalsifiable is the fault arm, where the same observation must not be zero
+REFUSE the worst gap between access units: nothing named au_interval_max_ms was observed, so there is no number to decide on
+       the same four arms report worst complete-intervals of 26.07, 50.59, 68.62 and 98.57 ms over 120 s each, so the bound sits above every clean arm this repository has recorded here and a five-second probe has a twenty-fourth of their opportunities to reach it. Crossing counts are deliberately not a criterion at this length: those arms cluster at 2.0 to 18.5 a minute, which is 0.17 to 1.5 clusters in five seconds, and a count expected to be small but non-zero separates nothing
+       2 of 7 checks hold, and a run that could not read the rest has answered neither way

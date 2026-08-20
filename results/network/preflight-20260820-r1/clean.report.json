@@ -1,0 +1,81 @@
+{
+  "kind": "network-preflight",
+  "run": {
+    "started_unix_ms": 1787227612370,
+    "arm": "clean",
+    "seconds_requested": 5.0,
+    "span_s": 5.002668625,
+    "fps": 120.0,
+    "mtu": 1200,
+    "pacer": "burst",
+    "commit": "06b654b"
+  },
+  "conditions": {
+    "before": {
+      "rssi_dbm": -72,
+      "noise_dbm": -95,
+      "tx_rate_mbps": 432.0,
+      "channel": 36,
+      "width_mhz": 80,
+      "radar_band": false,
+      "country": ""
+    },
+    "after": {
+      "rssi_dbm": -71,
+      "noise_dbm": -95,
+      "tx_rate_mbps": 103.0,
+      "channel": 36,
+      "width_mhz": 80,
+      "radar_band": false,
+      "country": ""
+    },
+    "reads": 2,
+    "channel_moved": false,
+    "signal_drift_db": 1.0
+  },
+  "shape": {
+    "datagrams": 26819,
+    "datagram_bytes": 31825204,
+    "mbps": 50.8931634463396,
+    "mean_datagram_bytes": 1186.666318654685,
+    "datagrams_per_access_unit": 44.69833333333333,
+    "under_one_datagram": 0
+  },
+  "stream": {
+    "expected": 600,
+    "reconstructed": 600,
+    "packet_loss": 0,
+    "datagrams_accounted": 26819,
+    "loss_ratio": 0.0,
+    "au_loss": 0,
+    "reordered": 86,
+    "reorder_ratio": 0.003206681830045863,
+    "duplicates": 0,
+    "rtp_jitter_us": 352.584
+  },
+  "delivery": {
+    "delivered": 600,
+    "au_interval_p50_ms": 8.237055,
+    "au_interval_p95_ms": 10.100735,
+    "au_interval_p99_ms": 11.935743,
+    "au_interval_max_ms": 99.811327,
+    "first_interval_p50_ms": 8.011775,
+    "first_interval_p95_ms": 11.730943,
+    "first_interval_p99_ms": 12.959743,
+    "first_interval_max_ms": 99.942399,
+    "span_s": 4.991047208,
+    "over_1_25t_per_min": 264.4735553461028,
+    "over_1_5t_per_min": 48.08610097201869,
+    "over_2t_per_min": 12.021525243004673,
+    "over_3t_per_min": 12.021525243004673,
+    "over_4t_per_min": 12.021525243004673,
+    "over_6t_per_min": 12.021525243004673,
+    "stall_clusters_per_min": 12.021525243004673,
+    "stall_clusters": 1,
+    "over_2t": 1,
+    "mean_catch_up_units": 12.0,
+    "max_catch_up_units": 12,
+    "stall_gap_p50_ms": 0.0,
+    "stall_gap_p95_ms": 0.0
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "kind": "network-preflight",
+  "run": {
+    "started_unix_ms": 1787227675095,
+    "arm": "clean",
+    "seconds_requested": 5.0,
+    "span_s": 5.003013917,
+    "fps": 120.0,
+    "mtu": 1200,
+    "pacer": "burst",
+    "commit": "06b654b"
+  },
+  "conditions": {
+    "before": {
+      "rssi_dbm": -72,
+      "noise_dbm": -93,
+      "tx_rate_mbps": 408.0,
+      "channel": 36,
+      "width_mhz": 80,
+      "radar_band": false,
+      "country": ""
+    },
+    "after": {
+      "rssi_dbm": -73,
+      "noise_dbm": -93,
+      "tx_rate_mbps": 432.0,
+      "channel": 36,
+      "width_mhz": 80,
+      "radar_band": false,
+      "country": ""
+    },
+    "reads": 2,
+    "channel_moved": false,
+    "signal_drift_db": -1.0
+  },
+  "shape": {
+    "datagrams": 26819,
+    "datagram_bytes": 31825204,
+    "mbps": 50.88965096316761,
+    "mean_datagram_bytes": 1186.666318654685,
+    "datagrams_per_access_unit": 44.69833333333333,
+    "under_one_datagram": 0
+  },
+  "stream": {
+    "expected": 600,
+    "reconstructed": 600,
+    "packet_loss": 0,
+    "datagrams_accounted": 26819,
+    "loss_ratio": 0.0,
+    "au_loss": 0,
+    "reordered": 100,
+    "reorder_ratio": 0.0037286998023789105,
+    "duplicates": 0,
+    "rtp_jitter_us": 342.097
+  },
+  "delivery": {
+    "delivered": 600,
+    "au_interval_p50_ms": 8.196095,
+    "au_interval_p95_ms": 9.576447,
+    "au_interval_p99_ms": 11.567103,
+    "au_interval_max_ms": 12.910591,
+    "first_interval_p50_ms": 7.888895,
+    "first_interval_p95_ms": 12.173311,
+    "first_interval_p99_ms": 13.156351,
+    "first_interval_max_ms": 14.335999,
+    "span_s": 4.991045458,
+    "over_1_25t_per_min": 132.2368240389607,
+    "over_1_5t_per_min": 12.021529458087334,
+    "over_2t_per_min": 0.0,
+    "over_3t_per_min": 0.0,
+    "over_4t_per_min": 0.0,
+    "over_6t_per_min": 0.0,
+    "stall_clusters_per_min": 0.0,
+    "stall_clusters": 0,
+    "over_2t": 0,
+    "mean_catch_up_units": 0.0,
+    "max_catch_up_units": 0,
+    "stall_gap_p50_ms": 0.0,
+    "stall_gap_p95_ms": 0.0
+  }
+}

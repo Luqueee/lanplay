@@ -1,0 +1,82 @@
+{
+  "kind": "network-preflight",
+  "run": {
+    "started_unix_ms": 1787227667102,
+    "arm": "faults",
+    "seconds_requested": 5.0,
+    "span_s": 5.001909125,
+    "fps": 120.0,
+    "mtu": 1200,
+    "pacer": "burst",
+    "faults": "loss 2%, 60 ms held every 150 ms",
+    "commit": "06b654b"
+  },
+  "conditions": {
+    "before": {
+      "rssi_dbm": -71,
+      "noise_dbm": -93,
+      "tx_rate_mbps": 408.0,
+      "channel": 36,
+      "width_mhz": 80,
+      "radar_band": false,
+      "country": ""
+    },
+    "after": {
+      "rssi_dbm": -72,
+      "noise_dbm": -93,
+      "tx_rate_mbps": 432.0,
+      "channel": 36,
+      "width_mhz": 80,
+      "radar_band": false,
+      "country": ""
+    },
+    "reads": 2,
+    "channel_moved": false,
+    "signal_drift_db": -1.0
+  },
+  "shape": {
+    "datagrams": 26553,
+    "datagram_bytes": 31509578,
+    "mbps": 50.39608231586974,
+    "mean_datagram_bytes": 1186.6673445561707,
+    "datagrams_per_access_unit": 66.21695760598504,
+    "under_one_datagram": 0
+  },
+  "stream": {
+    "expected": 588,
+    "reconstructed": 401,
+    "packet_loss": 280,
+    "datagrams_accounted": 26833,
+    "loss_ratio": 0.010434912234934595,
+    "au_loss": 187,
+    "reordered": 16219,
+    "reorder_ratio": 0.6044422912085864,
+    "duplicates": 2,
+    "rtp_jitter_us": 234.825
+  },
+  "delivery": {
+    "delivered": 401,
+    "au_interval_p50_ms": 0.191487,
+    "au_interval_p95_ms": 86.835199,
+    "au_interval_p99_ms": 104.660991,
+    "au_interval_max_ms": 108.462079,
+    "first_interval_p50_ms": 6.725631,
+    "first_interval_p95_ms": 61.046783,
+    "first_interval_p99_ms": 68.419583,
+    "first_interval_max_ms": 73.007103,
+    "span_s": 4.899333042,
+    "over_1_25t_per_min": 820.5198474033438,
+    "over_1_5t_per_min": 796.0267176301096,
+    "over_2t_per_min": 796.0267176301096,
+    "over_3t_per_min": 796.0267176301096,
+    "over_4t_per_min": 796.0267176301096,
+    "over_6t_per_min": 587.8351145576194,
+    "stall_clusters_per_min": 710.30076342379,
+    "stall_clusters": 58,
+    "over_2t": 65,
+    "mean_catch_up_units": 5.327586206896552,
+    "max_catch_up_units": 10,
+    "stall_gap_p50_ms": 71.434239,
+    "stall_gap_p95_ms": 104.923135
+  }
+}

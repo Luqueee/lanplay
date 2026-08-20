@@ -104,7 +104,8 @@ jobs:
             --exclude lanplay-renderer-metal \
             --exclude lanplay-audio-render \
             --exclude lanplay-mouse-mover \
-            --exclude lanplay-radio-sample 2>&1 | tee /tmp/test.log
+            --exclude lanplay-radio-sample \
+            --exclude lanplay-net-preflight 2>&1 | tee /tmp/test.log
           code=${PIPESTATUS[0]}
           set -e
           tools/ci-annotate.sh /tmp/test.log "$code" "windows tests"
@@ -120,6 +121,7 @@ jobs:
             --exclude lanplay-audio-render \
             --exclude lanplay-mouse-mover \
             --exclude lanplay-radio-sample \
+            --exclude lanplay-net-preflight \
             -- -D warnings 2>&1 | tee /tmp/clippy.log
           code=${PIPESTATUS[0]}
           set -e

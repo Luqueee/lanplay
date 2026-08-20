@@ -1,0 +1,40 @@
+{
+  "kind": "network-preflight",
+  "run": {
+    "started_unix_ms": 1787227595035,
+    "arm": "refusal",
+    "seconds_requested": 5.0,
+    "span_s": 0.0,
+    "fps": 120.0,
+    "mtu": 1200,
+    "pacer": "burst",
+    "commit": "06b654b"
+  },
+  "conditions": {
+    "before": {
+      "rssi_dbm": -72,
+      "noise_dbm": -95,
+      "tx_rate_mbps": 408.0,
+      "channel": 36,
+      "width_mhz": 80,
+      "radar_band": false,
+      "country": ""
+    },
+    "after": {
+      "rssi_dbm": -72,
+      "noise_dbm": -95,
+      "tx_rate_mbps": 432.0,
+      "channel": 36,
+      "width_mhz": 80,
+      "radar_band": false,
+      "country": ""
+    },
+    "reads": 2,
+    "channel_moved": false,
+    "signal_drift_db": 0.0
+  },
+  "refusal": {
+    "why": "no datagram arrived in 3 s of waiting, so nothing here says anything about the link: a loss of zero over a population of zero is the shape of an instrument that was never presented with any traffic",
+    "datagrams": 0
+  }
+}
