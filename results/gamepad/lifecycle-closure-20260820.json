@@ -1,0 +1,38 @@
+{
+  "schema": "lanplay.gamepad.lifecycle.v1",
+  "rocket_league_usb": {
+    "duration_seconds": 90,
+    "raw_reports": 22533,
+    "states_sent": 22533,
+    "receiver_udp": 22689,
+    "decode_errors": 0,
+    "wrong_session": 0,
+    "stale": 74,
+    "neutral": 1,
+    "operator_verdict": "all controls correct and fluid"
+  },
+  "physical_disconnect_held": {
+    "detach": 0,
+    "expired": 1,
+    "neutral": 2,
+    "sender_hid_reconnect_attempts": 2,
+    "verdict": "pass"
+  },
+  "lifecycle_cycles": {
+    "cycles_requested": 50,
+    "attach": 50,
+    "states": 50,
+    "detach": 50,
+    "neutral": 50,
+    "expired": 0,
+    "decode_errors": 0,
+    "stale": 0,
+    "verdict": "pass"
+  },
+  "session_generation": {
+    "old_generation_state": "rejected",
+    "new_generation_state": "accepted_for_new_slot",
+    "test": "a_stale_generation_cannot_reenter_a_new_session",
+    "verdict": "pass"
+  }
+}
