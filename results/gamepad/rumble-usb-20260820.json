@@ -1,0 +1,22 @@
+{
+  "schema": "lanplay.gamepad.rumble.v1",
+  "transport": "USB",
+  "xinput_commands": 5,
+  "xinput_stop_command": 1,
+  "xinput_results": [0, 0, 0, 0, 0, 0],
+  "windows_feedback": {
+    "udp": 5193,
+    "decode_errors": 0,
+    "wrong_session": 0,
+    "stale": 77,
+    "neutral": 1
+  },
+  "mac_sender": {
+    "raw_reports": 5033,
+    "states_sent": 5033,
+    "rumble_reports": 169,
+    "usb_output_writes": 169
+  },
+  "physical_observation": "operator confirmed five increasing rumble levels and stop on the USB-connected DS4",
+  "verdict": "pass"
+}

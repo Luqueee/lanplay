@@ -11,12 +11,29 @@ pub fn parse_bluetooth_input(
     controller_slot: u8,
     sequence: u32,
 ) -> Option<GamepadStateV1> {
-    if report.len() < INPUT_REPORT_LEN || report[0] != BLUETOOTH_INPUT_REPORT_ID {
+    let (
+        left_x,
+        left_y,
+        right_x,
+        right_y,
+        buttons_0,
+        buttons_1,
+        buttons_2,
+        left_trigger,
+        right_trigger,
+    ) = if report.first() == Some(&BLUETOOTH_INPUT_REPORT_ID) && report.len() >= INPUT_REPORT_LEN {
+        (
+            report[1], report[2], report[3], report[4], report[5], report[6], report[7], report[8],
+            report[9],
+        )
+    } else if report.first() == Some(&0x11) && report.len() >= 12 {
+        (
+            report[3], report[4], report[5], report[6], report[7], report[8], report[9],
+            report[10], report[11],
+        )
+    } else {
         return None;
-    }
-    let buttons_0 = report[5];
-    let buttons_1 = report[6];
-    let buttons_2 = report[7];
+    };
     let mut buttons = 0;
     for (mask, pressed) in [
         (buttons::WEST, buttons_0 & 0x10 != 0),
@@ -41,12 +58,12 @@ pub fn parse_bluetooth_input(
         sequence,
         buttons,
         dpad: dpad(buttons_0 & 0x0f),
-        left_x: axis(report[1]),
-        left_y: axis(report[2]),
-        right_x: axis(report[3]),
-        right_y: axis(report[4]),
-        left_trigger: trigger(report[8]),
-        right_trigger: trigger(report[9]),
+        left_x: axis(left_x),
+        left_y: axis(left_y),
+        right_x: axis(right_x),
+        right_y: axis(right_y),
+        left_trigger: trigger(left_trigger),
+        right_trigger: trigger(right_trigger),
     })
 }
 
@@ -96,6 +113,31 @@ mod tests {
                 | buttons::LEFT_STICK
                 | buttons::RIGHT_STICK
                 | buttons::GUIDE
+        );
+    }
+
+    #[test]
+    fn maps_a_bluetooth_report_common_section() {
+        let mut report = [0u8; 78];
+        report[0] = 0x11;
+        report[3] = 255;
+        report[4] = 0;
+        report[5] = 128;
+        report[6] = 64;
+        report[7] = 8 | 0x20 | 0x40;
+        report[8] = 0x01;
+        report[9] = 0x01;
+        report[10] = 0;
+        report[11] = 255;
+        let state = parse_bluetooth_input(&report, 4, 0, 9).expect("Bluetooth DS4 report");
+        assert_eq!(state.left_x, i16::MAX);
+        assert_eq!(state.left_y, -32767);
+        assert_eq!(state.left_trigger, 0);
+        assert_eq!(state.right_trigger, u16::MAX);
+        assert_eq!(state.dpad, Dpad::Neutral);
+        assert_eq!(
+            state.buttons,
+            buttons::SOUTH | buttons::EAST | buttons::LEFT_SHOULDER | buttons::GUIDE
         );
     }
 }
