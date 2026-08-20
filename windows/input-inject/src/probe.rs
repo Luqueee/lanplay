@@ -250,7 +250,8 @@ impl Counts {
             | Message::ReleaseAll { .. }
             | Message::GamepadAttach { .. }
             | Message::GamepadDetach { .. }
-            | Message::GamepadState(_) => {}
+            | Message::GamepadState(_)
+            | Message::GamepadFeedback(_) => {}
         }
     }
 }

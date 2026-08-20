@@ -1802,11 +1802,11 @@ Stopping
 Failed
 ```
 
-- [ ] transiciones válidas.
-- [ ] timeouts.
-- [ ] idempotencia.
-- [ ] generation numbers.
-- [ ] stale packet rejection.
+- [x] transiciones válidas.
+- [x] timeouts.
+- [x] idempotencia.
+- [x] generation numbers.
+- [x] stale packet rejection.
 
 ---
 
@@ -1814,23 +1814,23 @@ Failed
 
 Host anuncia:
 
-- [ ] codecs.
-- [ ] max encode modes.
-- [ ] virtual display modes.
-- [ ] audio capabilities.
-- [ ] gamepad backend availability.
-- [ ] input capabilities.
+- [x] codecs.
+- [x] max encode modes.
+- [x] virtual display modes.
+- [x] audio capabilities.
+- [x] gamepad backend availability.
+- [x] input capabilities.
 
 Client anuncia:
 
-- [ ] hardware decode.
-- [ ] display refresh.
-- [ ] codecs.
-- [ ] audio output.
-- [ ] controller features.
+- [x] hardware decode.
+- [x] display refresh.
+- [x] codecs.
+- [x] audio output.
+- [x] controller features.
 
-- [ ] resolver perfil deterministicamente.
-- [ ] registrar por qué se eligió.
+- [x] resolver perfil deterministicamente.
+- [x] registrar por qué se eligió.
 
 ---
 
@@ -1838,14 +1838,14 @@ Client anuncia:
 
 Ya existe ACK de startup; generalizar:
 
-- [ ] announce.
-- [ ] config.
-- [ ] ACK.
-- [ ] cutover.
-- [ ] first-frame watchdog.
-- [ ] audio-ready.
-- [ ] input-ready.
-- [ ] gamepad-ready.
+- [x] announce.
+- [x] config.
+- [x] ACK.
+- [x] cutover.
+- [x] first-frame watchdog.
+- [x] audio-ready.
+- [x] input-ready.
+- [x] gamepad-ready.
 - [ ] failure rollback.
 
 ---
@@ -1857,23 +1857,23 @@ Ya existe ACK de startup; generalizar:
 - [ ] host process restart.
 - [ ] renderer restart.
 - [ ] audio endpoint restart.
-- [ ] generation bump.
-- [ ] ReleaseAll/neutral gamepad before reconnect.
-- [ ] bounded reconnect attempts.
+- [x] generation bump.
+- [x] ReleaseAll/neutral gamepad before reconnect.
+- [x] bounded reconnect attempts.
 - [ ] clear UX.
 
 ---
 
 ## S4 — Session teardown
 
-- [ ] stop admitting input first.
-- [ ] ReleaseAll.
-- [ ] neutral gamepads.
-- [ ] stop audio.
-- [ ] stop video.
-- [ ] destroy virtual display if policy says so.
-- [ ] close sockets.
-- [ ] join threads bounded.
+- [x] stop admitting input first.
+- [x] ReleaseAll.
+- [x] neutral gamepads.
+- [x] stop audio.
+- [x] stop video.
+- [x] destroy virtual display if policy says so.
+- [x] close sockets.
+- [x] join threads bounded.
 - [ ] no leaked devices/resources.
 
 ---
@@ -1884,11 +1884,11 @@ Ya existe ACK de startup; generalizar:
 
 Para LAN-first:
 
-- [ ] evaluar mDNS/Bonjour o mecanismo equivalente.
-- [ ] listado automático de hosts.
-- [ ] manual IP fallback.
-- [ ] host identity estable.
-- [ ] duplicate names handled.
+- [x] evaluar mDNS/Bonjour o mecanismo equivalente.
+- [x] listado automático de hosts.
+- [x] manual IP fallback.
+- [x] host identity estable.
+- [x] duplicate names handled.
 
 ---
 
@@ -1896,9 +1896,9 @@ Para LAN-first:
 
 - [ ] usuario debe aprobar primer emparejamiento.
 - [ ] código/PIN o mecanismo equivalente.
-- [ ] persistir trust de forma segura.
-- [ ] revoke device.
-- [ ] show paired clients.
+- [x] persistir trust de forma segura.
+- [x] revoke device.
+- [x] show paired clients.
 
 ---
 
@@ -1934,11 +1934,11 @@ Documentar:
 
 ## SEC1 — Authentication
 
-- [ ] identidad host.
-- [ ] identidad client.
-- [ ] pairing keys.
-- [ ] no trust por IP.
-- [ ] key rotation/re-pair policy.
+- [x] identidad host.
+- [x] identidad client.
+- [x] pairing keys.
+- [x] no trust por IP.
+- [x] key rotation/re-pair policy.
 
 ---
 

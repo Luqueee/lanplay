@@ -125,6 +125,7 @@ libc = "0.2"
 parking_lot = "0.12"
 sha2 = "0.10"
 hidapi = "2.6"
+mdns-sd = "0.21"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The gate index is TOML, and `xtask gates` reads it. `preserve_order` keeps the

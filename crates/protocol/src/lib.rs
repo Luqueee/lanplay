@@ -4,11 +4,25 @@
 //! sit on opposite sides of the wire. Nothing in this crate touches an OS API.
 
 mod capabilities;
+mod discovery;
 mod frame;
+mod identity;
+mod negotiation;
+mod report;
+mod session;
 mod video;
 
 pub use capabilities::{
     ClientCapabilities, DisplayInfo, GpuInfo, GpuVendor, HostCapabilities, NvencInfo,
 };
 pub use frame::{FrameId, FrameIdSource};
+
+pub use discovery::{Discovery, HostAdvertisement, SERVICE_TYPE, manual_endpoint};
+pub use identity::{PairingRecord, PairingStore, StableIdentity, default_pairing_path};
+pub use negotiation::{CapabilitySelection, CapabilitySet, NegotiationError, negotiate};
+pub use report::{NegotiatedMode, SessionReport, SubsystemHealth};
+pub use session::{
+    SessionEvent, SessionMachine, SessionState, SessionTimeouts, StartupChannel,
+    StartupTransaction, TransitionError,
+};
 pub use video::{VideoCodec, VideoMode};

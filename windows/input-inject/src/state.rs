@@ -389,7 +389,8 @@ impl HostState {
             Message::Ack { .. }
             | Message::GamepadAttach { .. }
             | Message::GamepadDetach { .. }
-            | Message::GamepadState(_) => return Outcome::Ignored,
+            | Message::GamepadState(_)
+            | Message::GamepadFeedback(_) => return Outcome::Ignored,
         }
         Outcome::Applied
     }
