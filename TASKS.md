@@ -904,9 +904,9 @@ Con GameController.framework:
 
 ## G3 — Attach/detach control plane
 
-- [x] reliable attach.
+- [ ] reliable attach.
 - [ ] ACK.
-- [x] reliable detach.
+- [ ] reliable detach.
 - [ ] heartbeat/session timeout.
 - [x] neutralize on:
   - [x] detach.
@@ -924,7 +924,7 @@ Con GameController.framework:
 - [x] reorder.
 - [x] stalls.
 - [x] stale applied = 0.
-- [x] stuck state = 0.
+- [ ] stuck state = 0.
 - [ ] convergence.
 - [ ] reconnect.
 
