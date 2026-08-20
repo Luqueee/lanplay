@@ -6,6 +6,7 @@
 mod capabilities;
 mod frame;
 mod negotiation;
+mod report;
 mod session;
 mod video;
 
@@ -15,6 +16,7 @@ pub use capabilities::{
 pub use frame::{FrameId, FrameIdSource};
 
 pub use negotiation::{CapabilitySelection, CapabilitySet, NegotiationError, negotiate};
+pub use report::{NegotiatedMode, SessionReport, SubsystemHealth};
 pub use session::{
     SessionEvent, SessionMachine, SessionState, SessionTimeouts, StartupChannel,
     StartupTransaction, TransitionError,

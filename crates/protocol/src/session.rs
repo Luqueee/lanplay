@@ -4,7 +4,7 @@
 //! report events here; an invalid transition is rejected rather than silently
 //! turning a failed session into a streaming one.
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum SessionState {
     Disconnected,
     Connecting,
