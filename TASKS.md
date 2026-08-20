@@ -1006,9 +1006,9 @@ No llamar a métricas locales “end-to-end physical latency”.
 
 ## G8 — Soak/lifecycle
 
-- [ ] 10 min synthetic cycling.
-- [ ] 0 stuck buttons.
-- [ ] 0 stale applied.
+- [x] 10 min synthetic cycling.
+- [x] 0 stuck buttons.
+- [x] 0 stale applied.
 - [ ] 0 divergence.
 - [ ] 50–100 connect/disconnect.
 - [ ] reconnect.
