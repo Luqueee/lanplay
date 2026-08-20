@@ -36,11 +36,7 @@ fn main() -> ExitCode {
         Ok(target) => target,
         Err(error) => return fail(error, 2),
     };
-    let api = match HidApi::new() {
-        Ok(api) => api,
-        Err(error) => return fail(error.to_string(), 2),
-    };
-    let device = match open_ds4(&api, Duration::from_secs(15)) {
+    let device = match open_ds4(Duration::from_secs(30)) {
         Ok(device) => device,
         Err(error) => return fail(error, 3),
     };
@@ -138,13 +134,18 @@ fn send_control_until_ack(
     }
     false
 }
-fn open_ds4(api: &HidApi, wait: Duration) -> Result<HidDevice, String> {
+fn open_ds4(wait: Duration) -> Result<HidDevice, String> {
     let deadline = Instant::now() + wait;
     loop {
-        if let Some(info) = api.device_list().find(|device| {
-            device.vendor_id() == SONY_VENDOR && device.product_id() == DS4_BLUETOOTH_PRODUCT
-        }) {
-            return info.open_device(api).map_err(|error| error.to_string());
+        let api = HidApi::new().map_err(|error| error.to_string())?;
+        let device = api
+            .device_list()
+            .find(|device| {
+                device.vendor_id() == SONY_VENDOR && device.product_id() == DS4_BLUETOOTH_PRODUCT
+            })
+            .and_then(|info| info.open_device(&api).ok());
+        if let Some(device) = device {
+            return Ok(device);
         }
         if Instant::now() >= deadline {
             return Err("DS4 Bluetooth 054c:09cc not found after retry window".to_owned());
