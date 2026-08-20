@@ -839,15 +839,15 @@ Puede desarrollarse en paralelo con audio/network siempre que no se cambien simu
 
 ## G0 — Gamepad protocol/model
 
-- [ ] `GamepadStateV1`.
-- [ ] session generation.
-- [ ] controller slot.
-- [ ] sequence.
-- [ ] buttons bitmask.
-- [ ] D-pad.
-- [ ] sticks.
-- [ ] triggers.
-- [ ] normalización independiente Sony/Xbox.
+- [x] `GamepadStateV1`.
+- [x] session generation.
+- [x] controller slot.
+- [x] sequence.
+- [x] buttons bitmask.
+- [x] D-pad.
+- [x] sticks.
+- [x] triggers.
+- [x] normalización independiente Sony/Xbox.
 
 Baseline:
 
@@ -856,8 +856,8 @@ sticks   i16
 triggers u16
 ```
 
-- [ ] Tests mapping.
-- [ ] Tests neutral state.
+- [x] Tests mapping.
+- [x] Tests neutral state.
 
 ---
 
@@ -892,27 +892,27 @@ Con GameController.framework:
 
 ## G2 — Transporte state-based
 
-- [ ] Event-driven immediate send.
-- [ ] Periodic full state snapshot.
-- [ ] Baseline 120 Hz repair snapshot, validar.
-- [ ] Highest sequence wins.
-- [ ] Stale states dropped.
-- [ ] No retransmit de sticks antiguos.
-- [ ] No queue growth.
+- [x] Event-driven immediate send.
+- [x] Periodic full state snapshot.
+- [x] Baseline 120 Hz repair snapshot, validar.
+- [x] Highest sequence wins.
+- [x] Stale states dropped.
+- [x] No retransmit de sticks antiguos.
+- [x] No queue growth.
 
 ---
 
 ## G3 — Attach/detach control plane
 
-- [ ] reliable attach.
+- [x] reliable attach.
 - [ ] ACK.
-- [ ] reliable detach.
+- [x] reliable detach.
 - [ ] heartbeat/session timeout.
-- [ ] neutralize on:
-  - [ ] detach.
+- [x] neutralize on:
+  - [x] detach.
   - [ ] disconnect.
   - [ ] timeout.
-  - [ ] generation switch.
+  - [x] generation switch.
   - [ ] session failure.
 
 ---
@@ -920,11 +920,11 @@ Con GameController.framework:
 ## G4 — Fault injection
 
 - [ ] loss 1/3/5%.
-- [ ] duplicate.
-- [ ] reorder.
-- [ ] stalls.
-- [ ] stale applied = 0.
-- [ ] stuck state = 0.
+- [x] duplicate.
+- [x] reorder.
+- [x] stalls.
+- [x] stale applied = 0.
+- [x] stuck state = 0.
 - [ ] convergence.
 - [ ] reconnect.
 
@@ -938,19 +938,19 @@ Con GameController.framework:
 
 ## G5 — Windows virtual backend abstraction
 
-- [ ] Crear trait/interfaz `VirtualGamepadBackend`.
-- [ ] `create`.
-- [ ] `submit_state`.
+- [x] Crear trait/interfaz `VirtualGamepadBackend`.
+- [x] `create`.
+- [x] `submit_state`.
 - [ ] `poll_feedback`.
-- [ ] `destroy`.
-- [ ] Slot-aware.
-- [ ] Backend intercambiable.
+- [x] `destroy`.
+- [x] Slot-aware.
+- [x] Backend intercambiable.
 
 ### Backend
 
-- [ ] Evaluar backend virtual actual y mantenido.
-- [ ] No atar protocolo a una librería concreta.
-- [ ] ViGEm no debe ser dependencia estratégica nueva sin aceptar que está archivado.
+- [x] Evaluar backend virtual actual y mantenido.
+- [x] No atar protocolo a una librería concreta.
+- [x] ViGEm no debe ser dependencia estratégica nueva sin aceptar que está archivado.
 - [ ] Si se usa un backend externo, documentar instalación/licencia/signing/lifecycle.
 
 ---
@@ -959,17 +959,17 @@ Con GameController.framework:
 
 Default v1:
 
-- [ ] DS4 Cross → A.
-- [ ] Circle → B.
-- [ ] Square → X.
-- [ ] Triangle → Y.
-- [ ] L1/R1 → LB/RB.
-- [ ] L2/R2 → LT/RT.
-- [ ] Share → Back/View.
-- [ ] Options → Start/Menu.
-- [ ] PS → Guide si backend lo permite.
-- [ ] sticks.
-- [ ] D-pad.
+- [x] DS4 Cross → A.
+- [x] Circle → B.
+- [x] Square → X.
+- [x] Triangle → Y.
+- [x] L1/R1 → LB/RB.
+- [x] L2/R2 → LT/RT.
+- [x] Share → Back/View.
+- [x] Options → Start/Menu.
+- [x] PS → Guide si backend lo permite.
+- [x] sticks.
+- [x] D-pad.
 
 ### Synthetic gate
 
