@@ -16,7 +16,7 @@
 use core::fmt;
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -754,6 +754,7 @@ pub struct ControlClient {
     stream: TcpStream,
     token: Option<SessionToken>,
     server_name: String,
+    client_name: Option<String>,
 }
 
 impl ControlClient {
@@ -767,6 +768,7 @@ impl ControlClient {
             stream,
             token: None,
             server_name: String::new(),
+            client_name: None,
         })
     }
 
@@ -781,6 +783,9 @@ impl ControlClient {
     pub fn server_name(&self) -> &str {
         &self.server_name
     }
+    pub fn client_name(&self) -> Option<&str> {
+        self.client_name.as_deref()
+    }
 
     pub fn set_timeout(&self, timeout: Nanos) -> io::Result<()> {
         let budget = timeout_duration(timeout);
@@ -790,6 +795,7 @@ impl ControlClient {
 
     /// ClientHello -> ServerHello. Returns the issued session token.
     pub fn hello(&mut self, client_name: &str) -> io::Result<SessionToken> {
+        self.client_name = Some(client_name.to_owned());
         self.send(&ControlMessage::ClientHello {
             protocol_version: PROTOCOL_VERSION,
             client_name: client_name.to_string(),
@@ -845,6 +851,31 @@ impl ControlClient {
 
     pub fn stop_stream(&mut self) -> io::Result<()> {
         self.send(&ControlMessage::StopStream)
+    }
+
+    /// Replaces the control connection only after a new hello succeeds.
+    ///
+    /// Keeping the old stream until the replacement is negotiated prevents a
+    /// transient reconnect failure from erasing a session that is still alive.
+    pub fn reconnect(&mut self, addr: SocketAddr, timeout: Nanos) -> io::Result<()> {
+        let client_name = self.client_name.clone().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotConnected,
+                "cannot reconnect before ClientHello",
+            )
+        })?;
+        let mut replacement = Self::connect(addr, timeout)?;
+        replacement.hello(&client_name)?;
+        let old = std::mem::replace(self, replacement);
+        let _ = old.stream.shutdown(Shutdown::Both);
+        Ok(())
+    }
+
+    /// Sends the control teardown before closing the socket.
+    pub fn teardown(mut self) -> io::Result<()> {
+        let stop = self.stop_stream();
+        let close = self.stream.shutdown(Shutdown::Both);
+        stop.and(close)
     }
 
     /// Round trip over the control connection.
