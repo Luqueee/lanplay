@@ -324,6 +324,19 @@ the 5 ms spacing the curve exists to resolve. The fitted drift is reported in pp
 and the uncorrected curve is kept beside the corrected one, so the size of the correction is visible
 rather than trusted.
 
+**And the drift cannot be fitted by least squares.** Measured rather than assumed, on loopback where
+the true drift is zero because both ends share one clock, with `udp-fault` holding 5 per cent of
+datagrams for 40 ms: the slope through every arrival read **-6.92 ppm** while a fit through one
+minimum per 10 s block read **+0.07 ppm**. An estimator that a burst moves by seven parts per million
+cannot measure nine. So the drift is fitted through per-block minima, which are queue-free by
+construction since queueing only ever adds, and the all-points slope is reported beside it so the size
+of the difference is a number in the document rather than a choice buried in the code.
+
+If the radio fit disagrees with A7's +9.29 ppm by a factor of two or more, that is a **finding and not
+a criterion**: A7 measured a pair of crystals directly and this measures the same pair through a radio
+and a jitter buffer, so a disagreement says one of the two instruments is wrong and neither figure may
+be cited until it is settled. It does not say the run being measured was faulty.
+
 **Zero loss is required rather than hoped for.** A frame that never arrived has no excess, so a run
 with loss cannot produce this curve. Refused, naming the loss.
 
