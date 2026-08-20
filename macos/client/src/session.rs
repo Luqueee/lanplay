@@ -779,12 +779,39 @@ fn print_monitor(cadence: crate::monitor::Cost, trace: &crate::monitor::Trace) {
             if radio.wakeups > 0 { radio.cpu_ns as f64 / radio.wakeups as f64 / 1e3 } else { 0.0 }
         );
         println!(
-            "  shared lock held {:.3} ms across {} takes = {:.4}% of the run; that is the \
-             whole budget any delay it imposes comes from",
+            "  read        p50 {:.0} us  p95 {:.0} us  p99 {:.0} us  max {:.0} us over {} reads",
+            radio.read.p50_us,
+            radio.read.p95_us,
+            radio.read.p99_us,
+            radio.read.max_us,
+            radio.read.count
+        );
+        // The load-bearing line. A duty cycle cannot bound temporal
+        // interference: what does is showing where the sampler can interfere at
+        // all, and the only path it shares with the receive thread is this one.
+        // Compare the max against the read's max - the read is a disjoint
+        // statement from every lock entry, and this is the observable
+        // consequence of that.
+        println!(
+            "  shared path p50 {:.0} us  p95 {:.0} us  p99 {:.0} us  max {:.0} us over {} \
+             entries, {:.3} ms in total = {:.4}% of the run",
+            radio.lock_path.p50_us,
+            radio.lock_path.p95_us,
+            radio.lock_path.p99_us,
+            radio.lock_path.max_us,
+            radio.lock_path.count,
             radio.lock_hold_ns as f64 / 1e6,
-            radio.lock_holds,
             radio.lock_hold_ns as f64 * 100.0 / radio.span_ns as f64
         );
+        if radio.read.max_us > 0.0 {
+            println!(
+                "              worst read {:.0} us against worst shared-path entry {:.0} us: \
+                 the read is outside the section by a factor of {:.0}",
+                radio.read.max_us,
+                radio.lock_path.max_us,
+                radio.read.max_us / radio.lock_path.max_us.max(1.0)
+            );
+        }
     }
     println!(
         "  radio       {} reads, {} answered, {} empty, {:.2}/s achieved, worst read {:.2} ms",
@@ -1572,6 +1599,8 @@ fn build_report(
                     source_period_ms: period_ms,
                     max_mean_delay_share_of_period: bound_us
                         .map(|us| us / 1e3 / period_ms),
+                    read_us: span_of(radio.read),
+                    lock_path_us: span_of(radio.lock_path),
                 }
             },
             short_windows: monitor_trace.short.len(),
@@ -1609,6 +1638,18 @@ fn build_report(
             }
         },
         windows: slices,
+    }
+}
+
+/// A measured distribution as the report states it.
+fn span_of(span: crate::monitor::Span) -> crate::report::Span {
+    crate::report::Span {
+        count: span.count,
+        p50: span.p50_us,
+        p95: span.p95_us,
+        p99: span.p99_us,
+        max: span.max_us,
+        total: span.total_us,
     }
 }
 

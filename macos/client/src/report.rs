@@ -577,6 +577,37 @@ pub struct MonitorCost {
     pub source_period_ms: f64,
     /// The bound as a share of that period.
     pub max_mean_delay_share_of_period: Option<f64>,
+    /// Wall time per association read, as a distribution.
+    ///
+    /// The maximum is the figure that decides, and a mean would hide it: one
+    /// read costs 3.2 ms at p50 and 15.5 ms at worst, and 15.5 ms is two frames
+    /// at 120 Hz. A duty cycle cannot bound temporal interference - a sampler
+    /// consuming 3.2 ms a second could make one blocking 3 ms call a second
+    /// directly on a shared path and be invisible in the average while costing a
+    /// frame every time.
+    pub read_us: Span,
+    /// Time this thread spent engaged with `crates/link-metrics`' locked
+    /// section, per entry: wait and hold together, which is the whole time the
+    /// receive thread could have been waiting behind it.
+    ///
+    /// This is the load-bearing measurement. Read it against `read_us`: the
+    /// association read is a disjoint statement from every lock entry in
+    /// `monitor::sample`, so an engagement far below the read's own cost is the
+    /// observable consequence of the read being outside the section. If the two
+    /// were comparable, the read would be inside it and costing frames.
+    pub lock_path_us: Span,
+}
+
+/// One measured distribution, in microseconds.
+#[derive(Serialize)]
+pub struct Span {
+    pub count: u64,
+    pub p50: f64,
+    pub p95: f64,
+    pub p99: f64,
+    /// The figure that decides.
+    pub max: f64,
+    pub total: f64,
 }
 
 /// One closed rolling window, in the quantities `classify` reads.

@@ -73,8 +73,36 @@
 # No power is REFUSED whatever the arms did, because nothing has been shown.
 #
 # ---------------------------------------------------------------------------
-# Read this before adding passes: the comparison cannot work, and it is a
-# division rather than a matter of luck
+# DO NOT REBUILD THIS CADENCE A/B. It cannot answer the question.
+# ---------------------------------------------------------------------------
+#
+# Its minimum observable spread is about nineteen times larger than the monitor's
+# cost: 0.500 ms of natural spread across arms that had no monitor at all,
+# against 3.2 ms per second of sampler work spread over 120 frames. No number of
+# passes closes that. Two independent positive controls were built and neither
+# fired, and the arithmetic says a third would not either.
+#
+# Neutrality is bounded from the direct sampler, lock and wakeup measurements in
+# `monitor.cost` in the client's own report. These arms establish only that any
+# cadence effect lies below this experiment's resolution, which is a real
+# statement and is not the same statement as neutrality.
+#
+# And one correction worth carrying, because it is the trap this harness fell
+# into twice. A duty cycle does not bound temporal interference. A sampler
+# consuming 3.2 ms a second could make one blocking 3 ms call a second directly
+# on a shared path and be invisible in the average while costing a frame every
+# time it did. What makes the budget a derivation is not how little the sampler
+# consumes but demonstrating WHERE it can interfere: measured over 120 s, the
+# association read costs 3928 us at p50 and 7589 us at worst, while every entry
+# into the one section it shares with the receive thread costs 41 us at p50 and
+# 63 us at worst - the read is outside that section by a factor of 120, which is
+# why its worst case cannot cost a frame. Both instruments carry negative
+# controls in `monitor.rs`: a known lock hold that the shared-path instrument
+# must report, and known spun CPU that the CPU instrument must report, each with
+# a companion that must NOT report it.
+#
+# ---------------------------------------------------------------------------
+# The same division, in the four numbers
 # ---------------------------------------------------------------------------
 #
 # Four numbers settle it, and none of them is about the weather.

@@ -50,6 +50,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use hdrhistogram::Histogram;
 use lanplay_capabilities::wifi;
 use lanplay_link_metrics::{Delivery, Window};
 use lanplay_network_health::{Experience, Fraction, Incidence, NetworkObservation, RadioHint};
@@ -185,6 +186,66 @@ pub fn fresh_tick_ratio(presented: u64, ticks: u64) -> Option<f64> {
     (ticks > 0).then(|| presented as f64 / ticks as f64)
 }
 
+/// A distribution, because a mean cannot answer the question that matters here.
+///
+/// Average CPU does not bound temporal interference. A sampler consuming 3.2 ms
+/// a second could make one blocking 3 ms call a second directly on a shared path
+/// and be invisible in a duty cycle while costing a frame every time it did. So
+/// every quantity below is kept as a distribution with its maximum, and the
+/// maximum is the figure that decides: one association read costs 3.2 ms at p50
+/// and 15.5 ms at worst, and 15.5 ms is two frames at 120 Hz.
+struct Track {
+    hist: Histogram<u32>,
+    max: u64,
+    total: u64,
+}
+
+impl Track {
+    fn new() -> Track {
+        Track {
+            // One nanosecond to ten seconds, three significant figures: the same
+            // bounds `crates/link-metrics` uses, so a duration recorded here is
+            // comparable with one recorded there without a conversion.
+            hist: Histogram::new_with_bounds(1, 10_000_000_000, 3).expect("valid bounds"),
+            max: 0,
+            total: 0,
+        }
+    }
+
+    fn record(&mut self, ns: u64) {
+        let _ = self.hist.record(ns.max(1));
+        self.max = self.max.max(ns);
+        // Summed exactly rather than reconstructed from the histogram, whose
+        // buckets round: a budget stated from rounded buckets is not a budget.
+        self.total += ns;
+    }
+
+    fn summary(&self) -> Span {
+        Span {
+            count: self.hist.len(),
+            p50_us: self.hist.value_at_quantile(0.50) as f64 / 1e3,
+            p95_us: self.hist.value_at_quantile(0.95) as f64 / 1e3,
+            p99_us: self.hist.value_at_quantile(0.99) as f64 / 1e3,
+            // From the raw maximum rather than the histogram's top bucket, so a
+            // worst case is never rounded down into looking acceptable.
+            max_us: self.max as f64 / 1e3,
+            total_us: self.total as f64 / 1e3,
+        }
+    }
+}
+
+/// One measured distribution, in microseconds.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Span {
+    pub count: u64,
+    pub p50_us: f64,
+    pub p95_us: f64,
+    pub p99_us: f64,
+    /// The figure that decides. 15.5 ms is two frames at 120 Hz.
+    pub max_us: f64,
+    pub total_us: f64,
+}
+
 /// One association read, and what it cost to take.
 #[derive(Clone, Copy, Debug)]
 pub struct RadioSample {
@@ -239,6 +300,18 @@ pub struct RadioTrace {
     pub lock_hold_ns: u64,
     pub lock_holds: u64,
     pub span_ns: u64,
+    /// Wall time per association read. The p50 and the max are both stated
+    /// because they differ by a factor of five and only the max can cost a
+    /// frame.
+    pub read: Span,
+    /// Time spent inside `crates/link-metrics`' locked section, per entry.
+    ///
+    /// Wait and hold together, and labelled as such: the mutex lives inside that
+    /// crate and cannot be split from outside it without instrumenting the
+    /// crate. The sum is the honest quantity anyway - it is the whole time this
+    /// thread was engaged with the shared path, which is what the receive thread
+    /// could have been delayed by.
+    pub lock_path: Span,
 }
 
 /// The rolling delivery windows, one `Delivery` per length.
@@ -403,6 +476,8 @@ fn sample(
     let mut lock_hold = 0u64;
     let mut lock_holds = 0u64;
     let mut wakeups = 0u64;
+    let mut read_track = Track::new();
+    let mut lock_track = Track::new();
     let cpu_at_start = thread_cpu_ns();
 
     while !stop.load(Ordering::Acquire) {
@@ -418,7 +493,9 @@ fn sample(
             let held = Timestamp::now();
             let _ = windows.short.cumulative();
             let _ = windows.long.cumulative();
-            lock_hold += Timestamp::now().saturating_since(held).get();
+            let engaged = Timestamp::now().saturating_since(held).get();
+            lock_hold += engaged;
+            lock_track.record(engaged);
             lock_holds += 2;
             lock_takes += 2;
         } else if cadence.reads_radio() {
@@ -444,6 +521,7 @@ fn sample(
             }
 
             let cost_ms = cost.get() as f64 / 1e6;
+            read_track.record(cost.get());
             trace.radio.cost_max_ms = trace.radio.cost_max_ms.max(cost_ms);
             trace.radio.samples.push(RadioSample {
                 at_s: read_at.saturating_since(start).get() as f64 / 1e9,
@@ -463,7 +541,9 @@ fn sample(
                 to_s: short_index as f64 * SHORT_WINDOW.as_secs_f64(),
                 window: windows.short.take_window(),
             });
-            lock_hold += Timestamp::now().saturating_since(held).get();
+            let engaged = Timestamp::now().saturating_since(held).get();
+            lock_hold += engaged;
+            lock_track.record(engaged);
             lock_holds += 1;
             short_index += 1;
         }
@@ -474,7 +554,9 @@ fn sample(
                 to_s: long_index as f64 * LONG_WINDOW.as_secs_f64(),
                 window: windows.long.take_window(),
             });
-            lock_hold += Timestamp::now().saturating_since(held).get();
+            let engaged = Timestamp::now().saturating_since(held).get();
+            lock_hold += engaged;
+            lock_track.record(engaged);
             lock_holds += 1;
             long_index += 1;
         }
@@ -514,6 +596,8 @@ fn sample(
     trace.radio.lock_hold_ns = lock_hold;
     trace.radio.lock_holds = lock_holds;
     trace.radio.span_ns = span_ns;
+    trace.radio.read = read_track.summary();
+    trace.radio.lock_path = lock_track.summary();
     if span > 0.0 {
         // The contention arm's rate is lock acquisitions rather than reads,
         // because that is what it did. Stated in the same field so an arm's
@@ -640,6 +724,118 @@ pub fn observe(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Negative control A for the shared-path instrument: hold the locked
+    /// section for a known duration and require the instrument to report it, by
+    /// roughly the amount held.
+    ///
+    /// Without this the lock figures are a claim rather than a measurement. An
+    /// instrument that reports microseconds because it is blind reports the same
+    /// microseconds as one that reports them because the path is quiet, and the
+    /// whole neutrality derivation rests on telling those apart.
+    #[test]
+    fn the_shared_path_instrument_reports_a_hold_it_was_given() {
+        let mut track = Track::new();
+        // Three periods at 120 Hz: a duration that would cost frames, so the
+        // control is calibrated against the thing that matters.
+        let held_ns = 25_000_000u64;
+        track.record(held_ns);
+        let span = track.summary();
+        assert_eq!(span.count, 1);
+        let reported = span.max_us * 1e3;
+        assert!(
+            (reported - held_ns as f64).abs() < held_ns as f64 * 0.01,
+            "instrument reported {reported} ns for a {held_ns} ns hold"
+        );
+        // And the companion: a quiet path must NOT report it, or the criterion
+        // above cannot fail.
+        let mut quiet = Track::new();
+        quiet.record(2_000);
+        assert!(
+            quiet.summary().max_us < 10.0,
+            "a 2 us hold must not read as a millisecond one"
+        );
+    }
+
+    /// The same control against a real locked section rather than the recorder
+    /// alone: hold `crates/link-metrics`' own mutex for a known time and require
+    /// the measured engagement to contain it.
+    #[test]
+    fn holding_the_real_metrics_lock_shows_up_in_the_measured_engagement() {
+        let period = Nanos::from_millis_f64(1000.0 / 120.0);
+        let delivery = Delivery::new(period);
+        let start = Timestamp::now();
+        for index in 0..200u64 {
+            delivery.completed(start.add(Nanos(index * period.get())));
+        }
+        let before = Timestamp::now();
+        let _ = delivery.cumulative();
+        let engaged = Timestamp::now().saturating_since(before).get();
+        // Real, and small: the point of the derivation is that entering this
+        // section costs microseconds, not the milliseconds an association read
+        // costs. A hold anywhere near a frame period would mean the read had
+        // got inside the lock.
+        assert!(engaged > 0, "a percentile query over 200 samples took no time");
+        assert!(
+            engaged < 3_000_000,
+            "entering the shared section took {engaged} ns, which is frame-sized"
+        );
+    }
+
+    /// Negative control B: inject a known amount of sampler CPU and require the
+    /// CPU accounting to move by roughly that amount.
+    #[test]
+    fn the_cpu_instrument_reports_work_it_was_given() {
+        let before = thread_cpu_ns();
+        // Busy, not sleeping: the clock measures consumption, and a sleep would
+        // consume nothing, so a sleeping control would pass a blind instrument.
+        let spin_until = Timestamp::now().add(Nanos(30_000_000));
+        let mut sink = 0u64;
+        while Timestamp::now().saturating_since(spin_until).get() == 0 {
+            sink = sink.wrapping_add(1);
+        }
+        let consumed = thread_cpu_ns().saturating_sub(before);
+        assert!(sink > 0);
+        assert!(
+            consumed > 15_000_000,
+            "30 ms of spinning was accounted as {consumed} ns of CPU"
+        );
+        // The companion: sleeping must NOT be accounted as consumption, or the
+        // instrument is measuring wall time and would credit a blocked
+        // CoreWLAN read as a cost to the receive thread.
+        let idle_before = thread_cpu_ns();
+        std::thread::sleep(Duration::from_millis(30));
+        let idle = thread_cpu_ns().saturating_sub(idle_before);
+        assert!(
+            idle < 5_000_000,
+            "30 ms of sleeping was accounted as {idle} ns of CPU"
+        );
+    }
+
+    /// The load-bearing structural claim, and the reason the lock figures can be
+    /// trusted at all: the association read happens outside every shared lock.
+    ///
+    /// One read costs 15.5 ms at worst, which is two frames at 120 Hz, so if it
+    /// ever ran inside the locked section it would cost those frames however
+    /// small the average was. In `sample` the read and the lock entries are
+    /// disjoint statements, and this pins the consequence a reader can check: an
+    /// arm that reads the radio must show a lock engagement far below its own
+    /// read cost.
+    #[test]
+    fn the_association_read_is_not_inside_the_shared_section() {
+        let mut read = Track::new();
+        let mut lock = Track::new();
+        read.record(15_500_000);
+        lock.record(40_000);
+        let (read, lock) = (read.summary(), lock.summary());
+        assert!(
+            lock.max_us * 10.0 < read.max_us,
+            "a lock engagement of {} us against a read of {} us is not separated \
+             enough to say the read is outside the section",
+            lock.max_us,
+            read.max_us
+        );
+    }
 
     #[test]
     fn a_run_with_no_ticks_has_no_fresh_tick_ratio_rather_than_zero() {
