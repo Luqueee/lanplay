@@ -286,6 +286,22 @@ mod tests {
     }
 
     #[test]
+    fn a_stale_generation_cannot_reenter_a_new_session() {
+        let mut host = GamepadHost::new();
+        host.attach(0, 9, |_| {});
+        host.submit(state(1), |_| {});
+        host.attach(0, 10, |_| {});
+        let mut stale = state(2);
+        stale.session_generation = 9;
+        let mut actions = Vec::new();
+        assert_eq!(
+            host.submit(stale, |action| actions.push(action)),
+            GamepadOutcome::WrongGeneration
+        );
+        assert!(actions.is_empty());
+    }
+
+    #[test]
     fn a_short_tap_is_observed_when_down_and_up_states_arrive() {
         let mut host = GamepadHost::new();
         host.attach(0, 9, |_| {});

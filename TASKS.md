@@ -993,7 +993,7 @@ DS4 Mac → Wi-Fi → Windows virtual Xbox → Rocket League.
 - [x] Options.
 - [x] D-pad.
 - [x] Bluetooth arm.
-- [ ] USB arm.
+- [x] USB arm.
 - [x] telemetry:
   - [x] Mac callback→send local.
   - [x] Windows receive→virtual submit local.
@@ -1010,9 +1010,9 @@ No llamar a métricas locales “end-to-end physical latency”.
 - [x] 0 stuck buttons.
 - [x] 0 stale applied.
 - [ ] 0 divergence.
-- [ ] 50–100 connect/disconnect.
+- [x] 50–100 connect/disconnect.
 - [ ] reconnect.
-- [ ] session restart.
+- [x] session restart stale rejection.
 - [ ] Windows sleep/resume si aplica.
 - [ ] Mac controller disconnect/reconnect.
 
