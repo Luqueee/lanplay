@@ -42,22 +42,31 @@ pub enum TransitionError {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SessionMachine {
     state: SessionState,
+    generation: u32,
 }
 
 impl SessionMachine {
     pub const fn new() -> Self {
         Self {
             state: SessionState::Disconnected,
+            generation: 0,
         }
     }
-
     pub const fn state(self) -> SessionState {
         self.state
+    }
+    pub const fn generation(self) -> u32 {
+        self.generation
+    }
+
+    pub const fn accepts_generation(self, generation: u32) -> bool {
+        generation != 0 && generation == self.generation
     }
 
     pub fn apply(&mut self, event: SessionEvent) -> Result<SessionState, TransitionError> {
         let next = match (self.state, event) {
             (SessionState::Disconnected, SessionEvent::ConnectRequested) => {
+                self.generation = self.generation.wrapping_add(1).max(1);
                 SessionState::Connecting
             }
             (SessionState::Connecting, SessionEvent::ConnectionEstablished) => {
@@ -70,6 +79,7 @@ impl SessionMachine {
             (SessionState::Starting, SessionEvent::MediaReady) => SessionState::Streaming,
             (SessionState::Streaming, SessionEvent::ConnectionLost) => SessionState::Reconnecting,
             (SessionState::Reconnecting, SessionEvent::ReconnectRequested) => {
+                self.generation = self.generation.wrapping_add(1).max(1);
                 SessionState::Connecting
             }
             (SessionState::Reconnecting, SessionEvent::Recovered) => SessionState::Streaming,
@@ -163,7 +173,10 @@ mod tests {
             SessionState::Reconnecting,
             SessionState::Failed,
         ] {
-            let mut machine = SessionMachine { state: start };
+            let mut machine = SessionMachine {
+                state: start,
+                generation: 1,
+            };
             machine
                 .apply(SessionEvent::StopRequested)
                 .expect("active state can stop");
@@ -172,5 +185,33 @@ mod tests {
                 Ok(SessionState::Disconnected)
             );
         }
+    }
+
+    #[test]
+    fn reconnect_increments_generation_and_rejects_old_messages() {
+        let mut machine = SessionMachine::new();
+        machine
+            .apply(SessionEvent::ConnectRequested)
+            .expect("first connection starts");
+        let first = machine.generation();
+        assert!(machine.accepts_generation(first));
+        machine
+            .apply(SessionEvent::ConnectionEstablished)
+            .expect("connection established");
+        machine
+            .apply(SessionEvent::NegotiationAccepted)
+            .expect("negotiation accepted");
+        machine
+            .apply(SessionEvent::StartAccepted)
+            .expect("stream started");
+        machine
+            .apply(SessionEvent::ConnectionLost)
+            .expect("stream lost");
+        machine
+            .apply(SessionEvent::ReconnectRequested)
+            .expect("reconnect requested");
+        assert_ne!(machine.generation(), first);
+        assert!(!machine.accepts_generation(first));
+        assert!(machine.accepts_generation(machine.generation()));
     }
 }

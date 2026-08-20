@@ -5,6 +5,7 @@
 
 mod capabilities;
 mod frame;
+mod negotiation;
 mod session;
 mod video;
 
@@ -13,5 +14,6 @@ pub use capabilities::{
 };
 pub use frame::{FrameId, FrameIdSource};
 
+pub use negotiation::{CapabilitySelection, CapabilitySet, NegotiationError, negotiate};
 pub use session::{SessionEvent, SessionMachine, SessionState, TransitionError};
 pub use video::{VideoCodec, VideoMode};
