@@ -13,8 +13,8 @@ use lanplay_input_protocol::{
 
 const SONY_VENDOR: u16 = 0x054c;
 const DS4_BLUETOOTH_PRODUCT: u16 = 0x09cc;
-const CONTROL_RETRY: Duration = Duration::from_millis(20);
-const CONTROL_DEADLINE: Duration = Duration::from_secs(2);
+const CONTROL_RETRY: Duration = Duration::from_millis(50);
+const CONTROL_DEADLINE: Duration = Duration::from_secs(10);
 
 #[derive(Parser)]
 struct Cli {
