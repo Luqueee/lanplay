@@ -9,6 +9,7 @@
 mod config;
 mod dscp;
 mod gate;
+mod monitor;
 mod nap;
 mod phase;
 mod preflight;
@@ -134,6 +135,23 @@ pub struct Cli {
     /// the requirement is real; a run with this set cannot pass the gate.
     #[arg(long)]
     pub allow_software_decoder: bool,
+    /// The passive monitor: a 1 Hz radio sampler and rolling delivery
+    /// windows, in the three tiers `NETWORK.md` fixed.
+    ///
+    /// `on` by default, because a monitor that has to be asked for is a
+    /// monitor that is not running when the session anybody cares about goes
+    /// wrong.
+    ///
+    /// The other two are a matched pair and neither is decoration. `off`
+    /// removes the thread, the association read and the extra delivery
+    /// bookkeeping entirely, which is the only arm a neutrality claim can be
+    /// measured against. `expensive` is the positive control: the same sampler
+    /// with its interval removed, reading CoreWLAN as fast as it will answer.
+    /// A comparison that cannot tell `expensive` from `on` has no power, and
+    /// then the absence of a difference between `on` and `off` says nothing
+    /// whatever about the monitor.
+    #[arg(long, value_enum, default_value_t = monitor::Cost::Cheap)]
+    pub monitor: monitor::Cost,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]

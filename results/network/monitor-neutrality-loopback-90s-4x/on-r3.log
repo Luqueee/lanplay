@@ -1,0 +1,155 @@
+fixture /Users/adria/Documents/programacion/projects/lanplay/fixtures/motion-1920x1080@120-10s-50M.h264 (1200 access units, 10 IDR)
+feeding 120 fps for 90 s (10800 access units), mode display link
+monitor: association read every 1 s, rolling 3 s and 30 s windows
+transport: RTP over UDP loopback to 127.0.0.1:56836, mtu 1200
+phase: off: nothing measured, nothing sent
+renderer: display-link mode on "Built-in Retina Display" (120 Hz nominal), drawable 2722x1530
+preflight: ok decoder — VideoToolbox reports hardware acceleration
+preflight: ok app-nap — LatencyCritical activity held for the run
+preflight: ok radio — channel 36 at 80 MHz wide, 5170-5250 MHz, -72 dBm
+preflight: complete
+
+VideoToolbox
+  submitted        10800
+  decoded          10800
+  errors/dropped   0 / 0
+  backlog          peak 1 frames, 0 at exit, +0.00 frames/min
+  decode           p50 1.13 ms p95 1.22 ms p99 1.34 ms max 5.14 ms
+
+Metal
+  display          119.97 Hz
+  rendered         10757
+  superseded       43
+  empty ticks      36
+  fresh ticks      99.7% (10757 of 10793 refreshes had a newer frame)
+  drawable wait    n=10757   p50=0.00 ms p95=0.00 ms p99=0.00 ms max=0.00 ms
+  encode cpu       n=10757   p50=0.04 ms p95=0.12 ms p99=0.14 ms max=0.60 ms
+
+Transport (RTP over UDP loopback)
+  access units     10800 sent, 10800 reconstructed, 0 verified, 0 mismatched
+  packets          484371 (9 single NAL, 484362 FU-A), 44.8 per access unit
+  wire             574.8 MB for 560.4 MB of access unit (2.6% overhead)
+  losses           0 lost, 0 malformed, 0 dropped AUs, 0 duplicates, 0 reordered
+  reordering       depth max 0, gap filled in 0.000 ms p50 / 0.000 ms p99 / 0.000 ms max over 0 gaps
+  rfc3550 jitter   0.00 ms
+  au delivery      n=10800 p50 8.34 ms p95 8.40 ms p99 8.45 ms max 9.43 ms
+  au start         n=10800 p50 8.34 ms p95 8.36 ms p99 8.38 ms max 9.25 ms
+  au late/min      >1.25T 0.0  >1.5T 0.0  >2T 0.0  >3T 0.0  >4T 0.0  >6T 0.0
+  au bunching      0.0 clusters/min, catch-up 0.0 mean / 0 max units, stall gap p50 0 ms p95 0 ms
+  service class    observed DSCP 0 (CS0/best effort) x484371
+  packetization    p50 0.00 ms p95 0.00 ms p99 0.00 ms
+  transit          p50 0.18 ms p95 0.24 ms p99 0.33 ms  (first byte out to last byte in)
+  serialisation    p50 0.17 ms p95 0.22 ms p99 0.31 ms  (overlaps transit)
+  arrival spread   p50 0.14 ms p95 0.19 ms p99 0.26 ms  (overlaps transit)
+  reassembly       p50 0.00 ms p95 0.00 ms p99 0.00 ms
+
+Pipeline
+  presentation wait p50 6.19 ms p95 6.59 ms p99 6.65 ms
+  phase alignment   off: nothing measured, nothing sent
+  render            p50 0.04 ms p95 0.12 ms p99 0.14 ms
+  frame age         p50 7.57 ms p95 7.96 ms p99 8.00 ms max 9.04 ms
+  unattributed gap  p50 0.00 ms p99 0.00 ms
+  cpu plane copies  0 (textures alias the decoder's IOSurfaces)
+  resident memory   155.5 MB -> 168.7 MB, -23.78 MB/min over 358 samples
+
+clock domain: local-mac
+
+segment              count       p50       p95       p99       max  kind
+capture                  0
+preprocess wait          0
+gpu preprocess           0
+admission wait           0
+encode                   0
+packetize wait           0
+packetization        10800   0.00 ms   0.00 ms   0.00 ms   0.01 ms  work
+transit              10800   0.18 ms   0.24 ms   0.33 ms   1.32 ms  wire
+reassembly           10800   0.00 ms   0.00 ms   0.00 ms   0.06 ms  work
+decoder wait         10800   0.00 ms   0.00 ms   0.01 ms   0.03 ms  wait
+decode               10800   1.13 ms   1.22 ms   1.34 ms   5.14 ms  work
+presentation wait    10757   6.19 ms   6.59 ms   6.65 ms   7.24 ms  wait
+render               10757   0.04 ms   0.12 ms   0.14 ms   0.61 ms  work
+serialisation        10800   0.17 ms   0.22 ms   0.31 ms   1.30 ms  diag
+arrival              10800   0.14 ms   0.19 ms   0.26 ms   0.46 ms  diag
+
+frame age            10757   7.57 ms   7.96 ms   8.00 ms   9.04 ms  
+local age            10757   7.57 ms   7.96 ms   8.00 ms   9.04 ms  
+unattributed gap     10757   0.00 ms   0.00 ms   0.00 ms   0.01 ms  
+present interval     10756   8.36 ms   8.45 ms   8.45 ms  22.54 ms  
+source interval      10756   8.36 ms   8.36 ms   8.36 ms  25.03 ms  
+
+presented 10757 frames in 89.68 s (119.9/s), started 10800, incomplete 43
+events 118714 recorded, 0 dropped, 0 duplicate, 0 late, 0 clipped, 0 cross-domain
+p99 backed by 107 tail observations from 10757 frames
+
+Windows
+        window    src/s   dec/s   rnd/s  tick/s     aup99   >2T/m  loss   agep99   super%  fresh%
+      0-10        119.2   119.2   115.1   115.1      8.50     0.0     0     8.06      3.5   100.0
+     10-20        120.1   120.0   119.9   119.9      8.50     0.0     0     7.96      0.1   100.0
+     20-30        119.9   120.0   120.0   120.0      8.45     0.0     0     7.86      0.0   100.0
+     30-40        120.0   120.0   120.0   120.0      8.41     0.0     0     7.80      0.0   100.0
+     40-50        120.0   120.0   120.0   120.0      8.43     0.0     0     7.70      0.0   100.0
+     50-60        120.0   120.0   120.0   120.0      8.42     0.0     0     7.57      0.0   100.0
+     60-70        120.0   120.0   120.0   120.0      8.40     0.0     0     7.47      0.0   100.0
+     70-80        120.0   120.0   120.0   120.0      8.41     0.0     0     7.41      0.0   100.0
+     80-90        120.0   120.0   120.0   120.0      8.42     0.0     0     7.27      0.0   100.0
+  worst callback drop between windows: 0.0% over 9 windows
+
+Monitor  on
+  radio       90 reads, 90 answered, 0 empty, 1.00/s achieved, worst read 14.23 ms
+  link        -72 dBm, noise -94 dBm, 576 Mbps, channel 36 at 80 MHz
+  short       29 windows of 3 s     aus   p50 ms   p99 ms    >2T/m   clus/m    gapp50
+        0-3                               362     8.34     8.45      0.0      0.0       0.0
+        3-6                               361     8.34     8.56      0.0      0.0       0.0
+        6-9                               361     8.34     8.50      0.0      0.0       0.0
+        9-12                              362     8.34     8.58      0.0      0.0       0.0
+       12-15                              362     8.34     8.44      0.0      0.0       0.0
+       15-18                              361     8.34     8.49      0.0      0.0       0.0
+       18-21                              362     8.34     8.45      0.0      0.0       0.0
+       21-24                              362     8.34     8.45      0.0      0.0       0.0
+       24-27                              361     8.34     8.45      0.0      0.0       0.0
+       27-30                              362     8.34     8.45      0.0      0.0       0.0
+       30-33                              362     8.34     8.40      0.0      0.0       0.0
+       33-36                              362     8.34     8.43      0.0      0.0       0.0
+       36-39                              361     8.34     8.40      0.0      0.0       0.0
+       39-42                              362     8.34     8.43      0.0      0.0       0.0
+       42-45                              361     8.33     8.40      0.0      0.0       0.0
+       45-48                              361     8.34     8.41      0.0      0.0       0.0
+       48-51                              363     8.34     8.42      0.0      0.0       0.0
+       51-54                              361     8.34     8.40      0.0      0.0       0.0
+       54-57                              361     8.34     8.42      0.0      0.0       0.0
+       57-60                              362     8.34     8.43      0.0      0.0       0.0
+       60-63                              362     8.34     8.42      0.0      0.0       0.0
+       63-66                              361     8.34     8.40      0.0      0.0       0.0
+       66-69                              362     8.34     8.41      0.0      0.0       0.0
+       69-72                              363     8.34     8.43      0.0      0.0       0.0
+       72-75                              362     8.34     8.41      0.0      0.0       0.0
+       75-78                              362     8.34     8.41      0.0      0.0       0.0
+       78-81                              361     8.34     8.41      0.0      0.0       0.0
+       81-84                              362     8.34     8.46      0.0      0.0       0.0
+       84-87                              361     8.34     8.44      0.0      0.0       0.0
+  long        2 windows of 30 s     aus   p50 ms   p99 ms    >2T/m   clus/m    gapp50
+        0-30                             3616     8.34     8.50      0.0      0.0       0.0
+       30-60                             3616     8.34     8.42      0.0      0.0       0.0
+report written to /Users/adria/Documents/programacion/projects/lanplay/results/network/monitor-neutrality-loopback-90s-4x/on-r3.json
+
+  [pass] pipeline run exercised            10800 access units submitted, 10800 frames decoded, 10800 decode timings, 10793 display callbacks, 10757 frames rendered, 484371 datagrams received, 10800 access unit intervals
+  [pass] pipeline hardware decoder         VTDecompressionSession reports hardware acceleration
+  [pass] pipeline input sustained          10800 access units submitted, 10800 expected at 120 fps
+  [pass] pipeline decode throughput        10800 decoded of 10800 submitted, 0 errors, 0 dropped
+  [pass] pipeline decoder backlog          peak 1 frames, 0 left at exit, growth +0.00 frames/min
+  [pass] pipeline frames accounted         10800 decoded = 10757 rendered + 43 superseded + 0 held
+  [pass] pipeline span accounted           10793 callbacks = 10757 rendered + 36 empty + 0 without a drawable
+  [pass] pipeline decoder keeps up         decoded 120.0/s against 120.0/s deliverable on a 120.0 Hz display
+  [pass] link     link holds cadence       access units arrive p50 8.34 ms p95 8.40 ms p99 8.45 ms max 9.43 ms over 10800 access units, against a 8.33 ms source period (2x allowed at p99)
+  [pass] pipeline presentation tracks arrival present interval p99 8.45 ms against arrival p99 8.45 ms plus one 8.33 ms period
+  [pass] pipeline no present stalls        worst present interval 22.54 ms against a 33.34 ms limit (4x the 8.34 ms present period); worst arrival gap 9.43 ms
+  [pass] pipeline memory stable            -3.23 MB/min in steady state (318 samples after 10000.00 ms), -23.78 MB/min including warm-up, peak 228.2 MB
+  [pass] pipeline instrumentation intact   0 dropped marks, 0 duplicate, 0 late
+  [pass] pipeline drops explained          43 frames never presented, 43 superseded + 0 held explain them (0 unexplained)
+  [pass] pipeline gap instrumented         10757 of 10757 presented frames have a measured gap, p99 0.00 ms
+  [pass] pipeline zero copy path           structural: CVMetalTextureCache textures over VideoToolbox pixel buffers, no CPU plane access on the render path
+  [pass] pipeline decode measured          p50 1.13 ms p95 1.22 ms p99 1.34 ms max 5.14 ms over 10800 frames
+  [pass] pipeline access units intact      10800 sent from here, 10800 reconstructed, 0 verified byte-for-byte, 0 mismatched
+  [pass] pipeline transport clean          0 lost, 0 malformed, 0 dropped AUs, 0 missing fragments, 0 send errors, 0 duplicates, 0 reordered
+  [note] transport cost   484371 packets (9 single NAL, 484362 FU-A), 1.0 bytes on the wire per byte of access unit, RFC 3550 jitter 0.00 ms
+gate: pipeline PASS, link PASS

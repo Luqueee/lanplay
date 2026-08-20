@@ -278,6 +278,12 @@ pub fn receive_loop(
     // Delivery cadence, timestamped where delivery happens rather than
     // inferred from when a frame was eventually shown.
     delivery: Arc<lanplay_link_metrics::Delivery>,
+    // The monitor's own rolling windows, which need the same two marks and
+    // must not drain the set above: `take_window` resets what it returns, so
+    // two consumers of one windowed set steal each other's data. `None` when
+    // the monitor is off, which costs the receive path one branch on a value
+    // that never changes rather than the marks themselves.
+    monitor: Option<Arc<crate::monitor::Windows>>,
     stop: Arc<AtomicBool>,
 ) -> Result<(ReceiverOutcome, VideoToolboxDecoder), Box<dyn Error + Send + Sync>> {
     socket.set_read_timeout(Some(RECV_TIMEOUT))?;
@@ -329,6 +335,9 @@ pub fn receive_loop(
                 // starts every unit on time and finishes some of them late
                 // has a different fault from one that starts them late.
                 delivery.first_seen(arrival);
+                if let Some(monitor) = &monitor {
+                    monitor.first_seen(arrival);
+                }
             }
             if packet.header.marker && marked.ended(frame) {
                 recorder.mark(frame, Stage::NetworkReceiveLast);
@@ -341,6 +350,9 @@ pub fn receive_loop(
             // could block: this is the instant the network finished with the
             // frame, and nothing downstream may be allowed to move it.
             delivery.completed(arrival);
+            if let Some(monitor) = &monitor {
+                monitor.completed(arrival);
+            }
             match ledger.check(unit.id, &unit.data) {
                 Some(true) => outcome.verified += 1,
                 Some(false) => outcome.mismatched += 1,

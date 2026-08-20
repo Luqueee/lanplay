@@ -23,6 +23,7 @@ hdrhistogram = { workspace = true }
 lanplay-capabilities = { workspace = true }
 lanplay-link-metrics = { workspace = true }
 lanplay-protocol = { workspace = true }
+lanplay-network-health = { workspace = true }
 lanplay-renderer-metal = { workspace = true }
 lanplay-telemetry = { workspace = true }
 lanplay-transport = { workspace = true }

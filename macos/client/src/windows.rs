@@ -91,11 +91,12 @@ pub fn sample(
             // it is the number a link configuration is ranked by: 100% means
             // every refresh opportunity was used, and bunching shows up here
             // before it shows up anywhere else.
-            fresh_pct: if ticks == 0 {
-                0.0
-            } else {
-                drawn as f64 * 100.0 / ticks as f64
-            },
+            //
+            // The percentage form of `monitor::fresh_tick_ratio`, which is the
+            // one definition of this quantity and where the reason it may never
+            // decide anything is recorded.
+            fresh_pct: crate::monitor::fresh_tick_ratio(drawn, ticks)
+                .map_or(0.0, |fraction| fraction * 100.0),
             // Delivery cadence, measured at the depacketiser. Replaces the
             // presentation-derived series, which said 141 ms at p99 while
             // the link was losing nothing at all.

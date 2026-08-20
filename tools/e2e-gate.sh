@@ -18,6 +18,10 @@
 #   BITRATE=50    encoder target, Mbps
 #   REPORT=path   where the client's JSON lands
 #   QUIET=1       suppress the client's own report; the caller reads the JSON
+#   MONITOR=on    the client's passive monitor: off, on, or expensive.
+#                 `expensive` is the positive control of
+#                 tools/monitor-neutrality-gate.sh and no other caller has any
+#                 reason to pass it.
 #
 # Everything the run needs on the Windows side must already be up: the
 # IDD-LAB controller (LanPlayIddLabCtl) and, for a synthetic source, a
@@ -59,11 +63,32 @@ LOCAL_IP="$(ipconfig getifaddr "$IFACE" || true)"
 media="$(ifconfig "$IFACE" | awk '/media:/{$1=""; print substr($0,2)}')"
 echo "link      $IFACE $LOCAL_IP, $media"
 
-# Reaching the host from that source address proves the path exists before a
-# measurement depends on it.
-ping -c 2 -t 2 -S "$LOCAL_IP" "$WIN_IP" >/dev/null 2>&1 ||
-    fail "no route to $WIN_IP from $LOCAL_IP"
-echo "route     $LOCAL_IP -> $WIN_IP reachable"
+# Reaching the host from that source address proves the host is up and routable
+# from this interface. It does not prove a UDP datagram reaches the media port,
+# and those are different failures: a firewall permitting 22 and dropping 5004
+# would pass here and then produce a run with no arrivals at all. What catches
+# that is the refusal downstream on a population of zero, not this check.
+#
+# ICMP first, because it is the cheapest answer, and a TCP handshake from the
+# same source address when ICMP says nothing. Nothing in this product sends an
+# ICMP echo, and the host's firewall has all three profiles enabled with no
+# inbound ICMPv4 allow rule - which is the Windows default, so every user of
+# this product has that host - so `ping` fails there while ssh, the control
+# plane and the media all work. A precondition that requires a capability the
+# product never uses refuses runs that would have worked, and its refusal reads
+# exactly like a real one. Opening ICMP on the host was rejected: that is
+# changing the machine to suit the instrument, and a harness that only works
+# after somebody opens ICMP does not work.
+#
+# The fallback goes to port 22 because the run already depends on it: the sender
+# is launched through the interactive session over ssh.
+if ping -c 2 -t 2 -S "$LOCAL_IP" "$WIN_IP" >/dev/null 2>&1; then
+    echo "route     $WIN_IP reachable from $LOCAL_IP, ICMP answered"
+elif nc -z -w 3 -s "$LOCAL_IP" "$WIN_IP" 22 >/dev/null 2>&1; then
+    echo "route     $WIN_IP reachable from $LOCAL_IP on tcp/22; ICMP is filtered"
+else
+    fail "$WIN_IP is not reachable from $LOCAL_IP: neither ICMP nor tcp/22 answered"
+fi
 
 [ -x "$CLIENT" ] || fail "build the client first: cargo build --release -p lanplay-client"
 
@@ -139,6 +164,7 @@ caffeinate -d "$CLIENT" \
     --seconds "$SECONDS_TO_RUN" --fixture-seconds 10 --fixture-dir "$REPO/fixtures" \
     --mode display-link $DISPLAY_ARG \
     --phase-align "${PHASE_ALIGN:-on}" \
+    --monitor "${MONITOR:-on}" \
     --window-seconds 10 --report "$REPORT" >"$CLIENT_LOG" 2>&1 &
 CLIENT_PID=$!
 trap 'kill "$CLIENT_PID" 2>/dev/null || true; restore_clocks' EXIT

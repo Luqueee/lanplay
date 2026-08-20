@@ -275,6 +275,46 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     // same number would eventually disagree.
     let source_period = Nanos::from_millis_f64(1000.0 / feed_fps.max(1.0));
     let delivery = Arc::new(lanplay_link_metrics::Delivery::new(source_period));
+    // The passive monitor, started before anything is receiving so its first
+    // window covers the first access unit rather than beginning wherever the
+    // thread happened to get scheduled. It shares the run's stop flag: a
+    // monitor that could end its trace early would report a quiet window it
+    // had stopped watching.
+    //
+    // Its absence stops nothing. `--monitor off` returns a monitor with no
+    // thread and no windows, every accessor still answers, and the report says
+    // so instead of inventing a tier.
+    let monitor = crate::monitor::Monitor::start(cli.monitor, source_period, Arc::clone(&stop));
+    println!(
+        "monitor: {}",
+        match cli.monitor {
+            crate::monitor::Cost::Off =>
+                "off, no radio sampler and no rolling windows".to_string(),
+            crate::monitor::Cost::Cheap => format!(
+                "association read every {:.0} s, rolling {:.0} s and {:.0} s windows",
+                crate::monitor::RADIO_INTERVAL.as_secs_f64(),
+                crate::monitor::SHORT_WINDOW.as_secs_f64(),
+                crate::monitor::LONG_WINDOW.as_secs_f64()
+            ),
+            crate::monitor::Cost::Expensive => format!(
+                "POSITIVE CONTROL by frequency: association reads with no \
+                 interval, rolling {:.0} s and {:.0} s windows. If a comparison \
+                 cannot see this arm, the finding is that the machine had \
+                 headroom.",
+                crate::monitor::SHORT_WINDOW.as_secs_f64(),
+                crate::monitor::LONG_WINDOW.as_secs_f64()
+            ),
+            crate::monitor::Cost::Contend => format!(
+                "POSITIVE CONTROL by mechanism: no radio read at all, taking \
+                 lanplay-link-metrics' own mutex - the one the receive thread \
+                 takes on every access unit - as fast as it will be granted, \
+                 rolling {:.0} s and {:.0} s windows. If a comparison cannot \
+                 see this arm, the finding is that the comparison is blind.",
+                crate::monitor::SHORT_WINDOW.as_secs_f64(),
+                crate::monitor::LONG_WINDOW.as_secs_f64()
+            ),
+        }
+    );
     // Cloned before the decoder is moved into whichever thread submits to it.
     let decoder_counters = decoder.counters();
     let decoder_status = decoder_counters.clone();
@@ -309,6 +349,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             let receive_arrived = Arc::clone(&arrived);
             let receive_highest = Arc::clone(&highest_frame);
             let receive_delivery = Arc::clone(&delivery);
+            let receive_monitor = monitor.windows();
             let receiver = thread::Builder::new()
                 .name("rtp-rx".into())
                 .spawn(move || {
@@ -321,6 +362,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                         receive_arrived,
                         receive_highest,
                         Arc::clone(&receive_delivery),
+                        receive_monitor,
                         receive_stop,
                     )
                 })?;
@@ -368,6 +410,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             let receive_stop = Arc::clone(&stop);
             let receive_progress = Arc::clone(&progress);
             let receive_delivery = Arc::clone(&delivery);
+            let receive_monitor = monitor.windows();
             let receive_highest = Arc::clone(&highest_frame);
             let receiver = thread::Builder::new()
                 .name("rtp-rx".into())
@@ -381,6 +424,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
                         receive_progress,
                         receive_highest,
                         Arc::clone(&receive_delivery),
+                        receive_monitor,
                         receive_stop,
                     )
                 })?;
@@ -535,6 +579,13 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
     let outcome = pipeline.join()?;
     let memory = memory_sampler.join().expect("memory sampler");
     let mut slices = sampler.join().expect("window sampler");
+    // Stopped with the rest of the run, and before the report is assembled so
+    // its last window is closed rather than half open.
+    let monitor_cadence = monitor.cadence();
+    // Read from the live slot before the thread is joined, which is the read a
+    // consumer on a deadline would make: one lock, five scalars, no scan.
+    let monitor_radio = monitor.radio();
+    let monitor_trace = monitor.stop();
     // Joined before the snapshot below, because the loop holds a telemetry
     // handle and the snapshot can only be taken once the last one is gone.
     let phase = match phase_loop {
@@ -591,6 +642,7 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             slices.len()
         );
     }
+    print_monitor(monitor_cadence, &monitor_trace);
     if let Some(path) = &cli.report {
         let json = build_report(
             cli,
@@ -602,6 +654,10 @@ pub fn run(cli: &Cli) -> Result<bool, Box<dyn Error>> {
             &snapshot,
             &phase,
             delivery.cumulative(),
+            monitor_cadence,
+            monitor_radio,
+            &monitor_trace,
+            &memory,
             slices,
         );
         std::fs::write(path, serde_json::to_string_pretty(&json)?)?;
@@ -686,6 +742,90 @@ fn print_windows(windows: &[crate::report::Window]) {
             window.frame_age_p99_ms,
             window.superseded_pct,
             window.fresh_pct
+        );
+    }
+}
+
+/// The monitor's own account of the run: the radio trace and both windows.
+///
+/// Printed rather than left to the JSON because the claim this whole component
+/// rests on - a 1 Hz association read costs nothing - is only checkable against
+/// what the sampler actually achieved and what its worst read cost. A sampler
+/// asked for 1 Hz that delivered 0.4 Hz was measuring its own cost, and a read
+/// that took hundreds of milliseconds was not the passive one this tier claims.
+fn print_monitor(cadence: crate::monitor::Cost, trace: &crate::monitor::Trace) {
+    if cadence == crate::monitor::Cost::Off {
+        println!();
+        println!("Monitor  off: no radio sampler, no rolling windows");
+        return;
+    }
+    println!();
+    println!("Monitor  {}", cadence.label());
+    println!(
+        "  radio       {} reads, {} answered, {} empty, {:.2}/s achieved, worst read {:.2} ms",
+        trace.radio.samples.len(),
+        trace.radio.answered,
+        trace.radio.empty,
+        trace.radio.reads_per_s,
+        trace.radio.cost_max_ms
+    );
+    // The newest answered sample rather than the first: what the link was when
+    // the run ended is what a diagnosis printed now would be about.
+    match trace
+        .radio
+        .samples
+        .iter()
+        .rev()
+        .find_map(|sample| sample.hint)
+    {
+        Some(hint) => println!(
+            "  link        {} dBm, noise {} dBm, {:.0} Mbps, channel {} at {} MHz",
+            hint.rssi_dbm, hint.noise_dbm, hint.tx_rate_mbps, hint.channel, hint.width_mhz
+        ),
+        None => println!("  link        CoreWLAN answered nothing; the radio tier is absent"),
+    }
+    for event in &trace.radio.moved {
+        println!("  moved       {event}");
+    }
+    print_slices("short", crate::monitor::SHORT_WINDOW.as_secs_f64(), &trace.short);
+    print_slices("long", crate::monitor::LONG_WINDOW.as_secs_f64(), &trace.long);
+}
+
+/// One length of rolling window, as the tier that decides sees it.
+///
+/// Both lengths are provisional: N3 fixes them from recorded sessions, so the
+/// length is printed beside the label rather than left implicit in a constant
+/// somebody has to go and read.
+fn print_slices(label: &str, seconds: f64, slices: &[crate::monitor::Slice]) {
+    if slices.is_empty() {
+        println!("  {label:<11} no window of {seconds:.0} s closed; cadence uncounted");
+        return;
+    }
+    println!(
+        "  {:<11} {} windows of {:.0} s  {:>6} {:>8} {:>8} {:>8} {:>8} {:>9}",
+        label,
+        slices.len(),
+        seconds,
+        "aus",
+        "p50 ms",
+        "p99 ms",
+        ">2T/m",
+        "clus/m",
+        "gapp50"
+    );
+    for slice in slices {
+        let window = slice.window;
+        println!(
+            "    {:>5.0}-{:<6.0}                       {:>6} {:>8.2} {:>8.2} {:>8.1} {:>8.1} \
+             {:>9.1}",
+            slice.from_s,
+            slice.to_s,
+            window.delivered,
+            window.p50_ms,
+            window.p99_ms,
+            window.tail.per_minute(2, window.span_s),
+            window.tail.clusters_per_minute(window.span_s),
+            window.tail.stall_gap_p50_ms
         );
     }
 }
@@ -1103,6 +1243,19 @@ fn build_report(
     // Delivery cadence, already summarised: measured at the depacketiser, so
     // it stays valid whatever the display was doing.
     link: lanplay_link_metrics::Window,
+    // What the monitor was asked to cost, and what it saw. Passed rather than
+    // read from `cli` again so a report can never disagree with the monitor
+    // that produced it.
+    monitor_cadence: crate::monitor::Cost,
+    // The hint the sampler was holding when the run ended, read from its live
+    // slot rather than recovered from the trace. The slot is what a live
+    // consumer reads and the trace is the record of it, so taking the value
+    // from the slot is what makes the two checkable against each other.
+    radio: Option<lanplay_network_health::RadioHint>,
+    monitor_trace: &crate::monitor::Trace,
+    // Resident memory, so the ten-minute leak question has a structured answer
+    // rather than a sentence in the printed report.
+    memory: &Trend,
     slices: Vec<crate::report::Window>,
 ) -> crate::report::Report {
     let arrival = snapshot.segment(Segment::Arrival);
@@ -1153,6 +1306,16 @@ fn build_report(
         ));
     }
 
+    // A run whose radio changed channel or width underneath it is not a
+    // sample of the conditions it is labelled with. `tools/link-arm.sh` throws
+    // such runs away and two datasets were lost for want of exactly that
+    // check; the monitor sees it once a second from inside the run, so it goes
+    // where this client already says its numbers cannot be trusted rather than
+    // into a mechanism of its own.
+    for event in &monitor_trace.radio.moved {
+        invalidating.push(event.clone());
+    }
+
     // Whether anything below the display link is a measurement at all.
     let cadence_valid = expected_ticks <= 0.0 || (render.callbacks as f64) >= expected_ticks * 0.5;
 
@@ -1162,6 +1325,55 @@ fn build_report(
         .transport
         .as_ref()
         .and_then(|transport| transport.dscp.dominant());
+
+    // One definition, three consumers: the display tier's percentage, the
+    // per-window column, and the experience tier's fraction. The reason it may
+    // not decide anything is recorded where it is defined.
+    let fresh =
+        crate::monitor::fresh_tick_ratio(render.rendered, span_end.callbacks(render.callbacks));
+    let experience = lanplay_network_health::Experience {
+        fresh_tick_ratio: fresh,
+        // Absent for a run that presented nothing, for the same reason: the
+        // client's `local_age` is measured to presentation, so a run with no
+        // display has no age rather than an age of zero.
+        frame_age_p99_ms: fresh.map(|_| snapshot.local_age.p99.as_millis_f64()),
+        // Audio, which this client does not carry. Stated absent rather than
+        // zero: no concealer ran, so nothing concealed nothing.
+        concealed_ratio: None,
+        silence_events: None,
+    };
+
+    // The three tiers as the contract holds them, once per window length: the
+    // newest closed window of each, because that is what a live consumer would
+    // have been looking at when the run ended.
+    //
+    // A refusal rather than a tier full of zeroes when either precondition is
+    // missing - no window of that length closed, or the run received no
+    // datagrams at all - because a `Window` of every counter at zero reads as a
+    // flawless link and a loss of none over a population of none reads as a
+    // link that lost nothing. Both are absence of evidence used as evidence,
+    // and `REFUSED` is a separate outcome from a finding.
+    //
+    // Loss is datagrams over datagrams: what the receiver accepted plus what
+    // never came. The sender's own count is not comparable on this clock, and
+    // dividing datagram loss by the access unit count - which the `stream`
+    // section above states - read 30.8 per cent reorder where the datagram
+    // fraction is nearer one per cent.
+    let observe = |window: Option<lanplay_link_metrics::Window>| {
+        crate::monitor::observe(
+            window,
+            radio,
+            rx.lost,
+            rx.packets,
+            rx.reordered,
+            experience,
+        )
+    };
+    let observation = observe(monitor_trace.newest_short().map(|slice| slice.window))
+        .and_then(|short| {
+            observe(monitor_trace.newest_long().map(|slice| slice.window))
+                .map(|long| (short, long))
+        });
 
     crate::report::Report {
         run: crate::report::Run {
@@ -1243,14 +1455,15 @@ fn build_report(
             rendered: render.rendered,
             superseded: render.superseded,
             empty_refreshes: span_end.empty_ticks(render.empty_ticks),
-            fresh_tick_ratio: {
-                let ticks = span_end.callbacks(render.callbacks);
-                if ticks == 0 {
-                    0.0
-                } else {
-                    render.rendered as f64 * 100.0 / ticks as f64
-                }
-            },
+            // The percentage form of the one definition in `monitor`, kept a
+            // percentage under a name that says ratio because sixty-three
+            // committed sessions carry it that way and
+            // `crates/network-health`'s corpus reader divides it by a hundred.
+            // Zero for a run with no tick, which is what this field has always
+            // said; the honest absence is in the experience tier below.
+            fresh_tick_ratio: fresh
+                .map(|fraction| fraction * 100.0)
+                .unwrap_or(0.0),
             callback_interval_p50_ms: render.callback_interval.p50.as_millis_f64(),
             callback_interval_p95_ms: render.callback_interval.p95.as_millis_f64(),
             callback_interval_p99_ms: render.callback_interval.p99.as_millis_f64(),
@@ -1268,7 +1481,139 @@ fn build_report(
             link_pauses: render.link_pauses,
             app_nap_protection: true,
         },
+        observation: observation.as_ref().ok().map(|(short, long)| {
+            crate::report::Observation {
+            radio: short.radio.map(|hint| crate::report::RadioHint {
+                rssi_dbm: hint.rssi_dbm,
+                noise_dbm: hint.noise_dbm,
+                tx_rate_mbps: hint.tx_rate_mbps,
+                channel: hint.channel,
+                width_mhz: hint.width_mhz,
+            }),
+            stream_short: behaviour(
+                "short",
+                crate::monitor::SHORT_WINDOW.as_secs_f64(),
+                &short.stream,
+            ),
+            stream_long: behaviour(
+                "long",
+                crate::monitor::LONG_WINDOW.as_secs_f64(),
+                &long.stream,
+            ),
+            experience: crate::report::Experience {
+                fresh_tick_ratio: short.experience.fresh_tick_ratio,
+                frame_age_p99_ms: short.experience.frame_age_p99_ms,
+            },
+            }
+        }),
+        observation_refused: observation.as_ref().err().cloned(),
+        monitor: crate::report::Monitor {
+            cadence: monitor_cadence.label(),
+            radio_reads: monitor_trace.radio.samples.len() as u64,
+            radio_answered: monitor_trace.radio.answered,
+            radio_empty: monitor_trace.radio.empty,
+            radio_reads_per_s: monitor_trace.radio.reads_per_s,
+            radio_cost_max_ms: monitor_trace.radio.cost_max_ms,
+            radio_lock_takes: monitor_trace.radio.lock_takes,
+            short_windows: monitor_trace.short.len(),
+            long_windows: monitor_trace.long.len(),
+            short: monitor_trace.short.iter().map(monitor_window).collect(),
+            long: monitor_trace.long.iter().map(monitor_window).collect(),
+            radio_trace: monitor_trace
+                .radio
+                .samples
+                .iter()
+                .map(|sample| crate::report::RadioSample {
+                    at_s: sample.at_s,
+                    rssi_dbm: sample.hint.map(|hint| hint.rssi_dbm),
+                    noise_dbm: sample.hint.map(|hint| hint.noise_dbm),
+                    tx_rate_mbps: sample.hint.map(|hint| hint.tx_rate_mbps),
+                    channel: sample.hint.map(|hint| hint.channel),
+                    width_mhz: sample.hint.map(|hint| hint.width_mhz),
+                    cost_ms: sample.cost_ms,
+                })
+                .collect(),
+        },
+        memory: {
+            let steady = memory.after_warmup(crate::gate::MEMORY_WARMUP);
+            let mb = |bytes: f64| bytes / 1_048_576.0;
+            crate::report::Memory {
+                samples: memory.count(),
+                first_mb: memory.first().map_or(0.0, mb),
+                last_mb: memory.last().map_or(0.0, mb),
+                max_mb: memory.max().map_or(0.0, mb),
+                slope_mb_per_min: memory.slope_per_minute().map(mb),
+                steady_slope_mb_per_min: steady.slope_per_minute().map(mb),
+                steady_samples: steady.count(),
+                allowed_mb_per_min: mb(crate::gate::MAX_MEMORY_GROWTH),
+                warmup_ms: crate::gate::MEMORY_WARMUP.get() as f64 / 1e6,
+            }
+        },
         windows: slices,
+    }
+}
+
+/// One rolling window as the report states it.
+///
+/// The rates are derived from the window's own span rather than from its
+/// nominal length: a window whose first access unit arrived late covers less
+/// time than it is labelled with, and dividing by the label would understate
+/// every crossing rate in it.
+fn monitor_window(slice: &crate::monitor::Slice) -> crate::report::MonitorWindow {
+    let window = slice.window;
+    crate::report::MonitorWindow {
+        from_s: slice.from_s,
+        to_s: slice.to_s,
+        span_s: window.span_s,
+        delivered: window.delivered,
+        au_interval_p50_ms: window.p50_ms,
+        au_interval_p99_ms: window.p99_ms,
+        over_2t: window.tail.over[2],
+        over_2t_per_min: window.tail.per_minute(2, window.span_s),
+        clusters: window.tail.clusters,
+        clusters_per_min: window.tail.clusters_per_minute(window.span_s),
+        stall_gap_p50_ms: window.tail.stall_gap_p50_ms,
+        stall_gap_p95_ms: window.tail.stall_gap_p95_ms,
+    }
+}
+
+/// The middle tier as the report states it.
+///
+/// A `StreamBehaviour` only exists when a window closed and a datagram
+/// population was non-empty, so nothing here is optional. The refusal that
+/// takes its place lives in `observation_refused`, which is what keeps "the
+/// link was fine" and "nothing was measured" from serialising the same way.
+///
+/// `Incidence::population` is `Option` because the corpus contains envelopes
+/// that state a numerator and no denominator. A live run always has both, so
+/// the absence is expected never to occur here and is stated as zero rather
+/// than hidden - a zero population beside a non-zero event count is visibly
+/// wrong, which is what a reader needs it to be.
+fn behaviour(
+    window: &'static str,
+    seconds: f64,
+    stream: &lanplay_network_health::StreamBehaviour,
+) -> crate::report::StreamBehaviour {
+    let delivery = stream.delivery;
+    crate::report::StreamBehaviour {
+        window,
+        window_seconds: seconds,
+        span_s: delivery.span_s,
+        delivered: delivery.delivered,
+        au_interval_p50_ms: delivery.p50_ms,
+        au_interval_p99_ms: delivery.p99_ms,
+        over_2t_per_min: delivery.tail.per_minute(2, delivery.span_s),
+        clusters_per_min: delivery.tail.clusters_per_minute(delivery.span_s),
+        stall_gap_p50_ms: delivery.tail.stall_gap_p50_ms,
+        stall_gap_p95_ms: delivery.tail.stall_gap_p95_ms,
+        // The corpus reader looks for exactly these two beside the ratio, so a
+        // live session is readable by the same parser as a committed one.
+        loss_events: stream.loss_ratio.map_or(0, |loss| loss.events()),
+        loss_population: stream.loss_ratio.map_or(0, |loss| loss.population()),
+        loss_ratio: stream.loss_ratio.map_or(0.0, |loss| loss.value()),
+        reorder_events: stream.reorder.events(),
+        reorder_population: stream.reorder.population().unwrap_or(0),
+        reorder_ratio: stream.reorder.value().unwrap_or(0.0),
     }
 }
 

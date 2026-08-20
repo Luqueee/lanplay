@@ -20,7 +20,69 @@ pub struct Report {
     /// was trying to shrink.
     pub phase: Phase,
     pub environment: Environment,
+    /// The observation contract's three tiers, beside the structs above
+    /// rather than inside them.
+    ///
+    /// `NETWORK.md` separates what the radio was doing, what the stream did
+    /// and what the user got, and only the middle one decides. That
+    /// separation is not a new idea imposed on this report - `network`,
+    /// `delivery`, `decode` and `display` above are already four tiers kept
+    /// apart because delivery cadence used to be read off the presentation
+    /// clock. This is the same separation stated in the vocabulary
+    /// `crates/network-health` fixed, so an offline classifier can be handed
+    /// exactly what a live one would see.
+    ///
+    /// Absent when nothing could be observed, in which case
+    /// `observation_refused` below names the missing precondition.
+    pub observation: Option<Observation>,
+    /// Why there is no observation, when there is none.
+    ///
+    /// Exactly one of this and `observation` is present, and this one names the
+    /// missing precondition: a rolling window that never closed, or a run that
+    /// received no datagrams. `REFUSED` is a separate outcome from a finding,
+    /// so a reader must be able to tell "the link was fine" from "nothing was
+    /// measured", and the same shape is already used by `phase` above.
+    pub observation_refused: Option<String>,
+    /// What the monitor itself did, which the tiers above cannot say.
+    ///
+    /// Its cadence, its radio trace and its rolling windows. A run compared
+    /// against another to prove the monitor costs nothing has to state which
+    /// monitor it was running, and a comparison whose arms are told apart by
+    /// the harness's own bookkeeping rather than by the artefact is a
+    /// comparison whose labels nobody can check.
+    pub monitor: Monitor,
+    /// Resident memory across the run.
+    ///
+    /// Here rather than only in the printed report because the gate already
+    /// decides on it and a harness that needed the same number was reduced to
+    /// parsing a sentence. A ten-minute soak is the one run that can say
+    /// whether a component added to this client leaks, and the figure it turns
+    /// on has to be readable without a regex.
+    pub memory: Memory,
     pub windows: Vec<Window>,
+}
+
+/// Resident memory, as the leak check sees it.
+#[derive(Serialize)]
+pub struct Memory {
+    pub samples: usize,
+    pub first_mb: f64,
+    pub last_mb: f64,
+    pub max_mb: f64,
+    /// `None` when fewer than three samples were taken, which is a run too
+    /// short to fit a line through rather than a run that did not grow. A slope
+    /// of zero would say the opposite.
+    pub slope_mb_per_min: Option<f64>,
+    /// The same slope with the warm-up excluded, which is the one the gate
+    /// decides on: filling a decoder pool, compiling a shader and reading a
+    /// fixture each cost memory once, and a line fitted through them reads as a
+    /// leak on any short run.
+    pub steady_slope_mb_per_min: Option<f64>,
+    pub steady_samples: usize,
+    /// What the gate allows, so a reader comparing the slope against a
+    /// threshold does not have to find the threshold in a different file.
+    pub allowed_mb_per_min: f64,
+    pub warmup_ms: f64,
 }
 
 #[derive(Serialize)]
@@ -310,4 +372,180 @@ pub struct Window {
     pub au_loss: u64,
     /// The client's `local_age`, not the sender's frame age.
     pub frame_age_p99_ms: f64,
+}
+
+/// One observation of the link, in the three tiers `NETWORK.md` fixed.
+///
+/// The JSON projection of `lanplay_network_health::NetworkObservation`, which
+/// is the type the monitor actually holds. Projected rather than serialised
+/// directly because the contract crate carries no `serde` dependency and
+/// should not grow one to satisfy this file: every other tier in this report
+/// is a projection of something measured elsewhere for the same reason.
+#[derive(Serialize)]
+pub struct Observation {
+    /// `None` when CoreWLAN did not answer, or when no monitor ran. Diagnostic
+    /// only: it answers *why* and never *whether*. A link at -48 dBm
+    /// negotiating 1200 Mbps produced concealment from 0.196 to 7.442 per cent
+    /// across the ten arms of `results/audio/jitter-target-a8` while 3 dB of
+    /// signal between those arms moved the negotiated rate by nothing at all.
+    pub radio: Option<RadioHint>,
+    /// The only tier that decides, and the newest closed short window of it:
+    /// what something that has to react at all would have been looking at when
+    /// the run ended.
+    pub stream_short: StreamBehaviour,
+    /// The same tier over the newest closed long window, which is here so that
+    /// nothing reacts to one spike. Both lengths rather than one because that
+    /// is the whole reason there are two, and a report carrying only the short
+    /// one would leave the long one unfalsifiable.
+    pub stream_long: StreamBehaviour,
+    /// What the user got. Feeds the interface, indicts nothing.
+    pub experience: Experience,
+}
+
+#[derive(Serialize)]
+pub struct RadioHint {
+    pub rssi_dbm: i64,
+    pub noise_dbm: i64,
+    /// The negotiated rate, which is a ceiling on throughput and not
+    /// throughput.
+    pub tx_rate_mbps: f64,
+    pub channel: i64,
+    pub width_mhz: u32,
+}
+
+/// What the stream did, over the window this observation is about.
+#[derive(Serialize)]
+pub struct StreamBehaviour {
+    /// Which window this is: `short` or `long`, and how long each was. Stated
+    /// in the artefact because both lengths are provisional - N3 fixes them
+    /// from recorded sessions - and a reader must never have to guess which
+    /// build wrote the row in front of them.
+    pub window: &'static str,
+    pub window_seconds: f64,
+    /// A window that actually closed, always. An observation is refused rather
+    /// than reported when no window of this length has closed yet, because a
+    /// `Window` of every counter at zero reads as a flawless link and the
+    /// refusal is a different outcome from a finding. `observation_refused`
+    /// above carries the reason when this section is absent.
+    pub span_s: f64,
+    pub delivered: u64,
+    pub au_interval_p50_ms: f64,
+    pub au_interval_p99_ms: f64,
+    /// Counted crossings of two source periods a minute, which is the multiple
+    /// every comparison in this corpus is already written in.
+    pub over_2t_per_min: f64,
+    pub clusters_per_min: f64,
+    /// Interval between the starts of consecutive stalls. A tight distribution
+    /// indicts a timer - a scan, a beacon, a power-save cycle - and a broad one
+    /// indicts contention, and those need different actions. Not poolable
+    /// across windows, which is why each length keeps its own histogram.
+    pub stall_gap_p50_ms: f64,
+    pub stall_gap_p95_ms: f64,
+    /// Datagrams that never arrived, over what the receiver accepted plus what
+    /// never came. Datagrams over datagrams: the `stream` section above counts
+    /// loss in datagrams and `expected` in access units, and the ratio of those
+    /// two read 30.8 per cent reorder where the datagram fraction is nearer
+    /// one, because a 40 Mbps access unit at 120 fps is some thirty-five
+    /// datagrams.
+    pub loss_events: u64,
+    pub loss_population: u64,
+    pub loss_ratio: f64,
+    pub reorder_events: u64,
+    pub reorder_population: u64,
+    pub reorder_ratio: f64,
+}
+
+/// What the user got, and the tier that is structurally barred from deciding.
+#[derive(Serialize)]
+pub struct Experience {
+    /// The fraction of display ticks that presented a frame newer than the one
+    /// presented at the tick before. A fraction in 0..1, unlike
+    /// `display.fresh_tick_ratio` above, which is the same quantity as a
+    /// percentage and stays that way because sixty-three committed sessions
+    /// carry it and one reader already divides it by a hundred.
+    ///
+    /// `None` when no tick was counted - a run with no display, which is every
+    /// link-only arm - because zero would claim every refresh was stale.
+    pub fresh_tick_ratio: Option<f64>,
+    pub frame_age_p99_ms: Option<f64>,
+}
+
+/// What the monitor did, and what it cost to do it.
+#[derive(Serialize)]
+pub struct Monitor {
+    /// `off`, `on` or `expensive`. Three states rather than a flag, because
+    /// `expensive` is the positive control the neutrality comparison has to
+    /// detect before its failure to detect `on` means anything.
+    pub cadence: &'static str,
+    /// Association reads attempted, and how many CoreWLAN answered. An empty
+    /// read is recorded rather than skipped: a sampler that drops its failures
+    /// reports a clean trace over a radio that was not there.
+    pub radio_reads: u64,
+    pub radio_answered: u64,
+    pub radio_empty: u64,
+    /// Reads a second the sampler actually achieved, so the expensive control
+    /// states what it did rather than what it was asked for.
+    pub radio_reads_per_s: f64,
+    /// Worst single association read. One costs 3.2 ms at p50 and 15.5 ms at
+    /// worst on this machine, measured by
+    /// `tools/radio-sample/examples/read-cost.rs`; a scan costs hundreds of
+    /// milliseconds, so a figure in that range would say the read was not the
+    /// passive one this tier claims.
+    pub radio_cost_max_ms: f64,
+    /// Times the contention control took `crates/link-metrics`' own mutex, the
+    /// one the receive thread takes on every access unit. Zero for every other
+    /// cadence. The mechanism that control exercises, counted, so an arm's
+    /// artefact states what it did rather than what it was named.
+    pub radio_lock_takes: u64,
+    pub short_windows: usize,
+    pub long_windows: usize,
+    /// Every closed window of each length, in cadence alone.
+    ///
+    /// Cadence and not the whole middle tier, because loss and reorder are
+    /// counted at the socket over the run and there is no per-window figure for
+    /// either. Putting a run total in a three-second row would let a reader
+    /// difference two rows and get a loss that never happened.
+    pub short: Vec<MonitorWindow>,
+    pub long: Vec<MonitorWindow>,
+    /// Every association read, so the radio trace can be read beside the
+    /// windows rather than only as a summary.
+    pub radio_trace: Vec<RadioSample>,
+}
+
+#[derive(Serialize)]
+pub struct RadioSample {
+    pub at_s: f64,
+    pub rssi_dbm: Option<i64>,
+    pub noise_dbm: Option<i64>,
+    pub tx_rate_mbps: Option<f64>,
+    pub channel: Option<i64>,
+    pub width_mhz: Option<u32>,
+    pub cost_ms: f64,
+}
+
+/// One closed rolling window, in the quantities `classify` reads.
+///
+/// Rates are derived here rather than left as counts because a rate is the
+/// figure two windows of different length can be compared on, and both the
+/// counts and the span are stated beside them so the derivation can be checked.
+#[derive(Serialize)]
+pub struct MonitorWindow {
+    pub from_s: f64,
+    pub to_s: f64,
+    /// Wall time the window actually covered, which is not its nominal length:
+    /// a window whose first access unit arrived late covers less.
+    pub span_s: f64,
+    pub delivered: u64,
+    pub au_interval_p50_ms: f64,
+    pub au_interval_p99_ms: f64,
+    pub over_2t: u64,
+    pub over_2t_per_min: f64,
+    pub clusters: u64,
+    pub clusters_per_min: f64,
+    /// Interval between the starts of consecutive stalls, inside this window
+    /// alone. Each length keeps its own histogram because a percentile cannot
+    /// be pooled from percentiles, and this is the field that makes that
+    /// matter: `classify` reads it.
+    pub stall_gap_p50_ms: f64,
+    pub stall_gap_p95_ms: f64,
 }

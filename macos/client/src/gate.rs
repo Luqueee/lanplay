@@ -17,9 +17,9 @@ const MAX_TRAILING_BACKLOG: usize = 2;
 /// Backlog growth that counts as accumulation, in frames per minute.
 const MAX_BACKLOG_GROWTH: f64 = 0.5;
 /// Resident memory growth that counts as a leak, in bytes per minute.
-const MAX_MEMORY_GROWTH: f64 = 1_048_576.0;
+pub const MAX_MEMORY_GROWTH: f64 = 1_048_576.0;
 /// Start-up allocations excluded from the leak fit.
-const MEMORY_WARMUP: Nanos = Nanos::from_millis(10_000);
+pub const MEMORY_WARMUP: Nanos = Nanos::from_millis(10_000);
 /// How far a single present interval may exceed the display period before it
 /// is a stall rather than jitter.
 const STALL_MULTIPLE: f64 = 4.0;

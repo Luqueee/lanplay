@@ -1,0 +1,277 @@
+{
+  "verdict": "REFUSED",
+  "why": "the comparison did not separate the contention control from the cheap sampler or from no monitor on any metric. That control takes lanplay-link-metrics' own mutex - the one the receive thread takes on every access unit - thousands of times a second, so a perturbation arriving down the one path it is certain to arrive by was invisible: the comparison is blind, and the absence of a difference between on and off says nothing whatever about the monitor. The frequency control did not separate either, which on its own would only have said this machine had headroom",
+  "has_power": false,
+  "frequency_control_separated": false,
+  "detected_on_metrics": [],
+  "comparable": true,
+  "rate_ratio": 1.0,
+  "rate_ratio_limit": 2.0,
+  "rule": "separated(A,B) = min(A) > max(B) or min(B) > max(A), complete separation of the value sets; exact and distribution-free, p = 1/10 under the null for three against three",
+  "comparability_rule": "max(per-arm median rate) / min(per-arm median rate) < 2",
+  "arm_order": "pass k runs the arm list rotated left by k-1",
+  "metrics": [
+    {
+      "metric": "delivery p99 ms",
+      "worse_when": "higher",
+      "off": {
+        "median": 8.441855,
+        "min": 8.421375,
+        "max": 8.921087,
+        "spread": 0.4997120000000006,
+        "values": [
+          8.445951,
+          8.421375,
+          8.437759,
+          8.921087
+        ]
+      },
+      "on": {
+        "median": 8.437759,
+        "min": 8.421375,
+        "max": 14.123007,
+        "spread": 5.701632,
+        "values": [
+          14.123007,
+          8.421375,
+          8.445951,
+          8.429567
+        ]
+      },
+      "expensive": {
+        "median": 8.437759,
+        "min": 8.437759,
+        "max": 8.470527,
+        "spread": 0.032768000000000796,
+        "values": [
+          8.437759,
+          8.470527,
+          8.437759,
+          8.437759
+        ]
+      },
+      "on_vs_off_separated": false,
+      "expensive_vs_off_separated": false,
+      "expensive_vs_on_separated": false,
+      "contend_vs_off_separated": false,
+      "contend_vs_on_separated": false,
+      "contend": {
+        "median": 8.462335,
+        "min": 8.421375,
+        "max": 9.953279,
+        "spread": 1.5319040000000008,
+        "values": [
+          9.953279,
+          8.421375,
+          8.421375,
+          8.503295
+        ]
+      }
+    },
+    {
+      "metric": ">2T per min",
+      "worse_when": "higher",
+      "off": {
+        "median": 1.3334566243698265,
+        "min": 0.0,
+        "max": 6.667284582008338,
+        "spread": 6.667284582008338,
+        "values": [
+          1.3334566070851488,
+          0.0,
+          1.333456641654504,
+          6.667284582008338
+        ]
+      },
+      "on": {
+        "median": 0.0,
+        "min": 0.0,
+        "max": 48.67118785931122,
+        "spread": 48.67118785931122,
+        "values": [
+          48.67118785931122,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "expensive": {
+        "median": 1.000093252517468,
+        "min": 0.0,
+        "max": 3.3336454844509813,
+        "spread": 3.3336454844509813,
+        "values": [
+          0.0,
+          3.3336454844509813,
+          0.6667289829799955,
+          1.3334575220549405
+        ]
+      },
+      "on_vs_off_separated": false,
+      "expensive_vs_off_separated": false,
+      "expensive_vs_on_separated": false,
+      "contend_vs_off_separated": false,
+      "contend_vs_on_separated": false,
+      "contend": {
+        "median": 1.666822813238792,
+        "min": 0.0,
+        "max": 18.668417306004038,
+        "spread": 18.668417306004038,
+        "values": [
+          18.668417306004038,
+          0.0,
+          0.0,
+          3.333645626477584
+        ]
+      }
+    },
+    {
+      "metric": "presented fps",
+      "worse_when": "lower",
+      "off": {
+        "median": 119.3554800186276,
+        "min": 113.66608998227214,
+        "max": 119.52218782986824,
+        "spread": 5.856097847596104,
+        "values": [
+          119.43326344125983,
+          119.52218782986824,
+          119.27769659599538,
+          113.66608998227214
+        ]
+      },
+      "on": {
+        "median": 116.4663792050134,
+        "min": 113.4105068004718,
+        "max": 119.533408889108,
+        "spread": 6.122902088636209,
+        "values": [
+          113.432759284897,
+          113.4105068004718,
+          119.533408889108,
+          119.49999912512978
+        ]
+      },
+      "expensive": {
+        "median": 119.21112235495875,
+        "min": 117.82214357211251,
+        "max": 119.57772328798634,
+        "spread": 1.7555797158738358,
+        "values": [
+          119.57772328798634,
+          117.82214357211251,
+          119.45560945058253,
+          118.96663525933495
+        ]
+      },
+      "on_vs_off_separated": false,
+      "expensive_vs_off_separated": false,
+      "expensive_vs_on_separated": false,
+      "contend_vs_off_separated": false,
+      "contend_vs_on_separated": false,
+      "contend": {
+        "median": 116.47754367788839,
+        "min": 114.6106795937671,
+        "max": 119.10004608195581,
+        "spread": 4.489366488188708,
+        "values": [
+          117.77771132520049,
+          115.1773760305763,
+          114.6106795937671,
+          119.10004608195581
+        ]
+      }
+    },
+    {
+      "metric": "fresh tick %",
+      "worse_when": "lower",
+      "off": {
+        "median": 99.54587581093605,
+        "min": 94.76561052436539,
+        "max": 99.66641957005189,
+        "spread": 4.9008090456865006,
+        "values": [
+          99.61075069508804,
+          99.66641957005189,
+          99.48100092678406,
+          94.76561052436539
+        ]
+      },
+      "on": {
+        "median": 97.08296286360319,
+        "min": 94.50875081026021,
+        "max": 99.66645047716113,
+        "spread": 5.157699666900925,
+        "values": [
+          94.52727104361514,
+          94.50875081026021,
+          99.66645047716113,
+          99.63865468359123
+        ]
+      },
+      "expensive": {
+        "median": 99.56642933013863,
+        "min": 99.18473225866222,
+        "max": 99.64811556625614,
+        "spread": 0.4633833075939151,
+        "values": [
+          99.64811556625614,
+          99.57738542449286,
+          99.5554732357844,
+          99.18473225866222
+        ]
+      },
+      "on_vs_off_separated": false,
+      "expensive_vs_off_separated": false,
+      "expensive_vs_on_separated": false,
+      "contend_vs_off_separated": false,
+      "contend_vs_on_separated": false,
+      "contend": {
+        "median": 97.10040992680261,
+        "min": 95.56193829333827,
+        "max": 99.31430689399555,
+        "spread": 3.7523686006572774,
+        "values": [
+          98.1752500926269,
+          96.02556976097833,
+          95.56193829333827,
+          99.31430689399555
+        ]
+      }
+    }
+  ],
+  "rates": {
+    "off": {
+      "median": 432.0,
+      "min": 408.0,
+      "max": 612.0,
+      "samples": 40,
+      "rssi_median": -72.0
+    },
+    "on": {
+      "median": 432.0,
+      "min": 272.0,
+      "max": 576.0,
+      "samples": 40,
+      "rssi_median": -72.0
+    },
+    "expensive": {
+      "median": 432.0,
+      "min": 408.0,
+      "max": 544.0,
+      "samples": 40,
+      "rssi_median": -72.0
+    },
+    "contend": {
+      "median": 432.0,
+      "min": 408.0,
+      "max": 576.0,
+      "samples": 40,
+      "rssi_median": -72.0
+    }
+  },
+  "excluded_empty": [],
+  "memory": null,
+  "radio_before": "0.000,1787227177.095,-71,-95,576,36,80,0",
+  "radio_after": "0.000,1787228956.800,-72,-94,432,36,80,0"
+}

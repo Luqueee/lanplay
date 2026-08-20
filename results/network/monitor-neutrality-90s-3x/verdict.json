@@ -1,0 +1,213 @@
+{
+  "verdict": "REFUSED",
+  "why": "the comparison did not separate the expensive sampler from the cheap one on any metric, so it has no power and the absence of a difference between on and off says nothing whatever about the monitor",
+  "has_power": false,
+  "detected_on_metrics": [],
+  "comparable": true,
+  "rate_ratio": 1.0,
+  "rate_ratio_limit": 2.0,
+  "rule": "separated(A,B) = min(A) > max(B) or min(B) > max(A), complete separation of the value sets; exact and distribution-free, p = 1/10 under the null for three against three",
+  "comparability_rule": "max(per-arm median rate) / min(per-arm median rate) < 2",
+  "arm_order": "pass k runs the arm list rotated left by k-1",
+  "metrics": [
+    {
+      "metric": "delivery p99 ms",
+      "worse_when": "higher",
+      "off": {
+        "median": 17.367039,
+        "min": 11.927551,
+        "max": 17.793023,
+        "spread": 5.865472000000002,
+        "values": [
+          11.927551,
+          17.367039,
+          17.793023
+        ]
+      },
+      "on": {
+        "median": 17.858559,
+        "min": 13.238271,
+        "max": 18.038783,
+        "spread": 4.8005119999999994,
+        "values": [
+          13.238271,
+          17.858559,
+          18.038783
+        ]
+      },
+      "expensive": {
+        "median": 18.612223,
+        "min": 17.154047,
+        "max": 83.820543,
+        "spread": 66.666496,
+        "values": [
+          83.820543,
+          18.612223,
+          17.154047
+        ]
+      },
+      "on_vs_off_separated": false,
+      "expensive_vs_off_separated": false,
+      "expensive_vs_on_separated": false
+    },
+    {
+      "metric": ">2T per min",
+      "worse_when": "higher",
+      "off": {
+        "median": 96.27594429704142,
+        "min": 20.619856994790275,
+        "max": 182.65994661651493,
+        "spread": 162.04008962172466,
+        "values": [
+          20.619856994790275,
+          96.27594429704142,
+          182.65994661651493
+        ]
+      },
+      "on": {
+        "median": 182.6573919811895,
+        "min": 33.25200209183171,
+        "max": 274.26396455034313,
+        "spread": 241.01196245851142,
+        "values": [
+          33.25200209183171,
+          182.6573919811895,
+          274.26396455034313
+        ]
+      },
+      "expensive": {
+        "median": 98.25914881057207,
+        "min": 93.1755098511998,
+        "max": 525.1033194511172,
+        "spread": 431.92780959991734,
+        "values": [
+          93.1755098511998,
+          525.1033194511172,
+          98.25914881057207
+        ]
+      },
+      "on_vs_off_separated": false,
+      "expensive_vs_off_separated": false,
+      "expensive_vs_on_separated": false
+    },
+    {
+      "metric": "presented Hz",
+      "worse_when": "lower",
+      "off": {
+        "median": 119.97083748882322,
+        "min": 119.97083748882322,
+        "max": 119.97083748882322,
+        "spread": 0.0,
+        "values": [
+          119.97083748882322,
+          119.97083748882322,
+          119.97083748882322
+        ]
+      },
+      "on": {
+        "median": 119.97083748882322,
+        "min": 119.97083748882322,
+        "max": 119.97083748882322,
+        "spread": 0.0,
+        "values": [
+          119.97083748882322,
+          119.97083748882322,
+          119.97083748882322
+        ]
+      },
+      "expensive": {
+        "median": 119.97083748882322,
+        "min": 119.97083748882322,
+        "max": 119.97083748882322,
+        "spread": 0.0,
+        "values": [
+          119.97083748882322,
+          119.97083748882322,
+          119.97083748882322
+        ]
+      },
+      "on_vs_off_separated": false,
+      "expensive_vs_off_separated": false,
+      "expensive_vs_on_separated": false
+    },
+    {
+      "metric": "fresh tick %",
+      "worse_when": "lower",
+      "off": {
+        "median": 96.97278281799667,
+        "min": 85.48282566429035,
+        "max": 98.30225438352352,
+        "spread": 12.819428719233173,
+        "values": [
+          98.30225438352352,
+          96.97278281799667,
+          85.48282566429035
+        ]
+      },
+      "on": {
+        "median": 90.06757382208646,
+        "min": 83.87605529269877,
+        "max": 93.56990642082832,
+        "spread": 9.693851128129552,
+        "values": [
+          83.87605529269877,
+          93.56990642082832,
+          90.06757382208646
+        ]
+      },
+      "expensive": {
+        "median": 87.43867444228455,
+        "min": 77.07696582383996,
+        "max": 87.64034517954904,
+        "spread": 10.563379355709088,
+        "values": [
+          87.64034517954904,
+          77.07696582383996,
+          87.43867444228455
+        ]
+      },
+      "on_vs_off_separated": false,
+      "expensive_vs_off_separated": false,
+      "expensive_vs_on_separated": false
+    }
+  ],
+  "rates": {
+    "off": {
+      "median": 432.0,
+      "min": 103.0,
+      "max": 576.0,
+      "samples": 30,
+      "rssi_median": -71.0
+    },
+    "on": {
+      "median": 432.0,
+      "min": 408.0,
+      "max": 576.0,
+      "samples": 40,
+      "rssi_median": -71.0
+    },
+    "expensive": {
+      "median": 432.0,
+      "min": 103.0,
+      "max": 576.0,
+      "samples": 30,
+      "rssi_median": -70.5
+    }
+  },
+  "excluded_empty": [],
+  "memory": {
+    "samples": 2380,
+    "first_mb": 155.328125,
+    "last_mb": 166.75,
+    "max_mb": 224.375,
+    "slope_mb_per_min": -0.8083121746220931,
+    "steady_slope_mb_per_min": -0.2800992338945427,
+    "steady_samples": 2340,
+    "allowed_mb_per_min": 1.0,
+    "warmup_ms": 10000.0,
+    "seconds": 600.0,
+    "cadence": "on"
+  },
+  "radio_before": "0.000,1787224490.600,-70,-95,544,36,80,0",
+  "radio_after": "0.000,1787226251.053,-71,-95,576,36,80,0"
+}

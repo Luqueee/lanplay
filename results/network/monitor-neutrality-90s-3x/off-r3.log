@@ -1,0 +1,68 @@
+link      en0 192.168.1.108, autoselect
+route     192.168.1.70 reachable from 192.168.1.108 on tcp/22; ICMP is filtered
+clocks    host GPU locked to 2000-2700 MHz core, 9001 MHz memory
+source    monitor 1920x1080@120
+receiver  listening on 192.168.1.108:5004, negotiating on 5005
+sender    1080p120 NV12 -> NVENC 50 Mbps -> RTP burst for 90 s
+
+device NVIDIA GeForce RTX 4060 Ti (10de:2803, 7949 MB VRAM, feature level 11.1) driving \\.\DISPLAY10 at 1920x1080
+H.264 input formats: [NV_ENC_BUFFER_FORMAT_NV12, NV_ENC_BUFFER_FORMAT_YV12, NV_ENC_BUFFER_FORMAT_IYUV, NV_ENC_BUFFER_FORMAT_YUV444, NV_ENC_BUFFER_FORMAT_ARGB, NV_ENC_BUFFER_FORMAT_ABGR, NV_ENC_BUFFER_FORMAT_AYUV, NV_ENC_BUFFER_FORMAT_ARGB10, NV_ENC_BUFFER_FORMAT_ABGR10]
+sequence header 34 bytes: SPS 22 bytes, PPS 4 bytes
+control listening on 0.0.0.0:5005
+control session with 192.168.1.108:64035
+config generation 1 acknowledged
+service class BestEffort: nothing requested
+config 1920x1080 @ 120 fps, 50 Mbps, P1 Ll CBR, Nv12 input, Dda source, IDR interval 120, async 4 slots, Uncapped
+frames 10800 in 96.396 s = 112.04 frames/s, pool exhaustions 0
+phase requests: 30 relayed to 127.0.0.1:5010, 240.86 ms asked for, 0 not sent
+capture acquire    p50 8.237 ms p95 16.276 ms p99 16.809 ms max 25.237 ms
+DDA AcquireNextFrame S_OK 10800 = 112.04/s
+DDA desktop updates (LastPresentTime != 0) 10800 = 112.04/s
+DDA pointer-only (LastPresentTime == 0, LastMouseUpdateTime != 0) 0 = 0.00/s
+DDA other updates (both timestamps zero) 0 = 0.00/s
+DDA AccumulatedFrames p50 1 p95 1 p99 1 max 45
+capture newer frames accumulated while busy: 44
+admission wait     p50 0.000 ms p95 0.001 ms p99 0.001 ms max 0.034 ms
+map input          p50 0.072 ms p95 0.119 ms p99 0.149 ms max 0.910 ms
+submit CPU         p50 0.056 ms p95 0.085 ms p99 0.107 ms max 0.267 ms
+HW completion      p50 2.120 ms p95 3.951 ms p99 4.240 ms max 4.509 ms
+lock after event   p50 0.003 ms p95 0.005 ms p99 0.006 ms max 0.041 ms
+bitstream copy     p50 0.021 ms p95 0.027 ms p99 0.044 ms max 0.117 ms
+unlock             p50 5.989 ms p95 14.208 ms p99 14.903 ms max 22.831 ms
+network send       p50 0.142 ms p95 0.201 ms p99 0.298 ms max 0.441 ms
+RTP/UDP sent 427712 packets, 506648924 bytes, 0 errors
+RGB->NV12 CPU      p50 0.014 ms p95 0.046 ms p99 0.076 ms max 0.290 ms
+RGB->NV12 GPU      p50 0.010 ms p95 0.280 ms p99 0.293 ms max 2.744 ms
+encoder residency  p50 2.145 ms p95 3.979 ms p99 4.269 ms max 4.537 ms
+slot residency     p50 16.587 ms p95 24.990 ms p99 32.755 ms max 33.816 ms
+P completion       p50 2.120 ms p95 3.949 ms p99 4.238 ms max 4.509 ms
+IDR completion     p50 2.197 ms p95 4.082 ms p99 4.358 ms max 4.358 ms
+P frame            n=10710 p50 45833 B p95 50261 B p99 52937 B max 62375 B
+IDR                n=90 p50 53036 B p95 68620 B p99 69408 B max 69889 B
+output 40.99 Mbit/s, 493872645 bytes over 10800 frames
+resident memory start 56.7 MB end 70.1 MB peak 70.1 MB delta +13.4 MB
+
+windows of 10 s  (encode Hz, completion and capture p99 in ms, wire Mbit/s)
+      0-10       1193 fr   119.3 Hz  enc p99   2.015  cap p99   9.388   43.58 Mbit/s  late 0
+     10-20       1104 fr   110.5 Hz  enc p99   2.031  cap p99  16.724   40.40 Mbit/s  late 0
+     20-30        988 fr    98.9 Hz  enc p99   2.010  cap p99  17.042   35.94 Mbit/s  late 0
+     30-40       1058 fr   106.0 Hz  enc p99   2.432  cap p99  16.821   38.81 Mbit/s  late 0
+     40-50       1051 fr   105.2 Hz  enc p99   2.712  cap p99  16.993   38.37 Mbit/s  late 0
+     50-60       1163 fr   116.4 Hz  enc p99   2.997  cap p99  16.645   42.72 Mbit/s  late 0
+     60-70       1172 fr   117.4 Hz  enc p99   3.688  cap p99  16.391   43.11 Mbit/s  late 0
+     70-80       1108 fr   110.9 Hz  enc p99   3.990  cap p99  16.784   40.58 Mbit/s  late 0
+     80-90       1195 fr   119.7 Hz  enc p99   4.291  cap p99   8.775   43.83 Mbit/s  late 0
+     90-100       768 fr   120.2 Hz  enc p99   4.392  cap p99   8.767   44.01 Mbit/s  late 0
+
+  [pass] frames completed                 10800 of 10800
+  [pass] completion within a period       p99 4.240 ms against 8.333 ms
+  [pass] bitstream produced               493872645 bytes
+  [pass] frames in order                  true
+  [pass] paced rate held                  112.04 of 120 fps, 0 pool exhaustions
+  [pass] socket accepted every datagram   0 send errors
+gate: PASS
+
+
+host gate   PASS
+client gate FAIL (1)
+report      /Users/adria/Documents/programacion/projects/lanplay/results/network/monitor-neutrality/off-r3.json
