@@ -1,673 +1,2065 @@
-# Audio, what is left
-
-A1 to A5 are done and committed. This file is what the remaining phases need and what has
-already been decided, so that none of it has to be reconstructed from the commits.
-
-`docs/testing.md` has the harness design, `.claude/skills/realtime-audio/SKILL.md` has the
-findings that shaped the code, and `tools/gates.toml` says which gates can run where.
-`docs/reports/2026-08-15-audio-and-ci.md` is how the phase reached the state below.
-
-## Where the phase stands, after the first clean-link run
-
-**The continuity failure is exactly and only the arrival tail.** On the clean arm the three counts
-are not close, they are identical: 4587 frames late, 4587 buffer underruns, 4587 concealments, and
-4587 times 240 samples is 1100880, which is the hole to the sample. Every underrun is a late frame
-and every late frame is an underrun, so nothing else in this pipeline ever starves the buffer -
-the `min occupancy 0.0` that appears in all sixty windows is those moments and nothing more.
-
-That closes the question the phase opened. There is no defect in capture, the codec, RTP, the
-jitter buffer or CoreAudio, and there is no longer a suspicion of one.
-
-It also removes the radio as the explanation. The clean arm ran at -58 to -59 dBm on one channel
-with the preflight passing, and its hole is **3.82 per cent against the contaminated run's 2.09**.
-A better link produced a worse figure, so link instability was never what the hole was made of.
-
-```
-A0  contract and telemetry                     done
-A1  WASAPI loopback                            done
-A2  Opus in isolation                           done
-A3  RTP audio, with its radio figure and control done
-A4  receiver and jitter buffer                  done
-A5  CoreAudio                                   done
-A6  Windows to Mac, functional                  works
-A6  the continuity criterion                    fails, 3.82 % on a link that held
-A7  drift                                       measurable now, and it disagrees with the table
-A8  jitter target                               the question has changed, see below
-```
-
-### A retraction: the pair argument had its sign inverted
-
-What stood here claimed the second Opus frame of each WASAPI packet arrives 5 ms later relative to
-its own moment, and that pacing it would return the margin. **That is backwards and the paragraph
-was wrong.**
-
-Lateness is arrival minus deadline. Both frames leave within 44 microseconds of each other, and the
-second frame's deadline is 240 samples - 5 ms - after the first's, so:
-
-```
-lateness(first)  = t - D
-lateness(second) = (t + 0.044 ms) - (D + 5 ms) = lateness(first) - 4.956 ms
-```
-
-Arriving at the same instant with a later deadline is **more** margin, not less. The second frame of
-each pair is the safer of the two, and the sender's burst cannot be the thing that spends the
-margin. No pacing change is authorised, and none should be made on this reasoning.
-
-The rest of that paragraph's arithmetic was fitted to the conclusion after the fact: taking p95 of
--4.25 ms and adding five to reach +0.75 ms produced a number that crossed zero near the observed
-3.82 per cent, which looked like corroboration and was a coincidence between a wrong sign and a
-plausible magnitude.
-
-What survives is the measurement rather than the story. Drift deepened the buffer by 5 ms across the
-ten minutes and the hole fell **41 per cent** - 134880 samples in the first minute against 78960 in
-the last - so more margin does remove lateness, without saying where the lateness comes from. And a
-real tail exists underneath: p99 at +12.2 ms and a worst arrival at +85.0 ms on a link that was not
-moving.
-
-That tail is delay and not loss - zero packets lost of 120005 - so nothing recovers it. FEC and NACK
-stay out for want of anything to retransmit.
-
-### A6.1 answered: the sender is innocent and the tail is the link's
-
-The per-pair difference `lateness(second) - lateness(first)` is what the timestamps require, measured
-on three arms rather than argued:
-
-| arm | p50 | p95 | in [-5, -4) ms | pairs |
-|---|---|---|---|---|
-| clean-90s | **-4.997 ms** | -4.992 | 96.0 % | 8998 |
-| a61-pair-90s | **-4.996 ms** | -4.988 | 96.4 % | 9000 |
-| clean-1200s | **-4.996 ms** | -4.988 | 95.9 % | 120004 |
-
-Against a prediction of -4.956 ms. The second frame of each packet has five milliseconds **more**
-margin, so the burst cannot be what spends it, and the retracted paragraph above was wrong in exactly
-the way the arithmetic said it was.
-
-It is the **first** frame that is late, consistently: 524 against 384 on one 90 s arm, 476 against 354
-on the other, 8594 against 6391 over the 1200 s. The opposite of the claim that started this.
-
-Two internal checks make the figures load-bearing rather than plausible. The population closes to the
-sample - 524 + 384 = 908 = the late count, 524 + 385 = 909 = the underruns, and 909 x 240 = 218160 =
-the continuity hole - and the within-pair step is mirrored by the cross-packet one, -4.996 against
-+4.979, summing to -0.017 ms so that nothing is left unaccounted per 10 ms of audio.
-
-**No cadence defect exists. No sender change is justified and none should be proposed on this
-ground.** The whole arrival tail belongs to the link.
-
-The candidate that would have fabricated this offset was checked and does not exist: no frame carries
-a capture timestamp and no QPC value reaches the wire. The second frame's timestamp is the first's
-plus 240 by counter arithmetic, which is what RFC 7587 asks for and is also why the clock audit found
-the wire carrying the device's rate as an identity.
-
-How the pairing was recovered is worth keeping, because the obvious route does not work. A 480-frame
-packet becomes two datagrams 240 ticks apart, so every frame falls into one of two residue classes
-modulo 480 computed from its own timestamp - immune to loss and to reordering, and needing no arrival
-time. But which class is *first* cannot come from the wire: the packetiser seeds its timestamp from
-`random_u32()` as RFC 3550 requires, and a receiver joining a running stream cannot tell position from
-an absolute residue. Deciding it from arrival order was rejected as circular, since arrival order
-within a pair is the question. So one integer went into the sender's internal telemetry and not into
-the protocol - the packetiser's starting timestamp, read before any datagram can move it - and the
-join is `(anchor - base) mod 480`. It came out 0 on all three arms, and the base and anchor being
-identical also proves each receiver caught the stream's very first datagram, that timestamp being
-unique for twenty-five hours.
-
-### What A8's question is, now that both audits have answered
-
-Simply the sweep repeated on a link that holds, with the occupancy instrument in place. There is no
-cadence to fix first, so A6.2 is skipped.
-
-The criterion stands as decided: the **smallest** target that holds continuity reproducibly, not the
-one with the prettiest statistics. And one caution the audits produced: arrival-delay percentiles are
-not comparable between arms, because the anchor is the first admitted packet's own arrival plus the
-target and a bad first packet shifts every delay in a run by a constant. Late counts and continuity
-holes are comparable; p50 and p95 of arrival delay are not.
-
-### A8 attempted on 19 August and refused by the link, before any arm ran
-
-The sweep was armed with three things it did not have before - `tools/radio-preflight.sh` as a hard
-precondition, a per-arm interpretability check, and the per-arm depth control - and then it did not
-run, because the preflight refused. Three live 120 s windows, all on channel 100:
-
-| window | RSSI | slope | half medians |
-|---|---|---|---|
-| 22:36 | -68 -> -70 dBm | -0.593 dB/min | -1.0 dB |
-| 22:38 | -71 -> **-59** dBm | **+6.907 dB/min** | +10.0 dB |
-| 22:41 | -59 -> -61 dBm | -1.474 dB/min | -1.0 dB |
-
-The link is not falling, it is **swinging twelve decibels in six minutes**, and none of the three can
-project across a 600 s run inside the 3 dB budget. A forty-minute sweep across that ranks the swing.
-
-A mistake worth keeping, because it is the reason this is written down rather than retried. After the
-first refusal a 30 s sample read a flat -59 dBm and that was used to argue the refusal was transient.
-It was taken at the top of the 22:38 climb: **a window short enough to be convenient cannot see a
-swing slower than itself**, and the instrument was right both times while the argument against it was
-not. Two windows were taken and both are recorded; a third would have been shopping for a pass.
-
-What the arming added, and the failure each part is capable of:
-
-The **interpretability check** turns A6.1's finding into an instrument. That run had 4587 frames late,
-4587 underruns, 4587 concealments and exactly 4587 x 240 samples of hole, and the identity is the
-pipeline's shape rather than a coincidence: nothing else starves this buffer and nothing else fills an
-underrun. An arm where it stops holding has some other mechanism in it and its percentage reads like
-one that does not, so it is refused rather than noted. Demonstrated by lowering `plc_frames` by one in
-a copy of the clean 600 s envelope: the real document is interpretable and the copy is refused at a
-single frame of disagreement.
-
-The **depth control** records occupancy at both ends of every arm and its slope. It decides nothing -
-A7 is closed and a sweep does not reopen it - and exists because a target that ran while the buffer
-sat three frames deeper was ranked with three frames it did not earn. A7's +9.29 ppm projects 1.1 ms
-across a 120 s arm, below the 5 ms this instrument resolves, so the check is between arms and not
-within one: if the targets that held began a whole frame deeper than the ones that broke, the report
-says the winner is not safe to build on.
-
-And a defect found in that control before it ever ran: re-deciding an older record raised a
-`KeyError`. A record written before those columns cannot answer the question, and a traceback is
-neither an answer nor a refusal. It now refuses and names the reason.
-
-The ranking contract, restated because the audits changed it: rank on **late frames, continuity hole,
-concealments and underruns**, never on arrival-delay percentiles. If every target fails, A8 has no
-answer on this link and the targets are **not** extended to 30, 40 or 80 ms - that would be a product
-decision about the latency budget, taken elsewhere.
-
-### What A8's preconditions became, and why the projection stopped deciding
-
-Two questions were being asked as one, and only the categorical half belongs before a run.
-
-**Before the run, and binding: the channel.** Channel 36 at 80 MHz occupies 5170 to 5250 MHz, and
-5150-5250 is the only WAS/RLAN band in Spain with no DFS obligation - CNAF note UN-128 as rewritten by
-Orden ETD/625/2023 imposes DFS on 5250-5350 and 5470-5725, pointing at EN 301 893 v2.1.1, whose radar
-detection attaches to any channel whose nominal bandwidth falls partly or completely within either
-range. So the non-DFS set is **36, 40, 44 and 48**, the 36/40/44/48 block is the only non-DFS 80 MHz
-configuration available here, and channel 100 - centre 5500, 80 MHz span 5490 to 5570 - is not one of
-them. The width is required alongside the channel because the obligation attaches to the occupied
-span: 160 MHz anchored at 36 reaches 5330 and is a radar band. A8's twelve committed arms all ran on
-36 at 80 MHz with `radar_band 0`, so this is the baseline recovered rather than a new preference.
-
-`radar_band` is **this repository's own derived column**, not anything the OS reports. CoreWLAN exposes
-`channelNumber`, `channelWidth` and `channelBand` and nothing else; neither "radar" nor "dfs" occurs
-anywhere in its headers. `Association::uses_radar_band` computes it by intersecting the occupied span
-against the two ranges with strict inequalities, which is why the 36/80 block - whose upper edge
-touches 5250 exactly, the same number that starts the first DFS range - is correctly not flagged.
-`crates/capabilities` already tests that boundary and the 160 MHz case beside it.
-
-**Not before the run, and no longer deciding: whether the signal will hold still.** That criterion fits
-a line to a two-minute window and extrapolates it to ten, and this radio was measured at -0.593,
-+6.907 and -1.474 dB/min in three consecutive windows on one evening. A line through any part of a
-swing projects a disaster that may not arrive. Worse, the 3 dB it is judged against was derived as the
-spread of median signal **between** A8's arms, so applying it to a projection inside one window put a
-between-arm number in a within-window place. The sweep is counterbalanced so that a monotone drift
-contributes a term proportional to position, which cancels; what it cannot survive is arms measured in
-different regimes. So the projection is downgraded to a note for this caller, and the question it was
-standing in for is asked of the arms themselves.
-
-**After the run, and binding: overlap.** Every arm records signal and rate at p10, p50 and p90 as well
-as its extremes, plus how many channels it saw. The criterion is that the intersection of the arms'
-p10-to-p90 signal intervals is non-empty - a band of signal every arm actually spent time in. It needs
-no threshold: either such a band exists or it does not. Arms at -58..-61 and -70..-78 have none and are
-two links; arms at -57..-62, -58..-63, -57..-61 and -59..-63 intersect over -59..-61 and are one link
-breathing, which is the most this radio has ever offered. Both are exercised as fixtures and refuse and
-pass respectively. A channel change **inside** an arm refuses that arm outright: it is two links
-wearing one name, and every percentile of it is a mixture.
-
-The `RSSI_SPREAD_DB=8` that used to guard this is gone. Applied to the spread of arm means it admitted
-two arms with equal means and disjoint ranges, and refused four arms whose ranges nested.
-
-Two defects found while wiring this, both in the instrument rather than the pipeline:
-
-The comparability checks **only ran when the outcome was mixed**. A sweep in which every target broke
-skipped all of them and then printed "no target between 5 and 20 ms held continuity" - a statement
-about a link, made by arms that had never been shown to share one. The strongest claim this gate can
-print was resting on the weakest evidence it collects. The radio checks now run unconditionally, and
-incomparability refuses **before** the ranking fails, because a ranking of arms from different regimes
-is not repaired by knowing how different they were.
-
-And the first version of the per-arm distribution used `asort`, which is a gawk extension; this
-machine's awk is the one true awk and does not have it. It would have refused every arm for having no
-rows. It is python now.
-
-Re-checked against the committed A8 record, which the new criteria accept **by a hair**: the arms'
-p10-p90 intervals intersect at exactly -68 to -68 dBm, a degenerate band, and their median rates run
-288 to 576 Mbps, a factor of 2.00 against a limit of 2.0. That sweep's conclusion stands and it was
-never robust.
-
-### A8 refused to select, and the reason is measured
-
-```
-A8 fixed-arm sweep: REFUSED TO SELECT
-
-No candidate at or below 20 ms passed reproducibly in the sampled arms.
-Cause: between-arm heavy-tail variance dominates the 5 ms target spacing.
-```
-
-That wording is deliberate and replaces an earlier line here that said *no target at or below 20 ms
-holds*. The stronger claim was not demonstrated: what these arms show is that this design cannot
-separate these targets, not that no such target exists. A sweep that cannot rank has refused, and a
-refusal is not a proof of absence - which is this repository's own rule, applied to its author.
-
-Thirty-four minutes, eleven arms, on the steadiest link this project has measured: channel 36 at
-80 MHz with median signal -40 to -43 dBm and **every arm negotiating a median 1200 Mbps**, a factor of
-1.00 across the sweep. Evidence in `results/audio/jitter-target-a8/`.
-
-| target | arms | concealment ratio |
-|---|---|---|
-| 5 ms | 2 | 0.196, 2.087 % |
-| 10 ms | 2 | 2.267, 7.442 % |
-| 15 ms | 3 | 0.258, 0.838, 2.179 % |
-| 20 ms | 2 | 1.179, 7.142 % |
-
-The targets are not extended to 30, 40 or 80 ms as a consequence: that is a decision about the latency
-budget, taken elsewhere and not by a gate that just failed to rank.
-
-What makes the refusal trustworthy is what did not vary. The margins ascended with the nominal targets
-in every pass - 8.45, 11.87, 16.86, 21.90 and 7.64, 11.89, 18.22, 21.94 ms - so no anchor draw
-shuffled the effective targets and the sweep swept what it meant to. The arms were comparable by the
-mechanism that produces the tail. And the ratios still refuse to order by target, because what varies
-is **burst incidence per window**: worst arrivals of 78, 61, 76 and 221 ms in one pass against 24, 79,
-19 and 91 in another. A quantity whose sampling noise exceeds the effect being measured cannot rank
-the effect.
-
-The 221 ms arrival is worth stating carefully rather than dramatically. It is eleven times the largest
-target under test, so **that event** is out of reach of anything in this phase's budget. It does not
-follow that the targets under test are useless: absorbing a rare 221 ms stall is not what a target is
-for, and a curve is what says how much a target does absorb.
-
-### The metric was carrying the wrong name, and the evidence says so
-
-Two quantities have been reported as one, and the split changes what A8 is choosing between.
-
-**Playout continuity** is `render_underruns`: the device was handed nothing and a listener heard a
-click. It is **zero in 40 of 40 committed envelopes** - every audio run this project has ever recorded,
-including the control arm that lost a fifth of its samples on purpose. The device has never been
-starved here.
-
-**Source fidelity** is `plc_frames`: a frame of source audio replaced by the concealer, 240 samples
-at a time. The timeline stayed fed; what was lost is the original content. This is the quantity that
-has been called a *continuity hole*, and the name overstates it - it describes a playout failure that
-has never once occurred.
-
-So the observation key becomes `concealed_samples` and every ratio from it is a **concealment ratio**.
-The consequence is not cosmetic: the target of A8 was implicitly `PLC = 0`, and that target is not
-obviously right. Absorbing a 221 ms stall needs a buffer no interactive streamer would pay for, while
-0.1 per cent of concealment spread over isolated frames may be inaudible. Which of those two costs
-less is a question about what concealment sounds like, and this project has never listened - a short
-qualitative check belongs on the list, and it needs no instrument beyond ears.
-
-### What A8 says about how to ask the question
-
-Not "run longer arms". If a 120 s arm sees between zero and three bursts, averaging that out needs
-arms an order of magnitude longer - four targets by three passes by twenty minutes is four hours per
-sweep - and it would still rank one draw of a heavy tail against another.
-
-The distribution is the primitive and the target is a function of it. One number per datagram, taken
-once, independent of any target:
-
-```
-excess_i = (arrival_i - arrival_ref) - (rtp_i - rtp_ref) / 48000
-late(T)  <=>  excess_i > T
-```
-
-Every candidate target read off one population, with no anchor differing between arms, no radio change
-between arms, and no drift confounding a ranking. `Derive before building` is this repository's own
-rule, and four arms per target is the built version of an arithmetic question.
-
-Three decisions about that primitive, each of them paid for by something measured today.
-
-**The reference is not the first packet.** The playout anchor is the first admitted packet's own
-arrival plus the target, so a first packet that landed badly shifts every delay in a run by a
-constant - which is exactly why a 90 s arm read p50 -10.9 ms and a 1200 s arm -36.3 ms on the same
-link, and why that pair could not be used as evidence of drift. `excess` is referred to the minimum
-over the run, so the fastest observed path defines zero and every value is queueing delay above best
-case.
-
-**Drift is subtracted, and it is not small.** A7 measured +9.29 ppm referred to this Mac's timebase,
-closing to +238 samples predicted against +238 +-75 observed. Over 600 s that is 5.6 ms - larger than
-the 5 ms spacing the curve exists to resolve. The fitted drift is reported in ppm beside A7's figure
-and the uncorrected curve is kept beside the corrected one, so the size of the correction is visible
-rather than trusted.
-
-**And the drift cannot be fitted by least squares.** Measured rather than assumed, on loopback where
-the true drift is zero because both ends share one clock, with `udp-fault` holding 5 per cent of
-datagrams for 40 ms: the slope through every arrival read **-6.92 ppm** while a fit through one
-minimum per 10 s block read **+0.07 ppm**. An estimator that a burst moves by seven parts per million
-cannot measure nine. So the drift is fitted through per-block minima, which are queue-free by
-construction since queueing only ever adds, and the all-points slope is reported beside it so the size
-of the difference is a number in the document rather than a choice buried in the code.
-
-If the radio fit disagrees with A7's +9.29 ppm by a factor of two or more, that is a **finding and not
-a criterion**: A7 measured a pair of crystals directly and this measures the same pair through a radio
-and a jitter buffer, so a disagreement says one of the two instruments is wrong and neither figure may
-be cited until it is settled. It does not say the run being measured was faulty.
-
-**Zero loss is required rather than hoped for.** A frame that never arrived has no excess, so a run
-with loss cannot produce this curve. Refused, naming the loss.
-
-### A CDF is not enough, because the events arrive in bursts
-
-A hundred isolated late frames and twenty bursts of five have the same late ratio and sound nothing
-alike. So at each threshold, alongside `late(T)`: clusters per minute, frames per cluster at p50, p95
-and max, the worst excess inside a cluster, and the gap between clusters. A cluster is a maximal run of
-consecutive late frames in sequence order, closed by one on-time frame.
-
-Where uncertainty is quoted it comes from time blocks. A binomial interval over individual frames
-would be wrong by the amount the frames are correlated, and the correlated unit here is the cluster.
-
-The curve runs to 100 ms because its **shape** above 20 ms is the diagnostic: one heavy distribution,
-or a normal regime plus a second class of stall. Three arms with a worst arrival near 80 ms and one at
-221 is the shape of two mechanisms, and if it is two, the target that absorbs the first has nothing to
-do with the one that would absorb the second. Reporting a figure at 30, 50 or 80 ms authorises no
-target there.
-
-### What A8's decision becomes
-
-Not "which buffer gives zero concealment". It is: **the smallest target whose concealment ratio and
-burst structure are acceptable for an interactive streamer** - a product judgement, not a mathematical
-one, and it cannot be made before the curve exists. If the curve reads 0.20 per cent at 15 ms and 0.09
-at 30, then fifteen more milliseconds on every frame forever buys a tenth of a per cent and is a bad
-purchase. If it reads 2 per cent at 15 and 0.2 at 20, then 20 ms justifies itself. Nobody knows which
-shape this tail has.
-
-Opus in-band FEC becomes conceptually interesting at that point and not before, because a packet that
-arrives past its deadline is a loss as far as the decoder is concerned even when the radio delivered
-it. Two reasons not to reach for it yet: RFC 7587 describes it particularly for the voice mode, and it
-carries information about the immediately preceding frame, so it addresses isolated misses and not a
-burst of 80 to 200 ms. If the curve shows many recoverable isolated misses, it earns an experiment.
-
-### Three instrument defects, each found by a refusal rather than by review
-
-**The interpretability identity was an approximation.** `late == underruns == concealed` is what A6's
-clean run measured, and `receive.rs` has `Pull::Conceal | Pull::Underrun` both concealing with only
-the second counted as a starve. So the identity holds only where there is no overrun and no startup
-starvation. The control arm had 66 underruns with no late frame behind them: 18 frames thrown away by
-two buffer overruns and 48 concealed before the first datagram arrived. Replaced by three identities
-that are exact on the control arm and the clean 600 s run alike - starves equal concealments, the hole
-equals concealments plus overrun casualties, discards equal late plus overrun casualties - each shown
-firing against a single-field mutation.
-
-**Zero loss was assumed rather than required.** Those identities then refused t20-p3, which had lost
-382 datagrams of 23997, **1.59 per cent - the first real packet loss this project has measured**, on
-the best link of the session. A frame that never arrived is neither played, concealed nor discarded,
-so no identity can close. Loss is now a criterion stated before the arithmetic, refused with the radio
-named instead of the buffer blamed. It is the established state of this link - 0 of 120005 in A6, 0 of
-3000 in A3 - and the decision to leave FEC and NACK out of scope depends on it.
-
-**The comparability check was degenerate.** It intersected the arms' p10-to-p90 signal intervals. Those
-arms were flat to a decibel inside themselves, p10 and p90 identical, at either -40 or -43 dBm, so the
-intersection was empty by construction and the criterion reduced to *every arm at the same integer
-dBm* - a gate that passes by luck, which is the exact shape of error the redesign was meant to remove.
-Meanwhile all of them negotiated 1200 Mbps: three decibels moved the rate not at all. The ratio
-between the extreme per-arm median rates decides now, against the measured factor of two, and the
-signal is recorded without deciding. Porting the intersection onto the rate was tried first and has
-the same degeneracy.
-
-### A7 answered: both clock figures were right and the prediction crossed a boundary
-
-Measured directly over a 1200 s arm, each rate against its own machine's monotonic clock and nothing
-subtracted across the pair:
-
-| quantity | value | population |
-|---|---|---|
-| host capture device against QPC | **-15.0769 ppm** +-0.0001 | 125999 readings over 1260 s |
-| this Mac's output against `mHostTime` | **+5.1545 ppm** +-0.00003 | 224993 IO cycles over 1200 s |
-
-So the two rows in the table below are correct to a quarter of a part per million, and the
-contradiction was never in them. It was in the arithmetic that used them: `source_ppm` is samples per
-**QPC second** and `sink_ppm` is samples per **mach second**, and subtracting the two is subtracting
-rates held against the reference clocks of two different machines - the thing `AGENTS.md` forbids,
-committed in a formula rather than in a timestamp.
-
-The term that was missing is QPC against mach, which no measurement taken on either machine alone
-can supply. The invariant supplies it, from samples produced against samples consumed:
-**-24.37 ppm +-1.30, 18.8 sigma from zero.** Referred to this Mac's timebase the host's audio clock
-is therefore +9.293 ppm and not -15.077, and the account closes:
-
-```
-host vs mach   +9.293 ppm      (-15.077 vs QPC, plus 24.37 of QPC vs mach)
-Mac  vs mach   +5.155 ppm
-net filling    +4.139 ppm  ->  +0.1987 samples/s  ->  +238.4 samples over 1200 s
-observed                       +0.1985 +-0.0622   ->  +238 +-75
-```
-
-**The consequence is the part that matters for the phase.** A rate matcher must be driven by the
-observed buffer and never by these two figures, however precise they are, because the quantity it has
-to null is the host's audio clock against *this* machine's timebase, and that is not measurable on
-either machine alone. It is measurable exactly as it was measured here.
-
-Two corroborations, one of which was withdrawn during the audit and is worth recording as a trap.
-The arrival delay's p50 moved from -10.9 ms on a 90 s arm to -36.3 ms on the 1200 s one, which looks
-like drift and cannot be used as one: the anchor is set by the first admitted packet's own arrival
-plus the target, so a first packet that landed in a bad moment shifts every delay in the run by a
-constant, permanently, and a 25 ms anchor offset reproduces that whole move with no drift at all. It
-corroborates the sign and nothing else, and separating the two needs a per-window arrival delay this
-build does not record.
-
-What does corroborate is the occupancy staircase, and only because this arm has more than one step:
-0.0 to 5.0 to 10.0 to 15.0 ms with steps at windows 15, 56 and 96, 405 s per 5 ms step, **+12.35
-ppm** against the +9.29 the invariant predicts for the jitter buffer alone - agreeing inside the one
-frame that instrument is quantised to. A6's single-step staircase carried no rate, which is why its
-12.3 ppm was withdrawn; three steps do.
-
-The sample bookkeeping closed exactly and independently of all this: 60479520 frames captured from
-device positions with zero position gaps and zero rewinds, the same 60479520 encoded with zero sample
-disagreement and zero split residue, 251998 datagrams with every timestamp step exact, and
-251998 x 240 = 60479520. The RTP timestamp is not a nominal 48 kHz counter running beside the device;
-it is the running total of frames the device delivered, so the wire carries the device's rate as an
-identity rather than as an assumption.
-
-### The order from here
-
-A6.1, A7 and A8 have all answered, and what is left is not another sweep.
-
-```
-A8.1  the excess-delay survival curve and its cluster structure, one long clean run
-A8.2  the latency-against-concealment tradeoff read off that curve, and a listen:
-      what does 0.1 per cent of isolated concealment actually sound like
-      -> choose a fixed baseline target, as a product decision with the curve in hand
-A9    fault injection at the chosen target
-A10   video, audio and input together
-A11   A/V relative sync
-```
-
-Adaptive jitter and Opus FEC stay closed until A8.1 shows a distribution whose shape gives either one
-something to do.
-
-### What stays out until the data asks for it
-
-Opus FEC, NACK, audio retransmission, jitter targets above 20 ms, another codec, another frame
-size, per-process capture, an A/V sync controller and an adaptive resampler. And the capture
-period, which is not a candidate any more: the losses live in an upper tail of lateness, not in a
-fixed cost every frame pays, and the distribution said so before anything was changed.
-
-A8's answer, when it comes, is the **smallest** target that holds continuity reproducibly - not the
-one with the prettiest statistics. If 5 ms fails and 10, 15 and 20 hold, the answer is 10. Audio
-latency is structural and paid on every frame forever; ten more milliseconds bought for
-statistical comfort is a loss.
-
-## What is already established
-
-Numbers below are measured, not assumed. They are the inputs to everything that follows.
-
-| fact | value | where |
-|---|---|---|
-| host render endpoint | LG ULTRAWIDE, 48000 Hz, 2 ch, 32-bit float | A1 |
-| host device period | 10.000 ms default, 3.000 ms minimum | A1 |
-| loopback packet size | exactly 480 frames, every packet | A1 |
-| host audio clock | −15 ppm against nominal | A1 |
-| Opus frame | 5 ms, RESTRICTED_LOWDELAY, 128 kbps constrained VBR | A2 |
-| Opus packet | 81 bytes, p50 and p99 alike, 129.6 kbps effective | A2 |
-| Opus cost | encode p99 40 µs, decode p99 10 µs | A2 |
-| Opus algorithmic delay | 7.5 ms: one 5 ms frame plus 2.5 ms lookahead | A2 |
-| RTP | payload type 111, clock 48000, one frame per datagram, no extension | A3 |
-| jitter target | 10 ms, ceiling 3× target, PLC concealment | A4 |
-| Mac output device | 48000 Hz, 2 ch f32, 256-frame IO buffer, 5.333 ms | A5 |
-| Mac output clock | +5 ppm against nominal | A5 |
-| producer scheduling | THREAD_TIME_CONSTRAINT_POLICY, not a QoS band | A5 |
-
-Two consequences already drawn:
-
-- A 480-frame WASAPI packet is exactly two 5 ms Opus frames, so the accumulator **splits**
-  and never accumulates, and no residue ever carries between packets.
-- The two audio clocks differ by about 20 ppm, which is 12 ms of drift over ten minutes -
-  more than a 10 ms jitter buffer holds. **A7 is not hypothetical.**
-
-## Debts carried forward
-
-**The radio loss figure is owed.** `tools/audio-rtp-gate.sh` declares it unavailable
-rather than faking it. Everything for it is wired: `--receive-only` exists on the probe,
-and libopus builds on the host through the cmake inside Visual Studio BuildTools
-(`Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin`). It needs the host switched on
-and nothing else.
-
-**Nine of nineteen gates have no negative control**, including three of the audio ones.
-`cargo run -p xtask -- gates --debt` lists them. A gate whose failure mode has never been
-observed has not earned being trusted.
-
-**The ceiling in the jitter buffer is untested and cannot be tested by a delay.** Only a
-sink slower than its source breaches it, which is A7's subject. Do not add a fault arm
-claiming to cover it.
+# LANPLAY — MASTER PLAN DE DESARROLLO HASTA v1.0
+
+> Documento maestro de continuidad.
+>
+> **Objetivo:** que cualquier IA o desarrollador pueda continuar LanPlay sin reconstruir decisiones ya tomadas, repetir experimentos cerrados ni confundir resultados de laboratorio con requisitos de producto.
+>
+> **Plataforma v1.0:** host Windows + cliente macOS, orientado inicialmente a LAN, baja latencia, 1080p120 como baseline de alto rendimiento cuando la red/equipo lo soporten.
+>
+> **Regla principal:** *derive before building*. Una hipótesis no se convierte en arquitectura hasta que un gate la demuestra.
 
 ---
 
-## A6 - first Windows to Mac audio
+# 0. Cómo usar este documento
 
-Join the halves: WASAPI loopback, Opus, RTP over Wi-Fi, jitter buffer, CoreAudio.
+## 0.1 Estados
 
-Needs the host, the radio and an output device. The encoder must be built **on** the host,
-with cmake on the PATH.
+- `[x]` hecho y respaldado por evidencia.
+- `[ ]` pendiente.
+- `DEFERRED` conscientemente aplazado.
+- `REFUSED` el experimento no podía responder honestamente bajo esas condiciones.
+- `REJECTED` hipótesis probada y descartada.
+- `CLOSED` decisión arquitectónica que no debe reabrirse sin nueva evidencia.
 
-Exit criterion, 60 s first and then 600 s, in ten-second windows:
+## 0.2 Veredictos de gates
 
-```
-capture packets/s, frames encoded/s, RTP received/s
-packet loss, PLC count
-jitter buffer occupancy p50/p95/p99
-decode p99, render callbacks, underruns, overruns
-continuous samples expected against played
-```
+Todo gate debe terminar exactamente en una de estas categorías:
 
-The counter that decides it is the last one. A run whose underruns are zero because the
-concealer ran the whole time is a run that carried nothing, and the continuity accounting
-is what tells those apart: gap concealment counts as played, an underrun does not.
+- **PASS:** los criterios requeridos fueron observados y cumplidos.
+- **FAIL:** los criterios requeridos fueron observados y alguno no se cumplió.
+- **REFUSED:** faltó una observación o precondición necesaria para interpretar la prueba.
 
-This is also where the radio loss figure finally arrives, which is the debt above.
+Nunca convertir `Unavailable`, población cero, fichero ausente o campo ilegible en `PASS`.
 
-## A7 - clock drift
+## 0.3 Reglas de instrumentación
 
-The interesting one, and its number is estimable before it starts: about 20 ppm between the
-two devices.
+Antes de considerar terminado cualquier gate:
 
-First measure, correct nothing. Ten minutes, and compute occupancy slope per minute,
-underruns per minute, overruns per minute. Expect the buffer to drain or fill completely
-inside that window; if it does not, the estimate above is wrong and that is the finding.
+- [ ] Declarar la actividad esperada.
+- [ ] Rehusar si `n = 0` cuando se esperaba actividad.
+- [ ] Limpiar o versionar resultados para que un brazo no lea artefactos anteriores.
+- [ ] Atribuir métricas por tipo de evento/origen cuando los agregados puedan engañar.
+- [ ] Añadir control negativo cuando sea posible.
+- [ ] Demostrar que el control negativo falla/refuses por el motivo esperado.
+- [ ] No parsear prose si existe o puede existir un envelope estructurado.
+- [ ] No mover thresholds después de observar el resultado para fabricar un PASS.
+- [ ] Registrar condiciones de radio/host relevantes junto con resultados.
+- [ ] Distinguir métrica primaria de proxy.
+- [ ] Guardar resultados bajo `results/` con nombre reproducible.
+- [ ] Ejecutar unit tests, clippy y checks de plataforma tras cambios relevantes.
 
-### What A6's ten-minute run already answered, and what it cannot
+## 0.4 Reporte obligatorio al terminar cada tarea
 
-The prediction did not materialise, which is the outcome this section asked to be told about.
-Over A6's 600 s clean arm, in sixty ten-second windows recorded in
-`results/audio/e2e/clean-600s.receiver.out`: **zero buffer overruns, zero device underruns,
-and a continuity hole that does not grow.** Per minute the hole reads 107760, 108720, 104640,
-100080, 120960, 135840, 96240, 82080, 76080, 97200 samples - a least-squares slope of **-2624
-samples per minute** against a mean of 102960, which is noise around a flat line and if
-anything a slight decline.
+Añadir un reporte breve con:
 
-The reason is worth more than the number, because it says A7 cannot be measured on this link
-at all. The hole is lateness: 4290 frames arrived past their moment over the ten minutes and
-were discarded, and 4290 x 240 samples is exactly the 1029600 the hole came to. Discarding a
-late frame sheds backlog, so **the lateness is itself a drift correction**, continuously
-dumping the very accumulation drift would build. Drift fills the buffer and lateness empties
-it, and while both are present neither can be read.
+```md
+### Reporte <ID de tarea>
 
-So A7 needs a link whose tail does not produce lateness - the same condition A6's exit
-criterion is waiting on - and not a longer run.
+**Estado:** PASS | FAIL | REFUSED | DEFERRED
 
-**One instrument gap to close first.** The per-window row carries rtp/s, lost, plc, played,
-jitter underruns, callbacks, underruns, overruns, expected, played and hole. It does not carry
-occupancy, which is the one quantity this section asks for per minute. Only the run-wide
-aggregate exists - p50 15.0, p95 20.0, p99 20.0, max 25.0 ms against a 30 ms ceiling - and a
-p50 higher than the 60 s arm's 10.0 cannot be told apart from growth within a run without the
-per-window figure. Add occupancy to `WindowRow` before A7 runs, or A7's first number will be
-two runs compared instead of one run measured.
+**Qué se cambió**
+- ...
 
-Only then rate matching, and only if the measurement demands it: occupancy above target
-means consume infinitesimally faster, below means slower, at parts per million and slowly
-enough to be inaudible. Never by dropping a packet - that is a click every few seconds in
-exchange for an arithmetic problem.
+**Qué se midió**
+- ...
 
-This is the phase whose fault arm can finally exercise the jitter buffer's ceiling, because
-a sink slower than its source is exactly what breaches it.
+**Resultado**
+- ...
 
-## A8 - choosing the jitter buffer
+**Defectos del instrumento encontrados**
+- ...
 
-A shootout at 5, 10, 15 and 20 ms, three runs each, same network and same source, after A7
-so that drift is not what is being measured.
+**Decisiones**
+- ...
 
-Measure underruns, PLC count, occupancy and late packets. The winner is **the smallest
-buffer that holds continuity**, not the largest that reports zero faults: if 5 ms gives
-twenty underruns a minute and 10, 15 and 20 all give none, the answer is 10.
-
-Each arm must be long enough to sample what varies between the arms. Forty seconds was not
-enough for a video phase that swept its period in two hundred, and the same trap applies
-here to anything that drifts.
-
-## A9 - fault injection
-
-`tools/udp-fault` already does all of it and takes a seed: loss, duplication, reordering
-with a hold, and periodic stalls. No injector needs writing.
-
-Arms at 0.1, 0.5, 1 and 3 per cent loss, plus reordering, duplicates and stalls of 10, 20
-and 40 ms. What must hold:
-
-```
-loss                 -> concealed, continuity unbroken
-duplicate            -> dropped, counted
-reordering in window -> decodes normally
-late packet          -> discarded, never played
-a stall              -> never unbounded occupancy
+**Evidencia**
+- commit:
+- results/:
+- gate:
 ```
 
-The loss arm must show concealment happening. An arm with nothing concealed either lost
-nothing or bypassed the mechanism, and both are failures of the gate rather than passes.
+---
 
-## A10 - audio and video and input together
+# 1. Alcance de v1.0
 
-1080p120 at 40 Mbps, plus Opus, plus input, for ten minutes. Bandwidth is not the question -
-audio is small beside video. Interference between subsystems is:
+La v1.0 debe permitir que un usuario normal:
+
+1. Instale LanPlay en Windows y macOS.
+2. Empareje ambos equipos.
+3. Seleccione/conecte el host.
+4. Inicie una sesión sin editar configs ni tocar el router.
+5. Reciba vídeo, audio e input.
+6. Use teclado, ratón y mando.
+7. Tenga reconexión y recuperación razonables.
+8. Obtenga adaptación automática ante una red que no soporte el modo solicitado.
+9. Reciba mensajes comprensibles si la red/equipo limita la calidad.
+10. Cierre la sesión sin dispositivos/teclas/botones virtuales atrapados.
+11. Pueda recopilar un diagnóstico sin conocer RTP, RSSI, NVENC, etc.
+
+## Fuera de la obligación de v1.0
+
+Salvo que una prueba posterior cambie la prioridad:
+
+- Internet/WAN/NAT traversal.
+- HDR.
+- AV1.
+- Micrófono/voice chat.
+- Surround 5.1/7.1.
+- Touchpad/gyro/lightbar DS4 completos.
+- Multi-controller avanzado.
+- Streaming Linux.
+- Host macOS.
+- Cloud relay.
+- APIs específicas de routers.
+- “Optimizar automáticamente el canal Wi‑Fi”.
+
+---
+
+# 2. Estado consolidado actual
+
+## 2.1 Vídeo — CLOSED / PASS
+
+- [x] IDD-LAB expone display virtual 1920×1080 @ 120 Hz.
+- [x] Output selection por nombre, no índice fijo.
+- [x] Desktop Duplication como captura productiva.
+- [x] WGC probado y no elegido para esta ruta.
+- [x] DDA event-driven/uncapped.
+- [x] Eliminado pacing independiente de DDA a 120 Hz.
+- [x] Conversión GPU BGRA → NV12.
+- [x] NV12 declarado ruta cerrada para 1080p120.
+- [x] NVENC low-latency.
+- [x] Protección multithread D3D11 corregida.
+- [x] Watchdogs bounded en llamadas potencialmente bloqueantes.
+- [x] RTP H.264 RFC6184.
+- [x] RTP completion-thread pacing eliminado.
+- [x] Payload baseline 1200 bytes.
+- [x] Startup control-plane ACK.
+- [x] Watchdog de primer frame.
+- [x] VideoToolbox hardware decode.
+- [x] Metal zero-copy.
+- [x] CAMetalDisplayLink/display-driven presentation.
+- [x] Latest-frame-wins.
+- [x] Soak de vídeo 600 s PASS.
+- [x] 72,000/72,000 AUs en soak final.
+- [x] 0 VT errors en soak final.
+- [x] Video gate oficialmente cerrado.
+
+### No reabrir sin nueva evidencia
+
+- DDA vs WGC.
+- BGRA directo vs NV12 para 1080p120.
+- RTP pacing en completion thread.
+- QoS como solución primaria.
+- MTU >1200 como solución de cadence.
+- Reducir bitrate como solución automática a cualquier stall.
+- “El p99 de AU interval es latencia one-way”.
+- “Input software ~0.2 ms es end-to-end”.
+- “DFS obliga por estándar a pausas de ~220 ms”.
+
+---
+
+# 3. Input teclado/ratón — MVP CLOSED
+
+- [x] Protocolo de input separado.
+- [x] Relative mouse.
+- [x] SendInput Windows.
+- [x] Keyboard scan codes.
+- [x] ACK/snapshots/reliability.
+- [x] ReleaseAll.
+- [x] Barrier por EventId para eventos anteriores a ReleaseAll.
+- [x] Buttons + wheel.
+- [x] Fault injection.
+- [x] Capture/focus UX.
+- [x] Heartbeat/liveness.
+- [x] Rocket League con SendInput.
+- [x] Virtual HID no requerido para MVP.
+- [x] Software latency decomposition.
+- [ ] `I11 physical input-to-photon` — DEFERRED por ausencia de hardware.
+
+### Regla
+
+No construir Virtual HID para teclado/ratón por preferencia arquitectónica. Solo si una incompatibilidad real lo exige.
+
+---
+
+# 4. Infraestructura de calidad / CI
+
+## Ya hecho
+
+- [x] CI verde en Windows/macOS según último reporte.
+- [x] `ci-annotate.sh`.
+- [x] Manifests declaran plataformas.
+- [x] `xtask platforms`.
+- [x] Cadence benchmark retirado de libtest.
+- [x] Verdict triestado PASS/FAIL/REFUSED.
+- [x] Loss accounting corregido más allá de 32768 RTP packets.
+- [x] Tests de wrap/reorder de loss.
+- [x] Gates estructurados en `tools/gates.toml`.
+
+## Pendiente permanente
+
+### Q0 — Cerrar deuda de controles negativos
+
+- [ ] Ejecutar `cargo run -p xtask -- gates --debt`.
+- [ ] Enumerar gates sin negative control.
+- [ ] Añadir controles factibles.
+- [ ] Marcar explícitamente los que requieren hardware/persona/host.
+- [ ] No fingir cobertura de un control imposible.
+
+### Q1 — Migrar parsers frágiles
+
+- [ ] Revisar gates que aún parsean prose/regex.
+- [ ] Migrar resultados críticos a JSON/envelope estructurado.
+- [ ] Gate debe REFUSE ante campos ausentes.
+- [ ] Añadir test de schema/version.
+
+### Q2 — Acciones GitHub
+
+- [ ] Verificar si actions siguen fijadas por tag.
+- [ ] Si se adopta política de SHA, implementar check real.
+- [ ] Corregir documentación que mencione subcomandos inexistentes.
+- [ ] No bloquear v1.0 si no cambia seguridad/reproducibilidad de forma material.
+
+---
+
+# 5. FASE N — NETWORK ROBUSTNESS & ADAPTATION
+
+> **SIGUIENTE FASE PRINCIPAL.**
+>
+> Objetivo: que LanPlay funcione para un usuario normal sin pedirle cambiar canales Wi‑Fi. La radio es una señal diagnóstica; el comportamiento real del stream decide.
+
+---
+
+## N0 — Contrato de observabilidad
+
+- [ ] Crear `NetworkObservation`.
+- [ ] Separar `RadioObservation` de `TransportObservation`.
+- [ ] Registrar:
+  - [ ] banda.
+  - [ ] canal.
+  - [ ] RSSI.
+  - [ ] PHY/transmit rate.
+  - [ ] packet loss.
+  - [ ] reorder.
+  - [ ] AU interval p50/p95/p99.
+  - [ ] `>1.25T`, `>1.5T`, `>2T`, `>3T`, etc.
+  - [ ] clusters/min.
+  - [ ] fresh tick ratio.
+  - [ ] audio late/concealment cuando esté disponible.
+- [ ] Todas las métricas deben llevar window id y session generation.
+- [ ] Distinguir “unavailable” de valor cero.
+
+### Gate N0
+
+- [ ] En una sesión conocida, todas las observaciones esperadas aparecen.
+- [ ] Campo eliminado/mutilado → REFUSED.
+- [ ] Población cero inesperada → REFUSED.
+
+---
+
+## N1 — NetworkMonitor pasivo
+
+- [ ] Implementar sampler CoreWLAN sin escaneo activo.
+- [ ] Prohibir `system_profiler SPAirPortDataType` dentro de gates de rendimiento.
+- [ ] Muestrear radio a baja frecuencia, baseline ~1 Hz.
+- [ ] Implementar rolling windows cortas y largas.
+- [ ] No asignar todavía GOOD/BAD automáticamente.
+- [ ] Registrar channel changes.
+- [ ] Registrar band changes.
+- [ ] Registrar PHY changes.
+
+### Gate N1-A — Neutralidad del monitor
+
+A/B:
+
+- [ ] monitor OFF.
+- [ ] monitor ON.
+- [ ] mismo stream.
+- [ ] comparar AU cadence.
+- [ ] comparar clusters.
+- [ ] comparar fresh tick.
+- [ ] monitor no debe inducir stalls medibles.
+
+### Gate N1-B — Soak
+
+- [ ] 10 min.
+- [ ] memoria plana.
+- [ ] muestras radio presentes.
+- [ ] métricas stream presentes.
+- [ ] active scans = 0.
+
+---
+
+## N2 — Startup Network Preflight
+
+- [ ] Crear `NetworkPreflightReport`.
+- [ ] Capturar snapshot radio inicial.
+- [ ] Ejecutar probe UDP parecido al tráfico real del stream.
+- [ ] Evitar Speedtest como sustituto.
+- [ ] Probe corto solo selecciona modo inicial; no certifica toda la sesión.
+- [ ] Guardar:
+  - [ ] loss.
+  - [ ] cadence.
+  - [ ] clusters.
+  - [ ] PHY.
+  - [ ] RSSI.
+  - [ ] band/channel.
+- [ ] Si información radio no está disponible, no bloquear: usar observaciones de tráfico.
+
+### Gate N2
+
+- [ ] good-known link produce reporte completo.
+- [ ] missing radio still yields usable stream-level report.
+- [ ] missing stream observations → REFUSED.
+- [ ] probe no deja sockets/threads/resources vivos.
+
+---
+
+## N3 — Taxonomía de degradaciones
+
+Implementar inicialmente como análisis/offline, no controlador.
+
+### N3-A Capacity pressure
+
+Caracterizar patrón:
+
+- [ ] loss aumenta con bitrate/capacidad.
+- [ ] bajar bitrate mejora integridad.
+- [ ] distinguir de cadence-only.
+
+### N3-B Cadence degradation
+
+Caracterizar:
+
+- [ ] loss ≈ 0.
+- [ ] stalls/clusters altos.
+- [ ] bitrate puede no ser causal.
+- [ ] no recomendar automáticamente bitrate.
+
+### N3-C Weak sustained link
+
+- [ ] PHY/RSSI bajan sostenidamente.
+- [ ] observar correlación con loss/cadence.
+- [ ] no convertir RSSI en criterio único.
+
+### N3-D Transient burst
+
+- [ ] detectar perturbación aislada.
+- [ ] no cambiar perfil por un único evento raro.
+
+### Gate N3
+
+Usar fixtures y sesiones reales:
+
+- [ ] cada clase conocida se reconoce.
+- [ ] una clase ambigua puede producir `UnknownDegradation`.
+- [ ] no forzar clasificación cuando evidencia insuficiente.
+
+---
+
+## N4 — Intervention Shootout
+
+> No automatizar nada hasta terminar esta fase.
+
+### N4-A Bitrate
+
+Reutilizar evidencia existente y repetir solo si hace falta:
+
+- [ ] 50 Mbps.
+- [ ] 45.
+- [ ] 40.
+- [ ] 35.
+- [ ] 30.
+- [ ] 25.
+- [ ] 20.
+
+Decidir:
+
+- [ ] qué reduce loss.
+- [ ] dónde está knee de integridad.
+- [ ] confirmar que no se vende bitrate reduction como solución universal de cadence.
+
+### N4-B FPS
+
+Comparar, idealmente con mismo display source para no mezclar decisiones:
+
+- [ ] 120 fps.
+- [ ] 90 fps.
+- [ ] 60 fps.
+- [ ] normalizar thresholds respecto al periodo correspondiente.
+- [ ] medir:
+  - [ ] loss.
+  - [ ] clusters.
+  - [ ] AU cadence.
+  - [ ] freshness.
+  - [ ] host cost.
+  - [ ] subjective responsiveness.
+
+### N4-C Resolución
+
+Solo después de bitrate/FPS:
+
+- [ ] 1080p baseline.
+- [ ] resolución inferior representativa.
+- [ ] mantener FPS constante cuando se estudie resolución.
+- [ ] verificar si menor resolución resuelve capacity, cadence o ninguna.
+
+### N4-D Mixed interventions
+
+Solo combinaciones justificadas:
+
+- [ ] bitrate + FPS.
+- [ ] bitrate + resolution.
+- [ ] no hacer grid combinatoria gigantesca sin hipótesis.
+
+### Resultado N4
+
+Crear tabla:
+
+```text
+degradation type -> proven intervention
+```
+
+Si una acción no demuestra mejora reproducible, queda fuera del controlador.
+
+---
+
+## N5 — NetworkHealth model
+
+- [ ] Crear enum:
+  - [ ] Healthy.
+  - [ ] CapacityPressure.
+  - [ ] CadenceDegraded.
+  - [ ] SevereLoss.
+  - [ ] TransientStall.
+  - [ ] UnknownDegradation.
+- [ ] Añadir confidence/evidence.
+- [ ] Añadir duration.
+- [ ] Añadir reason codes.
+- [ ] No crear score 0–100 como lógica primaria.
+
+---
+
+## N6 — Controller SHADOW MODE
+
+- [ ] Implementar decisiones sin aplicarlas.
+- [ ] Log:
+  - [ ] estado actual.
+  - [ ] acción propuesta.
+  - [ ] evidencia.
+  - [ ] duración.
+- [ ] Ejecutar sesiones normales.
+- [ ] Comparar manual/offline si habría actuado correctamente.
+
+### Gate N6
+
+- [ ] healthy → no propone cambios innecesarios.
+- [ ] single transient → no degrada perfil.
+- [ ] sustained capacity pressure → propone acción validada.
+- [ ] cadence-only → no baja bitrate si N4 demostró que no ayuda.
+- [ ] unavailable observations → no inventa diagnóstico.
+
+---
+
+## N7 — Bitrate Adaptation automática
+
+Solo si N4 la valida.
+
+- [ ] Definir ladder inicial basado en datos.
+- [ ] Fast down / slow up.
+- [ ] Hysteresis.
+- [ ] Cooldown.
+- [ ] Rate limit de cambios.
+- [ ] Reconfigurar NVENC sin restart total si es viable.
+- [ ] No resetear RTP innecesariamente.
+- [ ] No romper decoder.
+
+### Gate N7
+
+- [ ] good→bad: baja.
+- [ ] bad→good: recupera lentamente.
+- [ ] transient: no oscila.
+- [ ] 30 min soak: cambios limitados y explicables.
+
+---
+
+## N8 — FPS/Resolution adaptation
+
+Solo si N4 lo demuestra.
+
+- [ ] Definir perfiles.
+- [ ] Implementar mode negotiation vía control plane.
+- [ ] ACK antes de cutover.
+- [ ] Decoder/client actualizan configuración sin corrupción.
+- [ ] IDD mode change seguro si se decide cambiar display real.
+- [ ] Preferir cambio menos visible que resuelva el problema.
+
+### Gate N8
+
+- [ ] degradación reproducida → perfil inferior arregla métrica objetivo.
+- [ ] recuperación estable → perfil superior.
+- [ ] no flapping.
+- [ ] input/audio siguen funcionando durante transición.
+
+---
+
+## N9 — Protección de audio/input
+
+- [ ] Colas/sockets independientes.
+- [ ] Video es bandwidth elephant.
+- [ ] Congestión no debe bloquear input.
+- [ ] Congestión no debe bloquear audio.
+- [ ] Priorizar reducción de vídeo antes que añadir buffering global.
+- [ ] Probar saturación artificial.
+
+---
+
+## N10 — UX de red
+
+### Usuario normal
+
+- [ ] Estado simple: Excellent / Good / Limited / Poor.
+- [ ] Mensajes sin jerga.
+- [ ] Si está en 2.4 GHz y hay degradación, recomendar 5/6 GHz.
+- [ ] No exigir cambiar canal.
+- [ ] Explicar cuando LanPlay reduce calidad automáticamente.
+
+### Advanced diagnostics
+
+- [ ] band.
+- [ ] channel.
+- [ ] RSSI.
+- [ ] PHY.
+- [ ] loss.
+- [ ] clusters/stalls.
+- [ ] current profile.
+- [ ] reason for adaptation.
+- [ ] export report.
+
+---
+
+## N11 — Fault injection del controlador
+
+- [ ] 0.1/1/3 % loss.
+- [ ] reorder.
+- [ ] duplicates.
+- [ ] 10/30/50/100/200 ms stalls.
+- [ ] capacity limit.
+- [ ] good→bad→good.
+- [ ] one transient.
+- [ ] missing telemetry.
+
+Comprobar:
+
+- [ ] clasificación correcta o Unknown.
+- [ ] acción validada.
+- [ ] no oscilación.
+- [ ] input no sufre.
+- [ ] audio no sufre.
+- [ ] recuperación.
+- [ ] no acciones ante datos REFUSED.
+
+---
+
+## N12 — Full-session network soak
+
+- [ ] vídeo.
+- [ ] audio cuando A esté terminado.
+- [ ] teclado/ratón.
+- [ ] controller adaptation.
+- [ ] 30–60 min.
+- [ ] registrar:
+  - [ ] state transitions.
+  - [ ] profile changes.
+  - [ ] time per profile.
+  - [ ] unnecessary adaptations.
+  - [ ] video quality.
+  - [ ] audio concealment.
+  - [ ] input health.
+
+### Salida fase N
+
+Network Adaptation queda cerrada cuando:
+
+- [ ] funciona sin tocar router.
+- [ ] sabe detectar limitaciones.
+- [ ] usa solo intervenciones demostradas.
+- [ ] no oscila.
+- [ ] usuario recibe explicación comprensible.
+- [ ] no sacrifica audio/input para mantener vídeo.
+
+---
+
+# 6. FASE A — AUDIO
+
+## Estado
+
+- [x] A0 contrato/telemetría.
+- [x] WASAPI loopback.
+- [x] Opus.
+- [x] RTP audio.
+- [x] jitter buffer.
+- [x] CoreAudio.
+- [x] Windows→Mac funcional.
+- [x] A6.1 sender cadence audit: emisor inocente.
+- [x] Segundo Opus frame tiene ~5 ms más margen.
+- [x] A6.2 pacing sender tachado.
+- [x] A7 drift cerrado.
+- [x] A8 fixed-target sweep: no selecciona candidato ≤20 ms de forma reproducible.
+- [x] Radio estable puede seguir mostrando cola larga.
+- [x] Pérdida y lateness ya diferenciadas.
+- [x] Identidades de conceal/underrun corregidas.
+
+## A8.1 — Long-run excess-delay distribution — **PASS**
+
+Evidencia: `results/audio/jitter-excess/radio1/`. Harness `tools/jitter-excess.sh`, aritmética en
+`tools/jitter-excess.py`, módulo `macos/audio-render/src/excess.rs`.
+
+- [x] Construir métrica target-independent de excess delay.
+- [x] Una sola población larga: 120005 llegadas sobre 600 s.
+- [x] Radio/NetworkObservation registrada continuamente: traza por brazo, canal 36 / 80 MHz.
+- [x] Exigir loss=0 para curva "lateness-only": 0 perdidos, 0 huecos de timeline, 0 render underruns
+      sobre 112493 callbacks. Un paquete perdido rehúsa la corrida.
+- [x] Construir survival curve `P(excess > T)`.
+- [x] Leer virtualmente T: 5, 10, 15, 20, 25, 30, 40, 50, 60, 80, 100 ms.
+- [x] No interpretar >20 ms como autorización de buffer >20: el harness lo imprime en cada corrida.
+
+### La curva
+
+| T | tardíos | % | clusters | /min | uno cada | frames/cluster p50/p95/max |
+|---|---|---|---|---|---|---|
+| 5 | 60916 | 50.7612 | 59055 | — | — | 1 / 1 / 23 |
+| 10 | 1494 | 1.2449 | 416 | 41.60 | 1.4 s | 1 / 12 / 20 |
+| 15 | 1033 | 0.8608 | 209 | 20.90 | 2.9 s | 4 / 12 / 19 |
+| 20 | 802 | 0.6683 | 162 | 16.20 | 3.7 s | 4 / 12 / 18 |
+| 25 | 631 | 0.5258 | 125 | 12.50 | 4.8 s | |
+| 30 | 504 | 0.4200 | 101 | 10.10 | 5.9 s | |
+| 40 | 319 | 0.2658 | 66 | 6.60 | 9.1 s | |
+| 50 | 196 | 0.1633 | 49 | 4.90 | 12.2 s | |
+| 60 | 103 | 0.0858 | 34 | 3.40 | 17.6 s | |
+| 80 | 20 | 0.0167 | 6 | tasa retirada | | |
+| 100 | 2 | 0.0017 | 1 | tasa retirada | | |
+
+Excess corregido: p50 5.327, p95 7.669, p99 12.376, max 109.541 ms. Peor cluster 109.5 ms en todos
+los umbrales — un solo evento que ningún target alcanza.
+
+### La corrección de deriva era obligatoria, y la corrida lo demuestra
+
+El reloj fuente corre a **+15.81 ppm** referido al timebase de este Mac contra los **+9.29 ppm** de A7:
+razón 1.70, dentro del factor de dos, así que las dos medidas concuerdan. La corrección valió
+**−9.48 ms acumulados** sobre la corrida y quitó **5.313 ms del p99 crudo** — más que los 5 ms que
+separan targets adyacentes. Sin corregir, la curva habría ordenado posición-en-la-corrida en vez del
+enlace.
+
+El estimador no es mínimos cuadrados y la razón está medida: en loopback con deriva verdadera cero y
+`udp-fault` reteniendo el 5 %, la pendiente sobre todos los puntos leyó −6.92 ppm y el ajuste por
+mínimos de bloque +0.07. Aquí los dos concuerdan (+15.69 contra +15.81) porque el enlace estaba limpio,
+y esa concordancia es informativa sólo porque el caso donde discrepan ya se había construido.
+
+### Por debajo de 15 ms la curva mide el emisor, no el aire
+
+La fila de 5 ms lee **50.7612 %** en clusters de un frame separados por huecos de un frame. Esa
+alternancia es la firma: un paquete WASAPI de 10 ms son dos frames Opus enviados juntos, el segundo
+está un frame más tarde en tiempo de stream, y su excess es exactamente un frame menor. A6.1 lo midió
+desde el otro lado — Δ = −4.996 ms al p50, 96 % de los pares en el bucket [−5,−4), y el primero es el
+que llega tarde en la práctica: 524 contra 384, 476 contra 354, 8594 contra 6391.
+
+**Es un suelo estructural**: ningún target por debajo del espaciado del par puede sostener a los dos
+miembros. No autoriza espaciar el par en el emisor, y el argumento que lo proponía se retiró por error
+de signo — está en `TASKS-AUDIO.md`.
+
+### Objetivo: qué forma tiene la cola
+
+- [x] **Una única heavy-tail distribution.** No régimen normal + stalls raros.
+
+Razón entre umbrales, normalizada a 10 ms:
 
 ```
-does audio add video stalls?
-do video bursts cause audio underruns?
-do the audio threads disturb NVENC?
-does CoreAudio disturb the display link?
-does input stay clean?
+15 -> 50 ms    x0.603  x0.619  x0.638  x0.633  x0.614     exponencial, tau ~ 21 ms
+50 -> 100 ms   x0.526  x0.441  x0.316                     cae MAS rapido
 ```
 
-The gate is that all three existing gates still pass. No subsystem may buy its success by
-breaking another.
+Un segundo mecanismo con su propia escala produciría un tramo **más lento** — una meseta o un bulto.
+Esto acelera por encima de 50 ms y se agota alrededor de 110. `[INFERENCIA a partir de la forma]`: una
+sola distribución con cola truncada. El tramo 10→15 (×0.478) queda fuera del ajuste porque ahí manda
+la cadencia del emisor, no el enlace.
 
-## A11 - A/V sync
+**Consecuencia: no hay acantilado, así que no hay target "natural".** Cada 10 ms compran ×0.62. La
+elección es económica, no matemática, y es exactamente lo que A8.2 tiene que decidir.
 
-Not before both work on their own. Then a Windows source that emits a visual flash and an
-audio click from the same event, so relative skew can be characterised without external
-hardware.
+### Reporte A8.1
 
-The product rule, decided in advance so a measurement does not quietly become a policy:
-**do not delay video systematically to achieve perfect lip sync.** This is an interactive
-streamer. Given a choice between perfect A/V with 20 ms more latency and a small skew with
-8 ms less, take the second while the skew stays perceptually acceptable. Measure first, and
-say what acceptable turned out to mean.
+**Estado:** PASS
 
-## A12 - per-process capture
+**Qué se cambió**
+- Nuevo `macos/audio-render/src/excess.rs`: traza acotada, ajuste de deriva por mínimos de bloque, dos
+  curvas de supervivencia y contabilidad de clusters por umbral.
+- `receive.rs` registra el primitivo a partir de la resta que ya hacía; `Receipt.excess` lo lleva.
+- `receive_envelope.rs`: observaciones, findings y tabla `environment.excess`. Sin entradas nuevas en
+  `checks`, deliberadamente, para no alterar el veredicto de `audio-e2e-gate`.
+- `tools/jitter-excess.sh` y `tools/jitter-excess.py` con modo `selftest`.
+- Registrado en `tools/gates.toml` como fase A8.1, 16 minutos.
 
-`AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK` includes or excludes a PID and its
-children, from Windows 10 build 20348. It offers system audio or game-only audio as a
-choice.
+**Qué se midió**
+- 120005 llegadas / 600 s, 60 bloques de 10 s, 0 perdidos, 0 huecos, 0 render underruns sobre 112493
+  callbacks. Concealment 179040 de 28800000 muestras, 0.6217 % al target de 10 ms con que corrió.
+- Curva y clusters en la tabla de arriba. Deriva +15.81 ppm contra los +9.29 de A7, razón 1.70.
 
-Last, and explicitly not allowed to delay anything above it.
+**Control negativo**
+- `udp-fault --reorder 5 --reorder-hold-ms 40 --seed 20250815` relayado en este lado de la radio, brazo
+  de 120 s, corrido **antes** del de 600. Los cuatro criterios se cumplieron: la población inyectada
+  aparece en la curva (5.224 % pasado 30 ms contra 5.0 inyectado), es un escalón y no una cola (1254
+  frames pasado 30 ms contra 24 pasado 60), el escalón está donde se inyectó (p95 a 40.61 ms contra un
+  hold de 40) y el brazo limpio no lo muestra (0.4200 % contra 5.224).
+- Mostrado en los dos sentidos: el `selftest` alimenta la misma decisión con un control que no inyectó
+  nada y se lee como no disparado, 3 de 4 criterios roto. Un control que dispara pase lo que pase no
+  demuestra nada.
 
-## Deliberately out of scope
+**Refusals ejercitados**
+- 17 en `jitter-excess.py selftest`, cada uno sobre un documento mutado en un solo campo, con el
+  documento sin mutar obligado a pasar.
+- Tres sobre condiciones reales: la longitud mínima rehusó un documento de loopback de 40 s; el
+  preflight de radio rehusó tres ventanas reales a −0.618, −0.724 y −4.305 dB/min contra 3 dB; la
+  precondición de entorno rehusó cuando el host perdió el cable, nombrando `windows-host` ausente.
 
-Surround, spatial audio, Dolby, microphone forwarding, voice chat, echo cancellation,
-Opus in-band FEC, audio NACK, separate audio encryption, Bluetooth compensation, per-app
-mixing.
+**Evidencia**
+- `results/audio/jitter-excess/radio1/` (brazo limpio y control, con trazas de radio)
+- `results/audio/jitter-excess/loopback600/`
+- gate: `tools/jitter-excess.sh 600 120`, exit 0, 15m56s
 
-FEC and NACK stay out until A6 has produced a real loss figure. The audio deadline is too
-short to build recovery because something sounds right, and the plan is explicit that loss
-gets measured before anything is built to hide it.
+---
+
+## A8.2 — Latency vs concealment decision
+
+- [ ] Traducir cada T a:
+  - [ ] fixed latency cost.
+  - [ ] concealment ratio.
+  - [ ] cluster structure.
+- [ ] Distinguir:
+  - [ ] playout continuity.
+  - [ ] source fidelity/concealment.
+- [ ] Escucha cualitativa de PLC en casos representativos.
+- [ ] No exigir PLC=0 por dogma.
+- [ ] Elegir el menor target con tradeoff aceptable.
+- [ ] Si ningún target ≤20 ms es aceptable, documentar explícitamente decisión de producto.
+
+---
+
+## A9 — Audio fault injection
+
+Con target elegido:
+
+- [ ] loss 0.1/0.5/1/3%.
+- [ ] reorder.
+- [ ] duplicates.
+- [ ] stalls 10/20/40/80/200 ms.
+- [ ] late packets dropped correctamente.
+- [ ] PLC/concealment correcto.
+- [ ] no backlog infinito.
+- [ ] no device underrun sostenido.
+- [ ] no stale retransmission.
+
+### FEC
+
+- [ ] No implementar por defecto.
+- [ ] Solo abrir experimento si A8.1 muestra misses aislados donde pueda ayudar.
+- [ ] NACK permanece fuera salvo evidencia de deadline recuperable.
+
+---
+
+## A10 — Audio + vídeo + input
+
+- [ ] 1080p120 baseline cuando NetworkController lo permita.
+- [ ] Opus audio.
+- [ ] keyboard/mouse.
+- [ ] 10 min.
+- [ ] comprobar:
+  - [ ] video gate sigue PASS.
+  - [ ] audio gate PASS.
+  - [ ] input gate PASS.
+  - [ ] no starvation entre threads.
+  - [ ] no colas crecientes.
+
+---
+
+## A11 — A/V relative sync
+
+- [ ] Crear fuente flash + click nacidos del mismo evento/clock.
+- [ ] Medir skew relativo.
+- [ ] Medir drift de skew.
+- [ ] No añadir buffering de vídeo para lip-sync perfecto sin demostrar necesidad.
+- [ ] Definir tolerancia perceptual/producto.
+- [ ] Si requiere corrección:
+  - [ ] preferir corrección audio rate/phase pequeña.
+  - [ ] evitar latency global grande.
+
+---
+
+## A12 — Process-specific capture
+
+No blocker de audio básico.
+
+- [ ] System mix baseline.
+- [ ] Evaluar process loopback.
+- [ ] Game only.
+- [ ] Excluir LanPlay/client sounds si procede.
+- [ ] Fallback claro si no disponible.
+
+---
+
+## A13 — Audio lifecycle
+
+- [ ] endpoint cambia.
+- [ ] device unplug.
+- [ ] Bluetooth headset connect/disconnect.
+- [ ] default output changes.
+- [ ] sample rate changes.
+- [ ] silent endpoint.
+- [ ] session reconnect.
+- [ ] no stuck audio thread.
+- [ ] no huge buffer after resume.
+
+### Salida fase A
+
+- [ ] audio estable.
+- [ ] target decidido.
+- [ ] concealment conocido.
+- [ ] drift controlado.
+- [ ] vídeo/input no degradados.
+- [ ] A/V sync aceptable.
+- [ ] lifecycle seguro.
+
+---
+
+# 7. FASE G — GAMEPAD, PRIORIDAD DUALSHOCK 4
+
+Puede desarrollarse en paralelo con audio/network siempre que no se cambien simultáneamente contratos compartidos sin coordinación.
+
+---
+
+## G0 — Gamepad protocol/model
+
+- [ ] `GamepadStateV1`.
+- [ ] session generation.
+- [ ] controller slot.
+- [ ] sequence.
+- [ ] buttons bitmask.
+- [ ] D-pad.
+- [ ] sticks.
+- [ ] triggers.
+- [ ] normalización independiente Sony/Xbox.
+
+Baseline:
+
+```text
+sticks   i16
+triggers u16
+```
+
+- [ ] Tests mapping.
+- [ ] Tests neutral state.
+
+---
+
+## G1 — DualShock 4 capture macOS
+
+Con GameController.framework:
+
+- [ ] detectar DS4.
+- [ ] Bluetooth.
+- [ ] USB.
+- [ ] Cross/Circle/Square/Triangle.
+- [ ] L1/R1.
+- [ ] L2/R2 analógicos.
+- [ ] L3/R3.
+- [ ] Share/Options/PS.
+- [ ] D-pad.
+- [ ] LX/LY/RX/RY.
+- [ ] touchpad click detectado aunque no se transmita aún.
+- [ ] callback cadence.
+- [ ] axis range.
+- [ ] neutral noise.
+- [ ] disconnect.
+
+### Gate G1
+
+- [ ] all standard controls observed.
+- [ ] full range.
+- [ ] neutral state.
+- [ ] USB/Bluetooth comparable documentados.
+
+---
+
+## G2 — Transporte state-based
+
+- [ ] Event-driven immediate send.
+- [ ] Periodic full state snapshot.
+- [ ] Baseline 120 Hz repair snapshot, validar.
+- [ ] Highest sequence wins.
+- [ ] Stale states dropped.
+- [ ] No retransmit de sticks antiguos.
+- [ ] No queue growth.
+
+---
+
+## G3 — Attach/detach control plane
+
+- [ ] reliable attach.
+- [ ] ACK.
+- [ ] reliable detach.
+- [ ] heartbeat/session timeout.
+- [ ] neutralize on:
+  - [ ] detach.
+  - [ ] disconnect.
+  - [ ] timeout.
+  - [ ] generation switch.
+  - [ ] session failure.
+
+---
+
+## G4 — Fault injection
+
+- [ ] loss 1/3/5%.
+- [ ] duplicate.
+- [ ] reorder.
+- [ ] stalls.
+- [ ] stale applied = 0.
+- [ ] stuck state = 0.
+- [ ] convergence.
+- [ ] reconnect.
+
+### Digital short presses
+
+- [ ] Medir si state-based pierde taps cortos.
+- [ ] Si sí, diseñar edge recovery con deadline.
+- [ ] No añadir reliability pesada preventivamente.
+
+---
+
+## G5 — Windows virtual backend abstraction
+
+- [ ] Crear trait/interfaz `VirtualGamepadBackend`.
+- [ ] `create`.
+- [ ] `submit_state`.
+- [ ] `poll_feedback`.
+- [ ] `destroy`.
+- [ ] Slot-aware.
+- [ ] Backend intercambiable.
+
+### Backend
+
+- [ ] Evaluar backend virtual actual y mantenido.
+- [ ] No atar protocolo a una librería concreta.
+- [ ] ViGEm no debe ser dependencia estratégica nueva sin aceptar que está archivado.
+- [ ] Si se usa un backend externo, documentar instalación/licencia/signing/lifecycle.
+
+---
+
+## G6 — Xbox 360 compatibility mode
+
+Default v1:
+
+- [ ] DS4 Cross → A.
+- [ ] Circle → B.
+- [ ] Square → X.
+- [ ] Triangle → Y.
+- [ ] L1/R1 → LB/RB.
+- [ ] L2/R2 → LT/RT.
+- [ ] Share → Back/View.
+- [ ] Options → Start/Menu.
+- [ ] PS → Guide si backend lo permite.
+- [ ] sticks.
+- [ ] D-pad.
+
+### Synthetic gate
+
+- [ ] values -1/-0.5/0/+0.5/+1.
+- [ ] trigger 0/25/50/75/100%.
+- [ ] buttons down/held/up.
+- [ ] host reconstructed state exact dentro de cuantización.
+- [ ] Windows game API observa lo esperado.
+
+---
+
+## G7 — Rocket League gate
+
+DS4 Mac → Wi-Fi → Windows virtual Xbox → Rocket League.
+
+- [ ] steering.
+- [ ] camera.
+- [ ] throttle/brake analog.
+- [ ] all face buttons.
+- [ ] bumpers.
+- [ ] Options.
+- [ ] D-pad.
+- [ ] Bluetooth arm.
+- [ ] USB arm.
+- [ ] telemetry:
+  - [ ] Mac callback→send local.
+  - [ ] Windows receive→virtual submit local.
+  - [ ] stale/reorder/drop.
+  - [ ] neutralizations.
+
+No llamar a métricas locales “end-to-end physical latency”.
+
+---
+
+## G8 — Soak/lifecycle
+
+- [ ] 10 min synthetic cycling.
+- [ ] 0 stuck buttons.
+- [ ] 0 stale applied.
+- [ ] 0 divergence.
+- [ ] 50–100 connect/disconnect.
+- [ ] reconnect.
+- [ ] session restart.
+- [ ] Windows sleep/resume si aplica.
+- [ ] Mac controller disconnect/reconnect.
+
+---
+
+## G9 — Rumble
+
+Después del MVP.
+
+- [ ] Capturar output feedback del virtual pad.
+- [ ] Transport feedback latest-wins.
+- [ ] Aplicar a DS4.
+- [ ] No retransmitir rumble viejo.
+- [ ] Validate USB/Bluetooth behavior.
+
+---
+
+## G10 — Native DS4 mode
+
+Post compatibility MVP, quizá v1.x.
+
+- [ ] DualShock 4 virtual identity.
+- [ ] touchpad.
+- [ ] touchpad click.
+- [ ] gyro.
+- [ ] accelerometer.
+- [ ] lightbar si aporta valor.
+- [ ] negociación `Xbox360 | DualShock4`.
+
+---
+
+## G11 — Multi-controller
+
+Puede ser post-v1 si no es requisito.
+
+- [ ] slots 0–3.
+- [ ] sequence por mando.
+- [ ] virtual device por mando.
+- [ ] feedback por mando.
+- [ ] reconnect preserving slot policy.
+
+### Salida fase G v1
+
+- [ ] DS4 Bluetooth funciona.
+- [ ] DS4 USB funciona.
+- [ ] Windows ve virtual Xbox.
+- [ ] Rocket League PASS.
+- [ ] soak PASS.
+- [ ] no stuck state.
+- [ ] rumble deseable, no necesariamente blocker si no se define como requisito.
+
+---
+
+# 8. FASE C — CODEC SHOOTOUT
+
+No tocar codec antes de cerrar estabilidad funcional básica.
+
+## C0 — Harness comparable
+
+- [ ] misma fuente.
+- [ ] mismo modo.
+- [ ] misma escena.
+- [ ] mismo network environment.
+- [ ] mismas métricas.
+- [ ] encoder config registrada.
+
+---
+
+## C1 — H.264 baseline refresh
+
+- [ ] medir encode latency.
+- [ ] bitrate.
+- [ ] quality proxy.
+- [ ] decode latency.
+- [ ] CPU/GPU.
+- [ ] compatibility.
+
+---
+
+## C2 — HEVC shootout
+
+- [ ] NVENC HEVC low-latency config.
+- [ ] VideoToolbox HEVC hardware decode.
+- [ ] 1080p120.
+- [ ] varios bitrates equivalentes.
+- [ ] comparar:
+  - [ ] encode p50/p95/p99.
+  - [ ] decode.
+  - [ ] bitrate for quality.
+  - [ ] host impact.
+  - [ ] network behavior.
+  - [ ] startup/config changes.
+  - [ ] compatibility.
+
+### Decisión
+
+- [ ] Si HEVC gana claramente sin coste relevante, permitirlo.
+- [ ] H.264 debe permanecer fallback de compatibilidad salvo razón fuerte.
+
+---
+
+## C3 — Codec negotiation
+
+- [ ] capability exchange.
+- [ ] client supported codecs.
+- [ ] host supported codecs.
+- [ ] deterministic selection.
+- [ ] fallback.
+- [ ] rejoin after unsupported config.
+- [ ] no silent mismatch SPS/PPS/config.
+
+---
+
+## C4 — AV1
+
+DEFERRED post-v1 salvo que hardware/compatibilidad lo hagan trivial y claramente superior.
+
+---
+
+# 9. FASE R — RESOLUCIONES Y MODOS
+
+## R0 — Mode negotiation contract
+
+- [ ] width.
+- [ ] height.
+- [ ] refresh rate.
+- [ ] codec constraints.
+- [ ] bitrate/profile.
+- [ ] virtual display mode.
+- [ ] control-plane ACK/cutover.
+
+---
+
+## R1 — 2560×1600 @120
+
+- [ ] añadir modo IDD si requerido.
+- [ ] DDA capture.
+- [ ] NV12 conversion.
+- [ ] NVENC.
+- [ ] RTP.
+- [ ] Mac decode.
+- [ ] Metal presentation.
+- [ ] 60 s gate.
+- [ ] 600 s soak.
+- [ ] host impact under real game.
+- [ ] network bitrate sweep.
+
+### Gate
+
+No declarar soportado solo porque “arranca”.
+
+Debe pasar:
+
+- [ ] cadence.
+- [ ] encode/decode.
+- [ ] no pool exhaustion.
+- [ ] client presentation.
+- [ ] network profile viable.
+
+---
+
+## R2 — 1440p / display-friendly modes
+
+Según producto:
+
+- [ ] 2560×1440.
+- [ ] otros modos necesarios por pantallas comunes.
+- [ ] evitar catálogo enorme inicialmente.
+- [ ] test de aspect ratio/scaling.
+
+---
+
+## R3 — 60/90/120 Hz
+
+- [ ] modo 60.
+- [ ] modo 90 si hardware/API lo soporta y N4 demuestra utilidad.
+- [ ] modo 120.
+- [ ] UI no promete 120 si el cliente/display/network no lo sostienen.
+
+---
+
+# 10. FASE V — PIPELINE SHOOTOUT / HOST EFFICIENCY
+
+> Optimización posterior. La ruta actual ya funciona.
+
+## V0 — Métricas baseline
+
+- [ ] copies.
+- [ ] GPU time.
+- [ ] CPU.
+- [ ] memory bandwidth proxy.
+- [ ] game impact.
+- [ ] capture→NVENC.
+
+---
+
+## V1 — IDD/direct-surface feasibility
+
+- [ ] estudiar si una ruta IDD→NVENC más directa es viable con APIs reales.
+- [ ] no construir si requiere arquitectura desproporcionada.
+- [ ] prototype mínimo.
+- [ ] comparar contra DDA→NV12→NVENC.
+
+### Decisión
+
+Solo sustituir baseline si mejora de forma clara:
+
+- [ ] latency.
+- [ ] host game impact.
+- [ ] robustness.
+- [ ] copy count.
+
+No reescribir una ruta cerrada por elegancia.
+
+---
+
+## V2 — GPU power/downclock robustness
+
+Problema conocido:
+
+- [ ] reproducir clocks idle/downclock sin clock lock.
+- [ ] probar configuración “prefer max performance” o equivalente soportada.
+- [ ] probar workload keepalive mínimo solo si necesario.
+- [ ] medir consumo adicional.
+- [ ] no requerir clock locking manual del usuario.
+- [ ] fallback/degradation si encoder cadence cae por clocks.
+
+---
+
+# 11. FASE S — SESSION / CONTROL PLANE HARDENING
+
+## S0 — Session state machine
+
+Definir estados explícitos:
+
+```text
+Disconnected
+Pairing
+Connecting
+Negotiating
+Starting
+Streaming
+Degraded
+Reconnecting
+Stopping
+Failed
+```
+
+- [ ] transiciones válidas.
+- [ ] timeouts.
+- [ ] idempotencia.
+- [ ] generation numbers.
+- [ ] stale packet rejection.
+
+---
+
+## S1 — Capability negotiation
+
+Host anuncia:
+
+- [ ] codecs.
+- [ ] max encode modes.
+- [ ] virtual display modes.
+- [ ] audio capabilities.
+- [ ] gamepad backend availability.
+- [ ] input capabilities.
+
+Client anuncia:
+
+- [ ] hardware decode.
+- [ ] display refresh.
+- [ ] codecs.
+- [ ] audio output.
+- [ ] controller features.
+
+- [ ] resolver perfil deterministicamente.
+- [ ] registrar por qué se eligió.
+
+---
+
+## S2 — Startup transaction
+
+Ya existe ACK de startup; generalizar:
+
+- [ ] announce.
+- [ ] config.
+- [ ] ACK.
+- [ ] cutover.
+- [ ] first-frame watchdog.
+- [ ] audio-ready.
+- [ ] input-ready.
+- [ ] gamepad-ready.
+- [ ] failure rollback.
+
+---
+
+## S3 — Reconnection
+
+- [ ] Wi-Fi dropout.
+- [ ] Mac sleep/wake.
+- [ ] host process restart.
+- [ ] renderer restart.
+- [ ] audio endpoint restart.
+- [ ] generation bump.
+- [ ] ReleaseAll/neutral gamepad before reconnect.
+- [ ] bounded reconnect attempts.
+- [ ] clear UX.
+
+---
+
+## S4 — Session teardown
+
+- [ ] stop admitting input first.
+- [ ] ReleaseAll.
+- [ ] neutral gamepads.
+- [ ] stop audio.
+- [ ] stop video.
+- [ ] destroy virtual display if policy says so.
+- [ ] close sockets.
+- [ ] join threads bounded.
+- [ ] no leaked devices/resources.
+
+---
+
+# 12. FASE D — DISCOVERY, PAIRING Y CONNECTION UX
+
+## D0 — Host discovery
+
+Para LAN-first:
+
+- [ ] evaluar mDNS/Bonjour o mecanismo equivalente.
+- [ ] listado automático de hosts.
+- [ ] manual IP fallback.
+- [ ] host identity estable.
+- [ ] duplicate names handled.
+
+---
+
+## D1 — Pairing
+
+- [ ] usuario debe aprobar primer emparejamiento.
+- [ ] código/PIN o mecanismo equivalente.
+- [ ] persistir trust de forma segura.
+- [ ] revoke device.
+- [ ] show paired clients.
+
+---
+
+## D2 — Connection selection
+
+- [ ] host list.
+- [ ] online/offline.
+- [ ] last used.
+- [ ] connect.
+- [ ] disconnect.
+- [ ] network quality preview cuando exista.
+
+---
+
+# 13. FASE SEC — SECURITY
+
+> Obligatoria para distribuir el programa, incluso en LAN.
+
+## SEC0 — Threat model
+
+Documentar:
+
+- [ ] atacante en misma LAN.
+- [ ] spoofed client.
+- [ ] spoofed host.
+- [ ] replay.
+- [ ] packet injection.
+- [ ] control session hijack.
+- [ ] input injection.
+- [ ] credentials/secrets at rest.
+
+---
+
+## SEC1 — Authentication
+
+- [ ] identidad host.
+- [ ] identidad client.
+- [ ] pairing keys.
+- [ ] no trust por IP.
+- [ ] key rotation/re-pair policy.
+
+---
+
+## SEC2 — Encryption/integrity
+
+Tomar decisión explícita para:
+
+- [ ] control plane.
+- [ ] video.
+- [ ] audio.
+- [ ] input.
+- [ ] gamepad.
+
+No fijar ahora una tecnología por estética. Hacer design review comparando opciones compatibles con low-latency UDP/RTP.
+
+Requisitos:
+
+- [ ] confidentiality cuando corresponda.
+- [ ] integrity/authentication siempre que un packet pueda causar input/control.
+- [ ] anti-replay.
+- [ ] negligible overhead medido.
+- [ ] no bloquear hot paths.
+
+---
+
+## SEC3 — Security gates
+
+- [ ] una máquina no emparejada no puede inyectar input.
+- [ ] replay no aplica evento.
+- [ ] stale generation rejected.
+- [ ] tampered packet rejected.
+- [ ] revoked client cannot reconnect.
+- [ ] logs no filtran claves.
+
+---
+
+# 14. FASE UX — PRODUCTO
+
+## UX0 — Host Windows app
+
+- [ ] status tray/app.
+- [ ] service/backend lifecycle.
+- [ ] virtual display status.
+- [ ] current client.
+- [ ] resolution/FPS.
+- [ ] network status.
+- [ ] disconnect button.
+- [ ] paired devices.
+- [ ] logs/export diagnostics.
+- [ ] start on login opcional.
+
+---
+
+## UX1 — Client macOS app
+
+- [ ] host discovery screen.
+- [ ] pairing.
+- [ ] connect.
+- [ ] stream view.
+- [ ] capture/release input UX.
+- [ ] fullscreen.
+- [ ] network quality.
+- [ ] profile/quality selection:
+  - [ ] Auto.
+  - [ ] manual advanced.
+- [ ] audio output.
+- [ ] controller status.
+- [ ] disconnect.
+
+---
+
+## UX2 — Settings
+
+Normal:
+
+- [ ] Auto quality default.
+- [ ] max resolution.
+- [ ] max FPS.
+- [ ] audio on/off.
+- [ ] controller on/off.
+
+Advanced:
+
+- [ ] codec preference.
+- [ ] bitrate cap.
+- [ ] diagnostics.
+- [ ] network details.
+- [ ] logging level.
+
+Evitar exponer knobs que el controlador puede resolver solo.
+
+---
+
+## UX3 — Errors
+
+Mensajes concretos:
+
+- [ ] host unreachable.
+- [ ] pairing rejected.
+- [ ] decoder unsupported.
+- [ ] virtual display failed.
+- [ ] encoder unavailable.
+- [ ] network limited.
+- [ ] audio device unavailable.
+- [ ] gamepad backend unavailable.
+
+Siempre incluir acción razonable, no stack traces.
+
+---
+
+# 15. FASE PKG — INSTALACIÓN Y ACTUALIZACIONES
+
+## PKG0 — Windows packaging
+
+- [ ] host binary/app.
+- [ ] IDD driver.
+- [ ] virtual gamepad dependency/backend si aplica.
+- [ ] signing.
+- [ ] installer.
+- [ ] upgrade.
+- [ ] uninstall.
+- [ ] cleanup devices/drivers.
+- [ ] rollback ante instalación parcial.
+
+---
+
+## PKG1 — macOS packaging
+
+- [ ] signed app bundle.
+- [ ] hardened runtime según requisitos.
+- [ ] notarization.
+- [ ] entitlements mínimos.
+- [ ] controller permissions si aplica.
+- [ ] network permissions/prompts.
+- [ ] install/update flow.
+
+---
+
+## PKG2 — Version compatibility
+
+- [ ] protocol version.
+- [ ] min/max compatible version.
+- [ ] graceful incompatible-version error.
+- [ ] upgrade path.
+- [ ] feature negotiation compatible con versiones distintas.
+
+---
+
+## PKG3 — Updates
+
+- [ ] decidir estrategia update.
+- [ ] signed update metadata.
+- [ ] no auto-update inseguro.
+- [ ] host/client mismatch handled.
+- [ ] rollback si update falla.
+
+---
+
+# 16. FASE OBS — DIAGNÓSTICO Y TELEMETRÍA LOCAL
+
+## OBS0 — Session report
+
+Cada sesión debe poder resumir:
+
+- [ ] negotiated mode.
+- [ ] codec.
+- [ ] bitrate.
+- [ ] video cadence.
+- [ ] loss.
+- [ ] audio concealment.
+- [ ] input health.
+- [ ] gamepad health.
+- [ ] network adaptation actions.
+- [ ] relevant radio summary.
+- [ ] errors/watchdogs.
+
+---
+
+## OBS1 — Export diagnostics
+
+- [ ] botón “Export diagnostics”.
+- [ ] redactar secretos.
+- [ ] redactar datos sensibles innecesarios.
+- [ ] incluir versions.
+- [ ] hardware capabilities.
+- [ ] latest session envelope.
+- [ ] crash data si procede.
+
+---
+
+## OBS2 — Privacy
+
+- [ ] telemetría remota OFF salvo decisión explícita.
+- [ ] si se añade analytics, consentimiento/documentación.
+- [ ] no enviar input contents.
+- [ ] no enviar SSIDs si no es imprescindible.
+- [ ] retention policy.
+
+---
+
+# 17. FASE QA — MATRIZ DE COMPATIBILIDAD
+
+## QA0 — Windows hosts
+
+Probar al menos varias clases cuando haya hardware:
+
+- [ ] NVIDIA soportada baseline.
+- [ ] distintas versiones driver.
+- [ ] Windows supported versions.
+- [ ] single monitor.
+- [ ] multi-monitor.
+- [ ] HDR host aunque stream SDR.
+- [ ] display sleep/wake.
+
+No declarar AMD/Intel encoder soportado sin backend y gates reales.
+
+---
+
+## QA1 — macOS clients
+
+- [ ] Apple Silicon principal.
+- [ ] distintas versiones macOS soportadas.
+- [ ] 60 Hz display.
+- [ ] 120 Hz/ProMotion si procede.
+- [ ] Wi-Fi 5.
+- [ ] Wi-Fi 6/6E si hay hardware.
+- [ ] Bluetooth audio.
+- [ ] speakers/headphones.
+
+---
+
+## QA2 — Routers/network
+
+No optimizar para un único AP:
+
+- [ ] 2.4 GHz.
+- [ ] 5 GHz non-DFS.
+- [ ] DFS como condición diagnóstica, no universalmente “mala”.
+- [ ] Wi-Fi 5.
+- [ ] Wi-Fi 6.
+- [ ] AP cercano.
+- [ ] habitación/through-wall.
+- [ ] congestion representative.
+
+El objetivo no es que todos den 120; es que adaptation elija correctamente.
+
+---
+
+## QA3 — Games/apps
+
+- [ ] Rocket League.
+- [ ] DX11 game.
+- [ ] DX12 game.
+- [ ] Vulkan game.
+- [ ] desktop/browser/video.
+- [ ] fullscreen/borderless.
+- [ ] controller game.
+- [ ] game con mouse/raw-input si procede.
+
+---
+
+# 18. FASE PERF — PERFORMANCE FINAL
+
+## PERF0 — Host overhead
+
+Repetir metodología establecida:
+
+- [ ] game alone.
+- [ ] + capture.
+- [ ] + encode.
+- [ ] + network.
+- [ ] + audio.
+- [ ] + input/gamepad.
+- [ ] full product.
+
+Medir:
+
+- [ ] avg FPS.
+- [ ] 1% low.
+- [ ] 0.1% low.
+- [ ] frame p99.
+- [ ] GPU utilization.
+- [ ] CPU.
+- [ ] memory.
+- [ ] power si disponible.
+
+---
+
+## PERF1 — Client overhead
+
+- [ ] decode CPU/GPU.
+- [ ] render.
+- [ ] audio.
+- [ ] network monitor.
+- [ ] input capture.
+- [ ] controller.
+- [ ] energy impact.
+- [ ] thermal behavior.
+
+---
+
+## PERF2 — Long soak
+
+- [ ] 1 h.
+- [ ] idealmente varias horas posteriormente.
+- [ ] no memory growth.
+- [ ] no handle/thread leak.
+- [ ] no queue growth.
+- [ ] reconnect.
+- [ ] controller stable.
+- [ ] adaptation stable.
+
+---
+
+# 19. FASE REL — RELEASE CANDIDATE
+
+## REL0 — Definition of Done técnica
+
+Antes de RC:
+
+- [ ] clean tree.
+- [ ] all unit tests pass.
+- [ ] clippy both targets clean.
+- [ ] fmt clean.
+- [ ] cargo deny clean.
+- [ ] `xtask platforms` clean.
+- [ ] gate debt revisada.
+- [ ] blockers explícitos = 0.
+- [ ] known limitations documentadas.
+
+---
+
+## REL1 — Full experience gate
+
+Una sesión real:
+
+```text
+Windows game
+ + IDD
+ + DDA/NV12/NVENC
+ + RTP video
+ + WASAPI/Opus audio
+ + keyboard/mouse
+ + DS4
+ + NetworkController
+ + macOS VT/Metal/CoreAudio
+```
+
+- [ ] connect from fresh app start.
+- [ ] play 30+ min.
+- [ ] network adapts if needed.
+- [ ] audio stable.
+- [ ] controller stable.
+- [ ] disconnect/reconnect.
+- [ ] no stuck input.
+- [ ] diagnostics export.
+
+---
+
+## REL2 — Fresh-machine installation
+
+- [ ] clean Windows VM/machine where feasible.
+- [ ] installer works.
+- [ ] driver install works.
+- [ ] reboot behavior.
+- [ ] clean macOS install.
+- [ ] pairing.
+- [ ] first session.
+- [ ] uninstall.
+
+---
+
+## REL3 — Failure experience
+
+Provocar:
+
+- [ ] host process killed.
+- [ ] client process killed.
+- [ ] Wi-Fi lost.
+- [ ] encoder unavailable.
+- [ ] decoder error.
+- [ ] audio endpoint disappears.
+- [ ] controller disconnect.
+- [ ] virtual display failure.
+
+Comprobar:
+
+- [ ] no stuck input.
+- [ ] no stuck virtual pad.
+- [ ] actionable error.
+- [ ] restart works.
+
+---
+
+## REL4 — Documentation
+
+- [ ] install guide.
+- [ ] supported platforms.
+- [ ] recommended network conditions.
+- [ ] no requirement to change router channel.
+- [ ] troubleshooting.
+- [ ] diagnostics export instructions.
+- [ ] controller support.
+- [ ] known limitations.
+- [ ] security/privacy notes.
+
+---
+
+## REL5 — v1.0 release
+
+- [ ] version tagged.
+- [ ] artifacts signed.
+- [ ] checksums.
+- [ ] changelog.
+- [ ] release notes.
+- [ ] protocol version frozen for v1.
+- [ ] migration policy documented.
+
+---
+
+# 20. POST-v1.0
+
+No mezclar estas tareas con el camino crítico a v1.0 salvo nueva prioridad.
+
+## WAN / Internet
+
+- [ ] NAT traversal design.
+- [ ] STUN/TURN/ICE o alternativa evaluada.
+- [ ] encryption mandatory.
+- [ ] congestion control WAN.
+- [ ] packet loss recovery.
+- [ ] variable RTT.
+- [ ] relay option.
+- [ ] security review adicional.
+
+## AV1
+
+- [ ] hardware coverage.
+- [ ] encoder/decode latency.
+- [ ] quality/bitrate.
+- [ ] fallback.
+
+## HDR
+
+- [ ] virtual display HDR.
+- [ ] capture colorspace.
+- [ ] codec metadata.
+- [ ] decoder.
+- [ ] Metal output.
+- [ ] SDR fallback.
+- [ ] test patterns.
+
+## Advanced DS4
+
+- [ ] native DS4 virtual device.
+- [ ] touchpad.
+- [ ] gyro.
+- [ ] accel.
+- [ ] lightbar.
+- [ ] speaker.
+- [ ] advanced rumble.
+
+## Additional product features
+
+Solo si se desean:
+
+- [ ] clipboard.
+- [ ] file transfer.
+- [ ] microphone forwarding.
+- [ ] multiple clients/spectator.
+- [ ] recording.
+- [ ] per-app launcher.
+- [ ] remote wake.
+- [ ] host Linux.
+
+---
+
+# 21. Orden recomendado desde HOY
+
+No ejecutar todo secuencialmente; mantener tracks paralelos cuando no interfieran.
+
+```text
+TRACK 1 — PRODUCT NETWORK
+N0 → N1 → N2 → N3 → N4 → N5 → N6 → N7/N8 → N12
+
+TRACK 2 — AUDIO
+A8.1 → A8.2 → A9 → A10 → A11 → A13
+
+TRACK 3 — GAMEPAD
+G0 → G1 → G2 → G3 → G4 → G5 → G6 → G7 → G8
+
+                    ↓
+            FULL INTEGRATION
+                    ↓
+
+CODEC
+C1 → C2 → C3
+
+RESOLUTION
+R0 → R1 → R2/R3
+
+SESSION HARDENING
+S0 → S1 → S2 → S3 → S4
+
+DISCOVERY + PAIRING + SECURITY
+D0 → D1 → D2
+SEC0 → SEC1 → SEC2 → SEC3
+
+PRODUCT
+UX0 → UX1 → UX2 → UX3
+PKG0 → PKG1 → PKG2 → PKG3
+OBS0 → OBS1 → OBS2
+
+FINAL
+QA → PERF → REL → v1.0
+```
+
+---
+
+# 22. Paralelización recomendada
+
+## Puede hacerse en paralelo
+
+### Persona/agente A
+Network Adaptation.
+
+### Persona/agente B
+Audio A8.1+.
+
+### Persona/agente C
+Gamepad.
+
+### Persona/agente D
+UX/packaging/session work que no altere contratos calientes.
+
+## Requiere coordinación
+
+No cambiar simultáneamente sin acordar schema/version:
+
+- control plane.
+- session generation.
+- capability negotiation.
+- socket lifecycle.
+- RTP/shared telemetry schema.
+- error envelopes.
+- configuration structures.
+
+---
+
+# 23. Decisiones que NO deben olvidarse
+
+- Video baseline está cerrado.
+- No pacing DDA a la misma frecuencia nominal que la fuente.
+- DDA sigue event-driven.
+- NV12 es la ruta de 1080p120.
+- No RTP pacing en NVENC completion thread.
+- 1200-byte payload sigue baseline.
+- Startup ACK es obligatorio.
+- Mac Wi-Fi es parte real del escenario; no basar la solución en exigir Ethernet al cliente.
+- Bajar bitrate protege capacity/integrity; no está demostrado como solución general de cadence.
+- QoS no está en critical path.
+- MTU >1200 no arregló cadence.
+- DFS fue un problema reproducible en un AP concreto; no generalizar a todos los APs.
+- Network product design no puede exigir cambiar canales.
+- RSSI no decide por sí solo.
+- Active Wi-Fi scans pueden alterar la propia medición.
+- Input physical latency sigue sin medir; no inventar end-to-end.
+- SendInput es suficiente para el MVP probado.
+- Virtual HID de keyboard/mouse está deferred.
+- Audio sender burst de dos frames Opus no era culpable; segundo frame dispone de ~5 ms más margen.
+- Audio A8 fixed-arm no puede rankear targets de forma fiable bajo heavy-tail burst variance.
+- No ampliar automáticamente jitter target a 30/40/80 ms.
+- Loss y lateness audio son mecanismos distintos.
+- PLC/concealment no equivale automáticamente a device underrun.
+- Gamepad analógico debe ser state-based/latest state, no reliable-event queue.
+- Release/neutralization de input y gamepad es invariante de seguridad/lifecycle.
+
+---
+
+# 24. Preguntas abiertas reales
+
+No fingir que ya están resueltas:
+
+1. ¿Qué intervención arregla cada tipo de degradación de red?
+2. ¿Qué target audio ofrece el mejor coste latency/concealment?
+3. ¿La cola audio es una sola heavy tail o varios mecanismos?
+4. ¿Hace falta adaptive jitter/FEC después de A8.1?
+5. ¿Qué backend de virtual gamepad es adecuado para producción?
+6. ¿HEVC merece ser preferido frente a H.264?
+7. ¿2560×1600@120 mantiene los gates?
+8. ¿Una ruta más directa IDD→NVENC aporta suficiente para justificar complejidad?
+9. ¿Cómo solucionar robustamente el downclock de GPU en producto sin clock locking manual?
+10. ¿Qué mecanismo concreto de autenticación/encryption se adopta para v1.0?
+11. ¿Qué thresholds finales usa NetworkController?
+12. ¿Qué versiones exactas Windows/macOS se soportan oficialmente?
+
+---
+
+# 25. Definition of Done de LanPlay v1.0
+
+LanPlay v1.0 está terminado cuando:
+
+- [ ] Instalación Windows funciona en una máquina limpia soportada.
+- [ ] Instalación macOS funciona en una máquina limpia soportada.
+- [ ] Host y cliente se descubren o pueden añadirse manualmente.
+- [ ] Pairing seguro funciona.
+- [ ] Sesión autenticada.
+- [ ] Vídeo estable.
+- [ ] Audio estable.
+- [ ] Keyboard/mouse estable.
+- [ ] DualShock 4 funciona en juego real.
+- [ ] Network Adaptation funciona sin pedir cambios de router.
+- [ ] El sistema degrada calidad de forma controlada cuando 120 Hz no es sostenible.
+- [ ] Recovery/reconnect funciona.
+- [ ] Teardown nunca deja input/gamepad atrapado.
+- [ ] Diagnóstico exportable.
+- [ ] Seguridad revisada.
+- [ ] Full-session soak PASS.
+- [ ] Fresh-install gate PASS.
+- [ ] Failure-experience gate PASS.
+- [ ] QA matrix mínima completada.
+- [ ] Performance final documentada.
+- [ ] Known limitations documentadas.
+- [ ] Instaladores/artifacts firmados.
+- [ ] Release reproducible.
+- [ ] No blockers abiertos.
+
+---
+
+# 26. Próxima acción exacta
+
+A fecha de este documento:
+
+```text
+NEXT PRIMARY:
+N0 — NetworkObservation contract
+N1 — passive NetworkMonitor
+
+PARALLEL:
+A8.1 — long-run excess-delay distribution
+G0/G1 — Gamepad model + DualShock 4 macOS probe
+```
+
+No abrir una optimización nueva de vídeo antes de completar esos tracks salvo regresión demostrada.
+
+---
+
+# 27. Regla de continuidad para la siguiente IA
+
+Si este documento llega a otra conversación:
+
+1. Leer primero este archivo.
+2. Leer `TASKS.md`.
+3. Leer `tools/gates.toml`.
+4. Revisar los resultados nombrados por la última tarea.
+5. Ejecutar tests/checks antes de asumir estado.
+6. No reabrir decisiones CLOSED sin evidencia nueva.
+7. No convertir una hipótesis en implementación sin gate.
+8. Si un instrumento y el producto discrepan, auditar primero el instrumento.
+9. Un gate que no puede leer lo que necesita debe REFUSE.
+10. Al terminar una tarea, marcar checkboxes y añadir su reporte breve.
+
+---
+
+**Fin del MASTER PLAN v1.0**
