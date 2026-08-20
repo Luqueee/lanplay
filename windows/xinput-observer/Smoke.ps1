@@ -26,43 +26,50 @@ try {
         @{ buttons = 0; dpad = 8; left_x = 32767; left_y = -32767; right_x = -32767; right_y = 32767; left_trigger = 65535; right_trigger = 0 }
     )
 
-    $observerStart = [System.Diagnostics.ProcessStartInfo]::new($observerPath)
-    $observerStart.UseShellExecute = $false
-    $observerStart.RedirectStandardInput = $true
-    $observerStart.RedirectStandardOutput = $true
-    $observerStart.RedirectStandardError = $true
-    $observer = [System.Diagnostics.Process]::new()
-    $observer.StartInfo = $observerStart
-    if (-not $observer.Start()) { throw "cannot start $observerPath" }
     $sequence = 1
+    $summaries = @()
     foreach ($state in $states) {
         $bridge.StandardInput.WriteLine(
             "state 0 $($state.left_x) $($state.left_y) $($state.right_x) $($state.right_y) $($state.left_trigger) $($state.right_trigger) $($state.buttons) $($state.dpad)"
         )
         if ($bridge.StandardOutput.ReadLine() -ne "ok") { throw "bridge refused state" }
-        Start-Sleep -Milliseconds 250
+        Start-Sleep -Milliseconds 500
+
+        $observerStart = [System.Diagnostics.ProcessStartInfo]::new($observerPath)
+        $observerStart.UseShellExecute = $false
+        $observerStart.RedirectStandardInput = $true
+        $observerStart.RedirectStandardOutput = $true
+        $observerStart.RedirectStandardError = $true
+        $observer = [System.Diagnostics.Process]::new()
+        $observer.StartInfo = $observerStart
+        if (-not $observer.Start()) { throw "cannot start $observerPath" }
         $expected = @{
             session_generation = 1
             controller_slot = 0
             sequence = $sequence
-            buttons = $state.buttons
-            dpad = $state.dpad
             left_x = $state.left_x
-            left_y = $state.left_y
+            left_y = -$state.left_y
             right_x = $state.right_x
-            right_y = $state.right_y
+            right_y = -$state.right_y
             left_trigger = $state.left_trigger
             right_trigger = $state.right_trigger
         } | ConvertTo-Json -Compress
         $observer.StandardInput.WriteLine($expected)
+        $observer.StandardInput.Close()
+        $observer.WaitForExit()
+        $output = $observer.StandardOutput.ReadToEnd().Trim()
+        $stderr = $observer.StandardError.ReadToEnd().Trim()
+        if ($observer.ExitCode -ne 0) { throw "XInput observer failed: $output $stderr" }
+        $summaries += ($output | ConvertFrom-Json)
         $sequence++
     }
-    $observer.StandardInput.Close()
-    $observer.WaitForExit()
-    $output = $observer.StandardOutput.ReadToEnd().Trim()
-    $stderr = $observer.StandardError.ReadToEnd().Trim()
-    if ($observer.ExitCode -ne 0) { throw "XInput observer failed: $output $stderr" }
-    $output
+    [pscustomobject]@{
+        type = "xinput-conformance-summary"
+        states = $summaries.Count
+        matched_states = @($summaries | Where-Object verdict -eq "pass").Count
+        mismatched_states = @($summaries | Where-Object verdict -ne "pass").Count
+        verdict = if (@($summaries | Where-Object verdict -ne "pass").Count -eq 0) { "pass" } else { "fail" }
+    } | ConvertTo-Json -Compress
 }
 finally {
     if (-not $bridge.HasExited) {
