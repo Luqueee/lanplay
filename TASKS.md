@@ -259,6 +259,43 @@ donde había 0.69 %.
       después.
 - [ ] Considerar separar las dos unidades en structs distintas para que el error no se pueda repetir.
 
+### Q5 — El contador del emisor existe y el arnés de vídeo lo tira
+
+Raíz común de Q4, del artefacto de `parallel-r2` y de que el tier de pérdida de N3 no esté disponible.
+No falta un contador: **falta traerlo de vuelta.**
+
+```
+audio     clean.sender.json    datagrams_sent 126002, frames_encoded 126002
+                               y el arnés lo recupera:
+                               scp "$HOST:.../a81-sender-$arm.json" "$OUT/$arm.sender.json"
+net-bench SendReport.datagrams "Datagrams actually handed to send_to, faults included"
+video     results/b3-channel/  ningun envelope de emisor, en ninguna sesion
+```
+
+Comprobado: `wifi-matrix.sh`, `link-pacer.sh` y `bitrate-sweep.sh` no recuperan nada del emisor.
+`e2e-gate.sh` menciona transferencias pero no un `sender.json`. El de audio lo hace con una línea.
+
+Por eso `stream.expected` tiene que ser nominal — `target_fps * run.seconds` — y por eso los tres
+síntomas son el mismo defecto visto desde tres sitios: una pérdida que no se puede medir, un
+truncamiento indistinguible de una pérdida, y un host que subproduce contado como enlace que pierde.
+
+- [ ] Recuperar el report del emisor en los arneses de vídeo, con el patrón que ya usa el de audio.
+- [ ] Con eso, `expected` pasa a ser lo que el emisor dice que envió, y la pérdida se vuelve medible:
+      enviado contra recibido, misma unidad a los dos lados.
+- [ ] Hasta entonces N3 decide sólo por cadencia, y lo dice en cada corrida.
+
+### Q6 — Auditoría de precondiciones — **CERRADA**
+
+Hecha a raíz de Q3. Sólo dos arneses usan `ping` de verdad: `tools/e2e-gate.sh` y
+`tools/net-preflight-gate.sh`, y los dos llevan ya el patrón ICMP con caída a `nc` al 22 y fallo sólo
+si ninguno responde. Las otras ocho coincidencias de `grep` eran la subcadena «ping» dentro de palabras
+inglesas — *keeping*, *dropping*, *mapping* — que es en sí mismo un recordatorio de por qué un `grep -c`
+no es una auditoría.
+
+- [x] Ninguna otra precondición exige una capacidad que el producto no use.
+- [ ] Queda el hueco de Q3 sin cerrar: un handshake al 22 no prueba que un datagrama UDP llegue al
+      puerto de medio, y lo que tiene que cazar eso es el refusal de población cero aguas abajo.
+
 ---
 
 # 5. FASE N — NETWORK ROBUSTNESS & ADAPTATION
