@@ -40,6 +40,7 @@ PY
 
 paths=(Cargo.toml)
 paths+=(windows/hidmaestro-bridge)
+paths+=(windows/xinput-observer)
 count=0
 for member in $(members); do
     paths+=("$member/Cargo.toml")

@@ -6,6 +6,7 @@ using HIDMaestro;
 using var context = new HMContext();
 context.LoadDefaultProfiles();
 context.InstallDriver();
+HMContext.RemoveAllVirtualControllers();
 var profile = context.GetProfile("xbox-360-wired")
     ?? throw new InvalidOperationException("HIDMaestro lacks xbox-360-wired");
 var controllers = new Dictionary<byte, HMController>();
