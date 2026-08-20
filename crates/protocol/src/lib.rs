@@ -4,6 +4,7 @@
 //! sit on opposite sides of the wire. Nothing in this crate touches an OS API.
 
 mod capabilities;
+mod discovery;
 mod frame;
 mod negotiation;
 mod report;
@@ -15,6 +16,7 @@ pub use capabilities::{
 };
 pub use frame::{FrameId, FrameIdSource};
 
+pub use discovery::{Discovery, HostAdvertisement, SERVICE_TYPE, manual_endpoint};
 pub use negotiation::{CapabilitySelection, CapabilitySet, NegotiationError, negotiate};
 pub use report::{NegotiatedMode, SessionReport, SubsystemHealth};
 pub use session::{
