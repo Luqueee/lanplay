@@ -36,26 +36,28 @@ fn main() -> ExitCode {
         Ok(target) => target,
         Err(error) => return fail(error, 2),
     };
-    let device = match open_ds4(Duration::from_secs(30)) {
+    let mut device = match open_ds4(Duration::from_secs(30)) {
         Ok(device) => device,
         Err(error) => return fail(error, 3),
+    };
+    let mut sequence = 0u32;
+    let mut attach_id = EventId(1);
+    let attach = Message::GamepadAttach {
+        id: attach_id,
+        controller_slot: cli.slot,
+        session_generation: cli.generation,
     };
     let socket = match UdpSocket::bind("0.0.0.0:0") {
         Ok(socket) => socket,
         Err(error) => return fail(error.to_string(), 2),
     };
-    let mut sequence = 0u32;
-    let attach = Message::GamepadAttach {
-        id: EventId(1),
-        controller_slot: cli.slot,
-        session_generation: cli.generation,
-    };
     if !send_control_until_ack(&socket, target, cli.session, &mut sequence, attach) {
-        return ExitCode::from(3);
+        return fail("initial attach was not acknowledged".to_owned(), 3);
     }
     let deadline = Instant::now() + Duration::from_secs(cli.seconds);
     let mut reports = 0u64;
     let mut sent = 0u64;
+    let mut recoveries = 0u64;
     let mut buffer = [0; 128];
     while Instant::now() < deadline {
         match device.read_timeout(&mut buffer, 100) {
@@ -77,7 +79,23 @@ fn main() -> ExitCode {
                     sent += 1;
                 }
             }
-            Err(error) => return fail(error.to_string(), 3),
+            Err(error) => {
+                eprintln!("ds4-hidapi-sender: read failed, reconnecting: {error}");
+                recoveries += 1;
+                device = match open_ds4(Duration::from_secs(30)) {
+                    Ok(device) => device,
+                    Err(error) => return fail(error, 3),
+                };
+                attach_id = attach_id.next();
+                let attach = Message::GamepadAttach {
+                    id: attach_id,
+                    controller_slot: cli.slot,
+                    session_generation: cli.generation,
+                };
+                if !send_control_until_ack(&socket, target, cli.session, &mut sequence, attach) {
+                    return fail("reconnect attach was not acknowledged".to_owned(), 3);
+                }
+            }
         }
     }
     let neutral = GamepadStateV1::neutral_for(cli.generation, cli.slot, sequence);
@@ -96,7 +114,7 @@ fn main() -> ExitCode {
     {
         return ExitCode::from(3);
     }
-    println!("raw_reports {reports} states_sent {sent}");
+    println!("raw_reports {reports} states_sent {sent} recoveries {recoveries}");
     if sent == 0 {
         return ExitCode::from(4);
     }
