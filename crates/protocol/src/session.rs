@@ -32,13 +32,87 @@ pub enum SessionEvent {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum StartupChannel {
+    Video,
+    Audio,
+    Input,
+    Gamepad,
+}
+
+impl StartupChannel {
+    const fn bit(self) -> u8 {
+        match self {
+            Self::Video => 1 << 0,
+            Self::Audio => 1 << 1,
+            Self::Input => 1 << 2,
+            Self::Gamepad => 1 << 3,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct StartupTransaction {
+    generation: u32,
+    required: u8,
+    acknowledged: u8,
+}
+
+impl StartupTransaction {
+    pub const fn new(generation: u32, required: &[StartupChannel]) -> Self {
+        let mut mask = 0;
+        let mut index = 0;
+        while index < required.len() {
+            mask |= required[index].bit();
+            index += 1;
+        }
+        Self {
+            generation,
+            required: mask,
+            acknowledged: 0,
+        }
+    }
+
+    pub const fn generation(self) -> u32 {
+        self.generation
+    }
+
+    pub const fn ready(self) -> bool {
+        self.required == self.acknowledged
+    }
+
+    pub fn acknowledge(
+        &mut self,
+        generation: u32,
+        channel: StartupChannel,
+    ) -> Result<bool, TransitionError> {
+        if generation != self.generation {
+            return Err(TransitionError::StaleGeneration {
+                expected: self.generation,
+                received: generation,
+            });
+        }
+        if self.required & channel.bit() == 0 {
+            return Err(TransitionError::UnrequestedChannel { channel });
+        }
+        self.acknowledged |= channel.bit();
+        Ok(self.ready())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TransitionError {
     Invalid {
         state: SessionState,
         event: SessionEvent,
     },
+    StaleGeneration {
+        expected: u32,
+        received: u32,
+    },
+    UnrequestedChannel {
+        channel: StartupChannel,
+    },
 }
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SessionMachine {
     state: SessionState,
@@ -256,5 +330,47 @@ mod tests {
             Some(std::time::Duration::from_secs(2))
         );
         assert_eq!(timeouts.for_state(SessionState::Disconnected), None);
+    }
+
+    #[test]
+    fn startup_is_ready_only_after_every_requested_subsystem_acknowledges() {
+        let mut startup = StartupTransaction::new(
+            7,
+            &[
+                StartupChannel::Video,
+                StartupChannel::Audio,
+                StartupChannel::Input,
+                StartupChannel::Gamepad,
+            ],
+        );
+        assert!(!startup.ready());
+        assert!(
+            !startup
+                .acknowledge(7, StartupChannel::Video)
+                .expect("video ack")
+        );
+        assert_eq!(
+            startup.acknowledge(6, StartupChannel::Audio),
+            Err(TransitionError::StaleGeneration {
+                expected: 7,
+                received: 6
+            })
+        );
+        assert!(
+            !startup
+                .acknowledge(7, StartupChannel::Audio)
+                .expect("audio ack")
+        );
+        assert!(
+            !startup
+                .acknowledge(7, StartupChannel::Input)
+                .expect("input ack")
+        );
+        assert!(
+            startup
+                .acknowledge(7, StartupChannel::Gamepad)
+                .expect("gamepad ack")
+        );
+        assert!(startup.ready());
     }
 }
