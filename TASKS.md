@@ -839,15 +839,15 @@ Puede desarrollarse en paralelo con audio/network siempre que no se cambien simu
 
 ## G0 — Gamepad protocol/model
 
-- [ ] `GamepadStateV1`.
-- [ ] session generation.
-- [ ] controller slot.
-- [ ] sequence.
-- [ ] buttons bitmask.
-- [ ] D-pad.
-- [ ] sticks.
-- [ ] triggers.
-- [ ] normalización independiente Sony/Xbox.
+- [x] `GamepadStateV1`.
+- [x] session generation.
+- [x] controller slot.
+- [x] sequence.
+- [x] buttons bitmask.
+- [x] D-pad.
+- [x] sticks.
+- [x] triggers.
+- [x] normalización independiente Sony/Xbox.
 
 Baseline:
 
@@ -856,8 +856,8 @@ sticks   i16
 triggers u16
 ```
 
-- [ ] Tests mapping.
-- [ ] Tests neutral state.
+- [x] Tests mapping.
+- [x] Tests neutral state.
 
 ---
 
@@ -865,20 +865,20 @@ triggers u16
 
 Con GameController.framework:
 
-- [ ] detectar DS4.
-- [ ] Bluetooth.
+- [x] detectar DS4.
+- [x] Bluetooth.
 - [ ] USB.
-- [ ] Cross/Circle/Square/Triangle.
-- [ ] L1/R1.
-- [ ] L2/R2 analógicos.
-- [ ] L3/R3.
-- [ ] Share/Options/PS.
-- [ ] D-pad.
-- [ ] LX/LY/RX/RY.
+- [x] Cross/Circle/Square/Triangle.
+- [x] L1/R1.
+- [x] L2/R2 analógicos.
+- [x] L3/R3.
+- [x] Share/Options/PS.
+- [x] D-pad.
+- [x] LX/LY/RX/RY.
 - [ ] touchpad click detectado aunque no se transmita aún.
-- [ ] callback cadence.
-- [ ] axis range.
-- [ ] neutral noise.
+- [x] callback cadence.
+- [x] axis range.
+- [x] neutral noise.
 - [ ] disconnect.
 
 ### Gate G1
@@ -892,27 +892,27 @@ Con GameController.framework:
 
 ## G2 — Transporte state-based
 
-- [ ] Event-driven immediate send.
-- [ ] Periodic full state snapshot.
-- [ ] Baseline 120 Hz repair snapshot, validar.
-- [ ] Highest sequence wins.
-- [ ] Stale states dropped.
-- [ ] No retransmit de sticks antiguos.
-- [ ] No queue growth.
+- [x] Event-driven immediate send.
+- [x] Periodic full state snapshot.
+- [x] Baseline 120 Hz repair snapshot, validar.
+- [x] Highest sequence wins.
+- [x] Stale states dropped.
+- [x] No retransmit de sticks antiguos.
+- [x] No queue growth.
 
 ---
 
 ## G3 — Attach/detach control plane
 
-- [ ] reliable attach.
-- [ ] ACK.
-- [ ] reliable detach.
-- [ ] heartbeat/session timeout.
-- [ ] neutralize on:
-  - [ ] detach.
+- [x] reliable attach.
+- [x] ACK.
+- [x] reliable detach.
+- [x] heartbeat/session timeout.
+- [x] neutralize on:
+  - [x] detach.
   - [ ] disconnect.
-  - [ ] timeout.
-  - [ ] generation switch.
+  - [x] timeout.
+  - [x] generation switch.
   - [ ] session failure.
 
 ---
@@ -920,31 +920,31 @@ Con GameController.framework:
 ## G4 — Fault injection
 
 - [ ] loss 1/3/5%.
-- [ ] duplicate.
-- [ ] reorder.
-- [ ] stalls.
-- [ ] stale applied = 0.
+- [x] duplicate.
+- [x] reorder.
+- [x] stalls.
+- [x] stale applied = 0.
 - [ ] stuck state = 0.
 - [ ] convergence.
 - [ ] reconnect.
 
 ### Digital short presses
 
-- [ ] Medir si state-based pierde taps cortos.
+- [x] Medir si state-based pierde taps cortos.
 - [ ] Si sí, diseñar edge recovery con deadline.
-- [ ] No añadir reliability pesada preventivamente.
+- [x] No añadir reliability pesada preventivamente.
 
 ---
 
 ## G5 — Windows virtual backend abstraction
 
-- [ ] Crear trait/interfaz `VirtualGamepadBackend`.
-- [ ] `create`.
-- [ ] `submit_state`.
+- [x] Crear trait/interfaz `VirtualGamepadBackend`.
+- [x] `create`.
+- [x] `submit_state`.
 - [ ] `poll_feedback`.
-- [ ] `destroy`.
-- [ ] Slot-aware.
-- [ ] Backend intercambiable.
+- [x] `destroy`.
+- [x] Slot-aware.
+- [x] Backend intercambiable.
 
 ### Backend
 
@@ -959,25 +959,25 @@ Con GameController.framework:
 
 Default v1:
 
-- [ ] DS4 Cross → A.
-- [ ] Circle → B.
-- [ ] Square → X.
-- [ ] Triangle → Y.
-- [ ] L1/R1 → LB/RB.
-- [ ] L2/R2 → LT/RT.
-- [ ] Share → Back/View.
-- [ ] Options → Start/Menu.
-- [ ] PS → Guide si backend lo permite.
-- [ ] sticks.
-- [ ] D-pad.
+- [x] DS4 Cross → A.
+- [x] Circle → B.
+- [x] Square → X.
+- [x] Triangle → Y.
+- [x] L1/R1 → LB/RB.
+- [x] L2/R2 → LT/RT.
+- [x] Share → Back/View.
+- [x] Options → Start/Menu.
+- [x] PS → Guide si backend lo permite.
+- [x] sticks.
+- [x] D-pad.
 
 ### Synthetic gate
 
-- [ ] values -1/-0.5/0/+0.5/+1.
-- [ ] trigger 0/25/50/75/100%.
-- [ ] buttons down/held/up.
-- [ ] host reconstructed state exact dentro de cuantización.
-- [ ] Windows game API observa lo esperado.
+- [x] values -1/-0.5/0/+0.5/+1.
+- [x] trigger 0/25/50/75/100%.
+- [x] buttons down/held/up.
+- [x] host reconstructed state exact dentro de cuantización.
+- [x] Windows game API observa lo esperado.
 
 ---
 
@@ -985,20 +985,20 @@ Default v1:
 
 DS4 Mac → Wi-Fi → Windows virtual Xbox → Rocket League.
 
-- [ ] steering.
-- [ ] camera.
-- [ ] throttle/brake analog.
-- [ ] all face buttons.
-- [ ] bumpers.
-- [ ] Options.
-- [ ] D-pad.
-- [ ] Bluetooth arm.
+- [x] steering.
+- [x] camera.
+- [x] throttle/brake analog.
+- [x] all face buttons.
+- [x] bumpers.
+- [x] Options.
+- [x] D-pad.
+- [x] Bluetooth arm.
 - [ ] USB arm.
-- [ ] telemetry:
-  - [ ] Mac callback→send local.
-  - [ ] Windows receive→virtual submit local.
-  - [ ] stale/reorder/drop.
-  - [ ] neutralizations.
+- [x] telemetry:
+  - [x] Mac callback→send local.
+  - [x] Windows receive→virtual submit local.
+  - [x] stale/reorder/drop.
+  - [x] neutralizations.
 
 No llamar a métricas locales “end-to-end physical latency”.
 
