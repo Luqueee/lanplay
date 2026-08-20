@@ -261,33 +261,6 @@ fn crc32_step(mut crc: u32, byte: u8) -> u32 {
     crc
 }
 
-#[cfg(test)]
-mod rumble_tests {
-    use super::*;
-
-    #[test]
-    fn usb_rumble_uses_ds4_report_id_and_motor_offsets() {
-        let report = usb_rumble_report(u16::MAX, 0);
-        assert_eq!(report[0], 0x05);
-        assert_eq!(report[1], 1);
-        assert_eq!(report[4], u8::MAX);
-        assert_eq!(report[5], 0);
-    }
-
-    #[test]
-    fn bluetooth_rumble_has_report_id_flags_and_crc() {
-        let report = bluetooth_rumble_report(u16::MAX, u16::MAX);
-        assert_eq!(&report[..4], &[0x11, 0xC0, 0, 1]);
-        assert_eq!(&report[6..8], &[u8::MAX, u8::MAX]);
-        let mut crc = 0xFFFF_FFFFu32;
-        crc = crc32_step(crc, 0xA2);
-        for byte in &report[..74] {
-            crc = crc32_step(crc, *byte);
-        }
-        assert_eq!(&report[74..78], &(!crc).to_le_bytes());
-    }
-}
-
 fn send_control_until_ack(
     socket: &UdpSocket,
     target: SocketAddr,
@@ -374,4 +347,30 @@ fn resolve(spec: &str) -> Result<SocketAddr, String> {
 fn fail(error: String, code: u8) -> ExitCode {
     eprintln!("ds4-hidapi-sender: {error}");
     ExitCode::from(code)
+}
+#[cfg(test)]
+mod rumble_tests {
+    use super::*;
+
+    #[test]
+    fn usb_rumble_uses_ds4_report_id_and_motor_offsets() {
+        let report = usb_rumble_report(u16::MAX, 0);
+        assert_eq!(report[0], 0x05);
+        assert_eq!(report[1], 1);
+        assert_eq!(report[4], u8::MAX);
+        assert_eq!(report[5], 0);
+    }
+
+    #[test]
+    fn bluetooth_rumble_has_report_id_flags_and_crc() {
+        let report = bluetooth_rumble_report(u16::MAX, u16::MAX);
+        assert_eq!(&report[..4], &[0x11, 0xC0, 0, 1]);
+        assert_eq!(&report[6..8], &[u8::MAX, u8::MAX]);
+        let mut crc = 0xFFFF_FFFFu32;
+        crc = crc32_step(crc, 0xA2);
+        for byte in &report[..74] {
+            crc = crc32_step(crc, *byte);
+        }
+        assert_eq!(&report[74..78], &(!crc).to_le_bytes());
+    }
 }
