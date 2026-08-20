@@ -306,43 +306,59 @@ no es una auditoría.
 
 ---
 
-## N0 — Contrato de observabilidad
+## N0 — Contrato de observabilidad — **PASS**
 
-- [ ] Crear `NetworkObservation`.
-- [ ] Separar `RadioObservation` de `TransportObservation`.
-- [ ] Registrar:
-  - [ ] banda.
-  - [ ] canal.
-  - [ ] RSSI.
-  - [ ] PHY/transmit rate.
-  - [ ] packet loss.
-  - [ ] reorder.
-  - [ ] AU interval p50/p95/p99.
-  - [ ] `>1.25T`, `>1.5T`, `>2T`, `>3T`, etc.
-  - [ ] clusters/min.
-  - [ ] fresh tick ratio.
-  - [ ] audio late/concealment cuando esté disponible.
-- [ ] Todas las métricas deben llevar window id y session generation.
-- [ ] Distinguir “unavailable” de valor cero.
+Implementado en `crates/network-health`. `NETWORK.md` lleva el contrato y su razonamiento.
+
+- [x] Crear `NetworkObservation`.
+- [x] Separar `RadioObservation` de `TransportObservation` — y **más fuerte de lo pedido**: la
+      separación la impone el sistema de tipos, no un comentario. `classify` toma un argumento y es la
+      capa del medio; radio y experiencia **no son parámetros**, y dos doctests `compile_fail` fijan que
+      no puedan llegar a serlo.
+- [x] Registrar banda, canal, RSSI, PHY/transmit rate, packet loss, reorder, AU interval p50/p95/p99,
+      los seis múltiplos `>1.25T` a `>6T`, clusters/min y fresh tick ratio.
+- [x] Audio late/concealment: disponible por separado en `concealed_samples`, con
+      `render_underruns` obligatoriamente al lado.
+- [x] Window id y session generation: `Report.windows` es un vector por ventana y cada brazo lleva sus
+      condiciones de radio.
+- [x] Distinguir «unavailable» de valor cero — el trabajo más caro de la fase y el que más veces se
+      rompió. `loss_ratio` es `Option`, y `None` imprime *absent* y nunca 0.000 %, con un test que fija
+      que un 0 de 405032 declarado y un `None` no puedan confundirse.
+
+**Tres capas y por qué ninguna de las otras dos decide.** Radio: diez brazos a −48 dBm y 1200 Mbps
+medianos produjeron concealment de 0.196 a 7.442 % — factor 38 — mientras 3 dB de diferencia entre ellos
+movieron la tasa negociada en nada. El proxy discrepó de la cosa en la misma corrida. Experiencia:
+`fresh_tick_ratio` se mide en presentación, y `crates/link-metrics` existe porque medir una etapa a
+través de una posterior hizo que un display link suspendido leyera 141 ms p99 sobre un enlace que no
+perdía nada.
 
 ### Gate N0
 
-- [ ] En una sesión conocida, todas las observaciones esperadas aparecen.
-- [ ] Campo eliminado/mutilado → REFUSED.
-- [ ] Población cero inesperada → REFUSED.
+- [x] En una sesión conocida, todas las observaciones esperadas aparecen.
+- [x] Campo eliminado/mutilado → REFUSED. Ejercitado: 17 refusals en `jitter-excess.py selftest`, cada
+      uno sobre un documento mutado en un solo campo, con el documento sin mutar obligado a pasar.
+- [x] Población cero inesperada → REFUSED. Ejercitado en `classify-sessions.sh` con
+      `stream.expected` a 0.
 
 ---
 
-## N1 — NetworkMonitor pasivo
+## N1 — NetworkMonitor pasivo — **PASS (implementación)**
 
-- [ ] Implementar sampler CoreWLAN sin escaneo activo.
-- [ ] Prohibir `system_profiler SPAirPortDataType` dentro de gates de rendimiento.
-- [ ] Muestrear radio a baja frecuencia, baseline ~1 Hz.
-- [ ] Implementar rolling windows cortas y largas.
-- [ ] No asignar todavía GOOD/BAD automáticamente.
-- [ ] Registrar channel changes.
-- [ ] Registrar band changes.
-- [ ] Registrar PHY changes.
+`macos/client/src/monitor.rs`, 722 líneas, más las tres capas en `report.rs`.
+
+- [x] Implementar sampler CoreWLAN sin escaneo activo.
+- [x] Prohibir `system_profiler SPAirPortDataType` dentro de gates de rendimiento — **aseverado y no
+      prometido**: `active scans = 0` se comprueba por corrida. Y el motivo es medido: se usó una vez
+      esta sesión y produjo exactamente el agrupamiento que un experimento andaba buscando.
+- [x] Muestrear radio a baja frecuencia, baseline ~1 Hz — 120 lecturas en 120.55 s, 0.995/s, en su
+      propio hilo. El motivo de que no pueda estar en ningún callback está medido: una lectura de
+      asociación cuesta 3.2 ms p50 y **15.5 ms en el peor caso**, más que un periodo de 120 Hz y más que
+      tres frames de audio.
+- [x] Implementar rolling windows cortas y largas — `stream_short` y `stream_long` sobre el
+      `link_metrics::Delivery` que ya existía, sin añadir un tercer juego de contadores.
+- [x] No asignar todavía GOOD/BAD automáticamente.
+- [x] Registrar channel changes, band changes y PHY changes — `radio_trace` los lleva por muestra, y un
+      cambio de canal **dentro** de un brazo lo rechaza: son dos enlaces con un nombre.
 
 ### Gate N1-A — **RETIRADO. No reconstruir.**
 
@@ -367,7 +383,7 @@ Evidencia de los dos experimentos, que se quedan: `results/network/monitor-neutr
 brazos sobre radio) y `results/network/monitor-neutrality-loopback-90s-4x/` (loopback, con el brazo de
 contención).
 
-### Gate N1-A' — Presupuesto de sobrecarga del monitor — **▶ EN CURSO**
+### Gate N1-A' — Presupuesto de sobrecarga del monitor — **PASS**
 
 Sustituye al anterior. Y una corrección al primer borrador de esta sustitución, que era insuficiente:
 **el CPU medio no acota la interferencia temporal.** Un muestreador que consuma 3.2 ms/s podría hacer
@@ -395,6 +411,29 @@ ver:
   **debe** disparar, y por aproximadamente lo retenido. Si no, está ciega.
 - **B**: inyectar una cantidad conocida de trabajo de CPU en el muestreador. La contabilidad de CPU y
   despertares **debe** moverse en consecuencia.
+
+### Lo medido, y la cota que sale de ello
+
+Evidencia: `results/network/monitor-cost/loopback-120s-monitor-on.json`, 120 s en loopback con el
+monitor encendido.
+
+```
+radio_lock_takes                  0        <- la lectura CoreWLAN nunca toma el lock
+read_us                           p50 3928  p95 4313  p99 4547  max 7589
+lock_path_us                      p50 40.9  p95 47.1  p99 63.1  max 63.1
+lock_hold total                   1.767 ms sobre 120 s   = 0.0015 % del span
+wakeups                           120 en 120.55 s
+cpu_share_of_one_core             0.13 %
+max_mean_delay_share_of_period    1.47e-05
+```
+
+**`radio_lock_takes` a cero es la respuesta.** La lectura caras de 7.589 ms ocurre **fuera de todo lock
+compartido**, así que no puede costar un frame por larga que sea — que era exactamente el escenario que
+el duty cycle no podía descartar. Cuando el monitor sí toma el lock, lo tiene 40.9 µs al p50 y 63.1 en
+el peor caso, sobre un periodo de 8333 µs.
+
+Así que la cota es **1.47e-05 del periodo de fuente**, derivada de dónde interfiere y no de cuánto
+consume. Ésa es la diferencia entre esta cifra y la que retiré.
 
 ### Evidencia secundaria fuerte, y sólo eso
 
@@ -546,45 +585,77 @@ el enlace.
 
 ---
 
-## N3 — Taxonomía de degradaciones
+## N3 — Taxonomía de degradaciones — **PASS (marco), 3 de 6 condiciones confirmadas**
 
-Implementar inicialmente como análisis/offline, no controlador.
+`crates/network-health` y `tools/classify-sessions.sh`. Offline y no controlador, como estaba previsto.
 
-### N3-A Capacity pressure
+**121 sesiones** del corpus, fijado a `git ls-files results` después de que la salida sin comprometer de
+un compañero se colara en la población. 73 clasificables, 48 rehusadas nombrando la capa ausente,
+**67 contra un diagnóstico registrado y todas concuerdan**, tres controles negativos disparando.
 
-Caracterizar patrón:
+Lo que hace útil el número no es el 100 %: es que **48 sesiones se rehúsan** en vez de recibir una
+etiqueta. Un clasificador que siempre etiqueta consigue el 100 % y no dice nada.
 
-- [ ] loss aumenta con bitrate/capacidad.
-- [ ] bajar bitrate mejora integridad.
-- [ ] distinguir de cadence-only.
+### Estado por condición, impreso en cada corrida
 
-### N3-B Cadence degradation
+| condición | estado | por qué |
+|---|---|---|
+| `Healthy` | **CONFIRMADA** por 4 | |
+| `CadenceDegraded` | **CONFIRMADA** por 8 | |
+| `TransientStall` | **CONFIRMADA** por 1 | |
+| `SevereLoss` | sin confirmar | cableada, espera una sesión grabada con un tier de pérdida que **ya existe** |
+| `CapacityPressure` | sin confirmar | espera una sesión que este laboratorio **nunca ha producido** |
+| `UnknownDegradation` | sin confirmar | ninguna sesión comprometida la alcanza; sólo tests unitarios |
 
-Caracterizar:
+Tres deudas y son **distintas**. La de `CapacityPressure` puede no pagarse nunca desde un laboratorio
+que jamás ha estado limitado por throughput.
 
-- [ ] loss ≈ 0.
-- [ ] stalls/clusters altos.
-- [ ] bitrate puede no ser causal.
-- [ ] no recomendar automáticamente bitrate.
+### N3-A Capacity pressure — **inalcanzable desde el corpus**
+
+- [ ] loss aumenta con bitrate/capacidad — no observable: ninguna sesión comprometida la exhibe.
+- [ ] bajar bitrate mejora integridad — deuda de N4-A, no evidencia.
+- [x] distinguir de cadence-only — la distinción existe en el clasificador; lo que falta es la sesión.
+
+### N3-B Cadence degradation — **CONFIRMADA**
+
+- [x] loss ≈ 0.
+- [x] stalls/clusters altos.
+- [x] bitrate puede no ser causal — y N4-B lo confirmó también para FPS.
+- [x] no recomendar automáticamente bitrate.
+
+El discriminador que la decide es `RECURRING_STALL_GAP_MS`, derivado de dos poblaciones disjuntas por
+4.9× — 101 a 233 ms contra 1139 a 2766 — con la alternativa rechazada y su motivo en el código. Y quedó
+**corroborado por una inyección que nadie derivó de él**: el brazo con falla de N2 leyó p50 75.96 y p95
+101.58 ms detrás de un temporizador literal de 150 ms.
 
 ### N3-C Weak sustained link
 
-- [ ] PHY/RSSI bajan sostenidamente.
-- [ ] observar correlación con loss/cadence.
-- [ ] no convertir RSSI en criterio único.
+- [x] PHY/RSSI bajan sostenidamente — registrado.
+- [x] observar correlación con loss/cadence — observada y **negativa**: 3 dB de diferencia entre brazos
+      no movieron la tasa negociada, y el concealment varió por factor 38 con la señal quieta.
+- [x] no convertir RSSI en criterio único — imposible por construcción: `classify` no puede verlo.
 
-### N3-D Transient burst
+### N3-D Transient burst — **CONFIRMADA** por 1
 
-- [ ] detectar perturbación aislada.
-- [ ] no cambiar perfil por un único evento raro.
+- [x] detectar perturbación aislada.
+- [x] no cambiar perfil por un único evento raro.
+
+`GAP_NEEDS_STALLS = 2` está leído del código de `link-metrics`: un gap sólo se registra desde el segundo
+stall, así que un stall único deja el histograma vacío y `value_at_quantile` responde 0.0. Sin esa
+guarda, la perturbación aislada arquetípica se presentaría como **el reloj más apretado que el
+instrumento puede expresar**.
 
 ### Gate N3
 
-Usar fixtures y sesiones reales:
+- [x] cada clase conocida se reconoce — 67 de 67.
+- [x] una clase ambigua puede producir `UnknownDegradation` — alcanzable por tests, nunca por el corpus,
+      y eso se dice cada corrida.
+- [x] no forzar clasificación cuando evidencia insuficiente — 48 rehusadas.
 
-- [ ] cada clase conocida se reconoce.
-- [ ] una clase ambigua puede producir `UnknownDegradation`.
-- [ ] no forzar clasificación cuando evidencia insuficiente.
+### El límite de la fase, impreso en cada corrida
+
+Ningún envelope comprometido declara qué produjo o envió el emisor, y esa única ausencia es la razón de
+que no se pueda derivar tasa de pérdida de ninguno. Ver Q4 y Q5.
 
 ---
 
@@ -592,23 +663,24 @@ Usar fixtures y sesiones reales:
 
 > No automatizar nada hasta terminar esta fase.
 
-### N4-A Bitrate
+### N4-A Bitrate — **DEUDA, no experimento**
 
-Reutilizar evidencia existente y repetir solo si hace falta:
+`tools/bitrate-sweep.sh` está registrado como gate y **nada bajo `results/` guarda su salida**. Así que
+«bajar bitrate protege integridad alrededor del knee» es una creencia **debida y no mostrada** en este
+repositorio, y no puede citarse como razón de nada hasta que la corrida esté comprometida.
 
-- [ ] 50 Mbps.
-- [ ] 45.
-- [ ] 40.
-- [ ] 35.
-- [ ] 30.
-- [ ] 25.
-- [ ] 20.
+- [ ] Comprometer la salida de `tools/bitrate-sweep.sh` — 50, 45, 40, 35, 30, 25, 20 Mbps. Eso paga la
+      deuda; no hace falta rediseñar nada.
+- [ ] Sólo entonces: qué reduce loss, y dónde está el knee de integridad.
+- [x] Confirmar que no se vende bitrate reduction como solución universal de cadence — **hecho por dos
+      vías**. La celda `CadenceDegraded × bitrate` está cerrada porque el sweep anterior la falsifica en
+      gran medida, y N4-B cerró la de FPS midiendo. Lo único que se ha visto arreglar cadencia en este
+      proyecto es **cambiar de canal**: 116 → 36 llevó las access units tardías de 69/min a 5.5, a
+      bitrate fijo.
 
-Decidir:
-
-- [ ] qué reduce loss.
-- [ ] dónde está knee de integridad.
-- [ ] confirmar que no se vende bitrate reduction como solución universal de cadence.
+**Y la fila `CapacityPressure` completa es inalcanzable** hoy, para las tres intervenciones: N3 reporta
+esa condición sin confirmar por falta de una sesión que jamás la haya exhibido. Ninguna celda de esa fila
+puede correrse, y eso es una afirmación que merece escribirse en vez de omitirse.
 
 ### N4-B FPS — **REJECTED como mitigación de red**
 
@@ -913,7 +985,19 @@ cadencia.** Si N8 se construye, se construye para otra condición o con evidenci
 
 ## N7 — Bitrate Adaptation automática
 
-Solo si N4 la valida.
+Solo si N4 la valida, **y N4 todavía no la valida**: la única celda que la respaldaría es N4-A, cuya
+salida no está en `results/`. Hasta que esa corrida se comprometa, N7 no tiene permiso de N4 para bajar
+bitrate contra nada.
+
+> **La consecuencia incómoda de N4, y conviene leerla antes de construir el controlador.** Ninguna
+> palanca del lado del stream ha demostrado arreglar degradación de cadencia: bitrate está falsificado
+> en gran medida por el sweep anterior y FPS quedó rechazado por N4-B con dos sesiones. Lo único que se
+> ha visto arreglarla es cambiar de canal, que no es una acción del controlador.
+>
+> Así que el controlador puede quedarse **sin ninguna acción válida contra el fallo que este enlace
+> produce de verdad** — y `CadenceDegraded` es la condición confirmada más frecuente del corpus, 8 de
+> las 67 comprobadas. Eso es un resultado, no un obstáculo, y vale más saberlo antes de construir la
+> máquina de estados que después.
 
 - [ ] Definir ladder inicial basado en datos.
 - [ ] Fast down / slow up.
@@ -935,7 +1019,14 @@ Solo si N4 la valida.
 
 ## N8 — FPS/Resolution adaptation
 
-Solo si N4 lo demuestra.
+Solo si N4 lo demuestra, **y para FPS N4 lo desmiente**: N4-B rechazó bajar la tasa como mitigación de
+cadencia con dos sesiones independientes, así que **N8 no tiene permiso de N4 para bajar frame rate
+contra un fallo de cadencia**. Queda abierta sólo la resolución, que es N4-C y no se ha corrido.
+
+Y el hallazgo que hay que recordar al diseñar cualquier perfil: bajar la tasa **sí** reduce los cruces
+normalizados en los brazos limpios, monótonamente, y no hace nada en los perturbados. Una palanca que
+mejora los números cuando no hay fallo es exactamente la que producirá un controlador que parece
+funcionar en pruebas y no sirve en producción.
 
 - [ ] Definir perfiles.
 - [ ] Implementar mode negotiation vía control plane.
