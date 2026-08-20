@@ -22,6 +22,8 @@ struct Cli {
     seconds: u64,
     #[arg(long, default_value_t = 1_000)]
     idle_timeout_ms: u64,
+    #[arg(long)]
+    feedback_target: Option<std::net::SocketAddr>,
 }
 
 #[derive(Default)]
@@ -43,8 +45,21 @@ struct Bridge {
 }
 
 impl Bridge {
-    fn start(path: &str) -> Result<Self, String> {
-        let mut child = Command::new(path)
+    fn start(
+        path: &str,
+        feedback_target: Option<std::net::SocketAddr>,
+        session: u32,
+    ) -> Result<Self, String> {
+        let mut command = Command::new(path);
+        if let Some(target) = feedback_target {
+            command.args([
+                "--feedback",
+                &target.to_string(),
+                "--session",
+                &session.to_string(),
+            ]);
+        }
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -90,8 +105,8 @@ impl Drop for Bridge {
 impl lanplay_input_inject::VirtualGamepadBackend for Bridge {
     type Error = String;
 
-    fn create(&mut self, controller_slot: u8, _session_generation: u32) -> Result<(), Self::Error> {
-        self.command(&format!("create {controller_slot}"))
+    fn create(&mut self, controller_slot: u8, session_generation: u32) -> Result<(), Self::Error> {
+        self.command(&format!("create {controller_slot} {session_generation}"))
     }
 
     fn submit_state(
@@ -128,7 +143,7 @@ fn main() -> Result<(), String> {
         .set_read_timeout(Some(Duration::from_millis(100)))
         .map_err(|error| error.to_string())?;
     let deadline = Instant::now() + Duration::from_secs(cli.seconds);
-    let mut bridge = Bridge::start(&cli.bridge)?;
+    let mut bridge = Bridge::start(&cli.bridge, cli.feedback_target, cli.session)?;
     let mut host = GamepadHost::new();
     println!("ready");
     let mut buffer = [0; MAX_DATAGRAM];
