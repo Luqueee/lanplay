@@ -5,10 +5,13 @@
 
 mod capabilities;
 mod frame;
+mod session;
 mod video;
 
 pub use capabilities::{
     ClientCapabilities, DisplayInfo, GpuInfo, GpuVendor, HostCapabilities, NvencInfo,
 };
 pub use frame::{FrameId, FrameIdSource};
+
+pub use session::{SessionEvent, SessionMachine, SessionState, TransitionError};
 pub use video::{VideoCodec, VideoMode};
