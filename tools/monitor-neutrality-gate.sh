@@ -73,6 +73,46 @@
 # No power is REFUSED whatever the arms did, because nothing has been shown.
 #
 # ---------------------------------------------------------------------------
+# Read this before adding passes: the comparison cannot work, and it is a
+# division rather than a matter of luck
+# ---------------------------------------------------------------------------
+#
+# Four numbers settle it, and none of them is about the weather.
+#
+#   0.500 ms   spread of delivery p99 across the loopback arms that had no
+#              monitor at all, 8.421 to 8.921
+#   8.442 ms   the base those sit on, against a 8.333 ms source period
+#   ~60 ms/s   what a perturbation must therefore accumulate before a
+#              separation rule can see it: about 0.5 ms on each frame it
+#              touches, at 120 frames a second
+#   3.2 ms/s   what the monitor costs - one CoreWLAN association read a second,
+#              measured by tools/radio-sample/examples/read-cost.rs
+#
+# The effect is about nineteen times smaller than the smallest thing this
+# instrument can resolve. Measured at the source it is smaller still, because
+# CPU on an idle core costs the receive thread nothing and the only path the two
+# threads share is one mutex: a 90 s run with the monitor on holds that lock
+# 1.521 ms in total across 31 takes, 0.0017 per cent of the run, which bounds the
+# mean delay to any access unit at 0.141 us against a 8333 us period. That is
+# three thousand times under the floor.
+#
+# So two independent positive controls both failed to fire, and a third would
+# too. `contend` at 8.462 ms against `off` at 8.442 ms is a twenty microsecond
+# difference measured by an instrument whose floor is five hundred. Adding passes
+# narrows a median; it does not narrow the spread that sets the floor.
+#
+# The neutrality claim is therefore a derivation and not a detection, and it is
+# in the client's own report under `monitor.cost`: the sampler consumed X of the
+# budget on the path it shares, so it cannot account for more than Z of the
+# cadence. Derive before building applies to instruments too.
+#
+# What these arms do establish, which is worth having and is NOT neutrality: the
+# monitor's effect is below the resolution of the delivery path. And one thing
+# they establish outright - presented Hz read 119.971 with a spread of 0.00 on
+# every arm of both runs, radio and loopback, cheap and expensive and contending.
+# Not one presented frame was lost to any of them.
+#
+# ---------------------------------------------------------------------------
 # What the two committed runs found, which is about the metrics
 # ---------------------------------------------------------------------------
 #

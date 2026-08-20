@@ -761,6 +761,31 @@ fn print_monitor(cadence: crate::monitor::Cost, trace: &crate::monitor::Trace) {
     }
     println!();
     println!("Monitor  {}", cadence.label());
+    // The source measurement, printed first because it is the one that answers
+    // the question. Looking for this cost downstream cannot work: the delivery
+    // p99 of arms with no monitor spreads 0.500 ms on a base of 8.442, so a
+    // perturbation must cost about 60 ms a second to be separable, and one
+    // association read a second costs 3.2 ms - nineteen times under the floor.
+    let radio = &trace.radio;
+    let span_s = radio.span_ns as f64 / 1e9;
+    if span_s > 0.0 {
+        println!(
+            "  cost        {:.1} ms CPU over {:.1} s = {:.3}% of one core, {} wakeups at \
+             {:.1} us each",
+            radio.cpu_ns as f64 / 1e6,
+            span_s,
+            radio.cpu_ns as f64 * 100.0 / radio.span_ns as f64,
+            radio.wakeups,
+            if radio.wakeups > 0 { radio.cpu_ns as f64 / radio.wakeups as f64 / 1e3 } else { 0.0 }
+        );
+        println!(
+            "  shared lock held {:.3} ms across {} takes = {:.4}% of the run; that is the \
+             whole budget any delay it imposes comes from",
+            radio.lock_hold_ns as f64 / 1e6,
+            radio.lock_holds,
+            radio.lock_hold_ns as f64 * 100.0 / radio.span_ns as f64
+        );
+    }
     println!(
         "  radio       {} reads, {} answered, {} empty, {:.2}/s achieved, worst read {:.2} ms",
         trace.radio.samples.len(),
@@ -1515,6 +1540,40 @@ fn build_report(
             radio_reads_per_s: monitor_trace.radio.reads_per_s,
             radio_cost_max_ms: monitor_trace.radio.cost_max_ms,
             radio_lock_takes: monitor_trace.radio.lock_takes,
+            cost: {
+                let radio = &monitor_trace.radio;
+                let span_s = radio.span_ns as f64 / 1e9;
+                let period_ms = 1000.0 / feed_fps.max(1.0);
+                let delivered = link.delivered;
+                let bound_us = (delivered > 0)
+                    .then(|| radio.lock_hold_ns as f64 / delivered as f64 / 1e3);
+                crate::report::MonitorCost {
+                    span_s,
+                    wakeups: radio.wakeups,
+                    cpu_ms: radio.cpu_ns as f64 / 1e6,
+                    cpu_us_per_wakeup: if radio.wakeups > 0 {
+                        radio.cpu_ns as f64 / radio.wakeups as f64 / 1e3
+                    } else {
+                        0.0
+                    },
+                    cpu_share_of_one_core: if radio.span_ns > 0 {
+                        radio.cpu_ns as f64 / radio.span_ns as f64
+                    } else {
+                        0.0
+                    },
+                    lock_hold_ms: radio.lock_hold_ns as f64 / 1e6,
+                    lock_holds: radio.lock_holds,
+                    lock_share_of_span: if radio.span_ns > 0 {
+                        radio.lock_hold_ns as f64 / radio.span_ns as f64
+                    } else {
+                        0.0
+                    },
+                    max_mean_delay_us_per_unit: bound_us,
+                    source_period_ms: period_ms,
+                    max_mean_delay_share_of_period: bound_us
+                        .map(|us| us / 1e3 / period_ms),
+                }
+            },
             short_windows: monitor_trace.short.len(),
             long_windows: monitor_trace.long.len(),
             short: monitor_trace.short.iter().map(monitor_window).collect(),

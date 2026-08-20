@@ -497,6 +497,22 @@ pub struct Monitor {
     /// cadence. The mechanism that control exercises, counted, so an arm's
     /// artefact states what it did rather than what it was named.
     pub radio_lock_takes: u64,
+    /// What the monitor cost, measured at the source rather than looked for
+    /// downstream.
+    ///
+    /// Looking for it downstream cannot work, and the reason is arithmetic
+    /// rather than weather. The delivery p99 of arms with no monitor at all
+    /// spreads 0.500 ms on a base of 8.442 ms, so a perturbation has to cost
+    /// about 0.5 ms on the frames it touches - some 60 ms of accumulated delay a
+    /// second at 120 fps - before a separation rule can see it. One association
+    /// read a second costs 3.2 ms. The effect is about nineteen times under the
+    /// instrument's floor, which is why two independent positive controls both
+    /// failed to fire and why a third would too.
+    ///
+    /// Measured here there is no floor to clear, and the neutrality claim
+    /// becomes a derivation: the sampler consumed this much CPU and held the
+    /// shared lock this long, so it cannot account for more than that.
+    pub cost: MonitorCost,
     pub short_windows: usize,
     pub long_windows: usize,
     /// Every closed window of each length, in cadence alone.
@@ -521,6 +537,46 @@ pub struct RadioSample {
     pub channel: Option<i64>,
     pub width_mhz: Option<u32>,
     pub cost_ms: f64,
+}
+
+/// What the sampler consumed, and the bound that follows from it.
+#[derive(Serialize)]
+pub struct MonitorCost {
+    /// Wall time the sampler thread existed for.
+    pub span_s: f64,
+    /// Loop iterations. Divided into the CPU figure rather than a nominal
+    /// cadence, because a thread that fell behind did not hold its cadence.
+    pub wakeups: u64,
+    /// CPU the sampler thread actually consumed, from
+    /// `CLOCK_THREAD_CPUTIME_ID`. A thread blocked in CoreWLAN consumes none,
+    /// and it is consumption that competes with the receive thread.
+    pub cpu_ms: f64,
+    pub cpu_us_per_wakeup: f64,
+    /// Share of one core. The denominator a reader wants beside it is this
+    /// machine's core count: a figure of 0.3 per cent of a thread is 0.03 per
+    /// cent of ten cores.
+    pub cpu_share_of_one_core: f64,
+    /// How long the sampler held `crates/link-metrics`' mutex in total, and how
+    /// often. The only path it shares with the receive thread.
+    pub lock_hold_ms: f64,
+    pub lock_holds: u64,
+    /// Share of the run during which the sampler held that shared lock.
+    pub lock_share_of_span: f64,
+    /// The bound the two figures above give: total lock hold spread over the
+    /// access units delivered, which is the most the sampler could have delayed
+    /// any one of them on average.
+    ///
+    /// An upper bound on the delay to the *thread*, and not to the recorded
+    /// interval, which is a stronger statement: `transport.rs` timestamps
+    /// arrival before taking the lock, so lock delay moves when an interval is
+    /// recorded and never what it is. The delay to the measurement is zero by
+    /// construction and this is the delay to the work.
+    pub max_mean_delay_us_per_unit: Option<f64>,
+    /// The source period this has to be read against, since a delay only means
+    /// something as a fraction of the budget it eats.
+    pub source_period_ms: f64,
+    /// The bound as a share of that period.
+    pub max_mean_delay_share_of_period: Option<f64>,
 }
 
 /// One closed rolling window, in the quantities `classify` reads.

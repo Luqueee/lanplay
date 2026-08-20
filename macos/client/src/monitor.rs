@@ -218,6 +218,27 @@ pub struct RadioTrace {
     /// zero for every other cadence. The mechanism that control exercises,
     /// counted rather than described, so an arm's report says what it did.
     pub lock_takes: u64,
+    /// CPU time this thread actually consumed, from `CLOCK_THREAD_CPUTIME_ID`.
+    ///
+    /// The observable that replaced looking for the monitor's shadow in the
+    /// delivery cadence. That comparison cannot work and the reason is
+    /// arithmetic: the off arms' own delivery p99 spread is 0.500 ms on a base
+    /// of 8.442, so clearing it by separation needs about 60 ms of accumulated
+    /// delay a second, and one association read a second costs 3.2 ms - about
+    /// nineteen times under the floor. Measured at the source there is no floor
+    /// to clear.
+    pub cpu_ns: u64,
+    /// Loop iterations, so the CPU figure can be divided by the thing that
+    /// caused it rather than by a nominal cadence the thread may not have held.
+    pub wakeups: u64,
+    /// How long this thread held `crates/link-metrics`' mutex, in total.
+    ///
+    /// The only path the monitor shares with the receive thread, so this is the
+    /// whole budget from which any delay it imposes has to come. It bounds that
+    /// delay from above without needing to detect it.
+    pub lock_hold_ns: u64,
+    pub lock_holds: u64,
+    pub span_ns: u64,
 }
 
 /// The rolling delivery windows, one `Delivery` per length.
@@ -379,8 +400,13 @@ fn sample(
     // empty rows: it reads no radio, so it records how many times it took the
     // delivery lock and nothing per iteration.
     let mut lock_takes = 0u64;
+    let mut lock_hold = 0u64;
+    let mut lock_holds = 0u64;
+    let mut wakeups = 0u64;
+    let cpu_at_start = thread_cpu_ns();
 
     while !stop.load(Ordering::Acquire) {
+        wakeups += 1;
         let read_at = Timestamp::now();
         if cadence == Cost::Contend {
             // The named mechanism. `cumulative` takes the same
@@ -389,8 +415,11 @@ fn sample(
             // so this contends with the delivery path down a path that can be
             // pointed at rather than by doing unrelated work and hoping it is
             // felt. Both lengths, because the receive thread marks both.
+            let held = Timestamp::now();
             let _ = windows.short.cumulative();
             let _ = windows.long.cumulative();
+            lock_hold += Timestamp::now().saturating_since(held).get();
+            lock_holds += 2;
             lock_takes += 2;
         } else if cadence.reads_radio() {
             let before = read_at;
@@ -428,19 +457,25 @@ fn sample(
         // produces windows the cheap arm's can be compared against.
         let elapsed = Timestamp::now().saturating_since(start);
         if elapsed.get() >= SHORT_WINDOW.as_nanos() as u64 * short_index {
+            let held = Timestamp::now();
             trace.short.push(Slice {
                 from_s: (short_index - 1) as f64 * SHORT_WINDOW.as_secs_f64(),
                 to_s: short_index as f64 * SHORT_WINDOW.as_secs_f64(),
                 window: windows.short.take_window(),
             });
+            lock_hold += Timestamp::now().saturating_since(held).get();
+            lock_holds += 1;
             short_index += 1;
         }
         if elapsed.get() >= LONG_WINDOW.as_nanos() as u64 * long_index {
+            let held = Timestamp::now();
             trace.long.push(Slice {
                 from_s: (long_index - 1) as f64 * LONG_WINDOW.as_secs_f64(),
                 to_s: long_index as f64 * LONG_WINDOW.as_secs_f64(),
                 window: windows.long.take_window(),
             });
+            lock_hold += Timestamp::now().saturating_since(held).get();
+            lock_holds += 1;
             long_index += 1;
         }
 
@@ -471,8 +506,14 @@ fn sample(
         }
     }
 
-    let span = Timestamp::now().saturating_since(start).get() as f64 / 1e9;
+    let span_ns = Timestamp::now().saturating_since(start).get();
+    let span = span_ns as f64 / 1e9;
     trace.radio.lock_takes = lock_takes;
+    trace.radio.cpu_ns = thread_cpu_ns().saturating_sub(cpu_at_start);
+    trace.radio.wakeups = wakeups;
+    trace.radio.lock_hold_ns = lock_hold;
+    trace.radio.lock_holds = lock_holds;
+    trace.radio.span_ns = span_ns;
     if span > 0.0 {
         // The contention arm's rate is lock acquisitions rather than reads,
         // because that is what it did. Stated in the same field so an arm's
@@ -501,6 +542,26 @@ impl Trace {
     pub fn newest_long(&self) -> Option<Slice> {
         self.long.last().copied()
     }
+}
+
+/// CPU time the calling thread has consumed, in nanoseconds.
+///
+/// `CLOCK_THREAD_CPUTIME_ID` rather than a wall clock: a sampler that spends a
+/// second blocked in CoreWLAN has consumed no CPU, and it is the consumption
+/// that competes with the receive thread. Zero when the clock is unavailable,
+/// which is reported as zero rather than guessed - a cost of zero beside a
+/// non-zero wakeup count is visibly wrong, which is what a reader needs.
+fn thread_cpu_ns() -> u64 {
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `ts` is a valid, fully initialised `timespec` and the clock id is
+    // a documented constant.
+    if unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts) } != 0 {
+        return 0;
+    }
+    ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64
 }
 
 /// The five quantities the contract keeps, and not the two it does not.
