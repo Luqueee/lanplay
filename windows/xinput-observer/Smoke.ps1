@@ -30,7 +30,7 @@ try {
     $summaries = @()
     foreach ($state in $states) {
         $bridge.StandardInput.WriteLine(
-            "state 0 $($state.left_x) $($state.left_y) $($state.right_x) $($state.right_y) $($state.left_trigger) $($state.right_trigger) $($state.buttons) $($state.dpad)"
+            "state 0 $($state['left_x']) $($state['left_y']) $($state['right_x']) $($state['right_y']) $($state['left_trigger']) $($state['right_trigger']) $($state['buttons']) $($state['dpad'])"
         )
         if ($bridge.StandardOutput.ReadLine() -ne "ok") { throw "bridge refused state" }
         Start-Sleep -Milliseconds 500
@@ -47,12 +47,14 @@ try {
             session_generation = 1
             controller_slot = 0
             sequence = $sequence
-            left_x = $state.left_x
-            left_y = -$state.left_y
-            right_x = $state.right_x
-            right_y = -$state.right_y
-            left_trigger = $state.left_trigger
-            right_trigger = $state.right_trigger
+            buttons = $state['buttons']
+            dpad = $state['dpad']
+            left_x = $state['left_x']
+            left_y = -$state['left_y']
+            right_x = $state['right_x']
+            right_y = -$state['right_y']
+            left_trigger = $state['left_trigger']
+            right_trigger = $state['right_trigger']
         } | ConvertTo-Json -Compress
         $observer.StandardInput.WriteLine($expected)
         $observer.StandardInput.Close()
