@@ -26,7 +26,7 @@
 //! position, frames into the encoder, datagrams the socket accepted -- and the
 //! two counts that must agree exactly are stated as their own numbers: samples
 //! captured against samples encoded. That identity is the split's proof, and it
-//! is also the sender's half of the continuity accounting A6 is decided on,
+//! is also the sender's half of the accounting A6 is decided on,
 //! because a sender whose captured and encoded sample counts have drifted apart
 //! has already lost audio before the radio was involved, and a receiver has no
 //! way to tell that apart from loss on the air.

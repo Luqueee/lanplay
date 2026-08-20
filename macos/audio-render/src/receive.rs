@@ -63,12 +63,20 @@
 //! directions, and the direction it walks is the 20 ppm this phase is
 //! forbidden to correct.
 //!
-//! # What the counters mean, and the one that decides the phase
+//! # What the counters mean, and the two that are not one counter
 //!
-//! Continuity is the whole point, and it is stated in samples rather than in
-//! frames or packets because samples are what a listener loses. See
-//! [`Continuity`] for the arithmetic and for why an underrun and a concealment
-//! are counted differently.
+//! Two quantities were reported under one name here for the whole of the audio
+//! phase, and separating them is the point of [`Concealment`]. Source
+//! concealment is audio the source produced that the concealer's invention
+//! stood in for, stated in samples because samples are what a listener loses.
+//! Playout continuity is [`Render::underruns`]: cycles the device asked for
+//! audio and the ring had none, which is a click. The first is a fidelity loss
+//! and the second is a playout failure, and the difference is measured rather
+//! than argued - forty of the forty envelopes committed under `results/audio`
+//! report zero render underruns, so no run in this project's history has handed
+//! the device silence, while every one of them concealed something. See
+//! [`Concealment`] for the arithmetic and for why an underrun in the jitter
+//! buffer and a gap concealment are counted differently.
 
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::io;
@@ -91,6 +99,7 @@ use objc2_core_audio::{AudioConvertHostTimeToNanos, AudioGetCurrentHostTime};
 use parking_lot::Mutex;
 
 use crate::device::{self, Error as DeviceError};
+use crate::excess::{ExcessReport, ExcessTrace};
 use crate::format::OutputFormat;
 use crate::occupancy::WindowOccupancy;
 use crate::pairs::{CLASSES, PairReport, PairTiming, class_of};
@@ -257,7 +266,8 @@ impl Loss {
     }
 }
 
-/// The continuity accounting, which is what decides this phase.
+/// The source-concealment accounting: how much of what the sender produced the
+/// listener was handed the concealer's invention in place of.
 ///
 /// # How it is computed
 ///
@@ -273,53 +283,70 @@ impl Loss {
 /// taken off, because a frame the producer generated and the ring had no room
 /// for reached nobody.
 ///
-/// `hole` is the difference, and zero is the only good value.
+/// `concealed` is the difference, and zero is the only good value.
 ///
-/// # Why an underrun and a concealment are counted differently
+/// # Why this is not called a hole in continuity
+///
+/// Because it is not one, and the older name has been overstating every figure
+/// derived from it. Forty of the forty envelopes committed under
+/// `results/audio` report `render_underruns` as zero: the device has never once
+/// been handed silence in this project, not on the clean arms and not on the
+/// arm behind a relay holding two hundred milliseconds out of every second. The
+/// concealer keeps the timeline fed whatever the network does, so what this
+/// counter measures is source audio replaced rather than a playout that
+/// stopped, and a name saying otherwise sends its reader to look for a click
+/// nobody heard. Playout continuity is [`Render::underruns`], reported beside
+/// this and never folded into it.
+///
+/// # Why an underrun in the buffer and a gap concealment are counted differently
 ///
 /// Both hand the sink samples nobody sent, and there the resemblance stops.
 ///
 /// A concealment bridges a gap with real audio on both sides of it. The
 /// concealer extrapolates from the frames that did arrive, the waveform
-/// continues, and a listener hears a few milliseconds of slightly wrong audio
-/// rather than a click. The stream was carried across that moment, so the
-/// moment counts as played.
+/// continues, and the audio either side of the gap is the source's own. The
+/// stream was carried across that moment, so the moment counts as played.
 ///
 /// An underrun has nothing behind it. The buffer was empty, so the concealer is
 /// running on stale state and inventing, and what comes out decays towards
 /// silence however long it goes on. Crediting it would make the two runs this
 /// phase most needs to tell apart identical in the counters: a path carrying
 /// audio, and a path carrying nothing at all while a concealer keeps a sink
-/// alive. That confusion is exactly how a run with zero underruns can have
-/// carried nothing, which is the sentence the plan puts the whole phase on.
+/// alive. That confusion is exactly how a run with zero device underruns can
+/// have carried nothing, which is the sentence the plan puts the whole phase
+/// on.
 ///
-/// The same distinction is why the device's own shortfall is reported beside
-/// this rather than inside it. A callback the ring could not fill got silence,
-/// which is audible and is counted as [`Render::underruns`] — but it is counted
-/// in the device's cycles on the device's clock, and folding a count taken on
-/// one crystal into a count taken on another is how a subtraction stops meaning
-/// anything.
+/// The device's own shortfall stays outside this for a second reason as well as
+/// the first. It is counted in the device's cycles on the device's clock, and
+/// folding a count taken on one crystal into a count taken on another is how a
+/// subtraction stops meaning anything.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Continuity {
+pub struct Concealment {
     pub expected: u64,
     pub played: u64,
 }
 
-impl Continuity {
+impl Concealment {
     /// What the buffer and the ring together made of one run.
-    pub fn of(counts: Counts, refused_frames: u64) -> Continuity {
-        Continuity {
+    pub fn of(counts: Counts, refused_frames: u64) -> Concealment {
+        Concealment {
             expected: counts.expected_samples,
             played: counts.played_samples.saturating_sub(refused_frames),
         }
     }
 
-    pub fn hole(&self) -> u64 {
+    pub fn concealed(&self) -> u64 {
         self.expected.saturating_sub(self.played)
     }
 
-    pub fn unbroken(&self) -> bool {
-        self.expected > 0 && self.hole() == 0
+    /// Whether a real expectation was measured and none of it was concealed.
+    ///
+    /// The expectation is in here rather than left to the caller because a
+    /// concealed count of zero over an expectation of zero is a run that
+    /// carried nothing, and that is the reading this project has mistaken for
+    /// success more than once.
+    pub fn nothing_concealed(&self) -> bool {
+        self.expected > 0 && self.concealed() == 0
     }
 }
 
@@ -518,9 +545,9 @@ pub struct WindowRow {
     /// This window's rather than the run's so far, which for a distribution
     /// means a store that empties at the boundary rather than a difference of
     /// two running ones: see [`crate::occupancy`]. It is the figure that says
-    /// what state the buffer was in when the hole beside it appeared - empty,
-    /// at its ceiling, or holding its target while frames arrived too late to
-    /// be in it.
+    /// what state the buffer was in when the concealment beside it happened -
+    /// empty, at its ceiling, or holding its target while frames arrived too
+    /// late to be in it.
     pub occupancy_us: Option<Percentiles>,
     /// What the jitter buffer and the ring were holding together at the end of
     /// this window, in per-channel samples, and cumulative rather than a delta.
@@ -536,7 +563,7 @@ pub struct WindowRow {
 }
 
 impl WindowRow {
-    pub fn hole(&self) -> u64 {
+    pub fn concealed(&self) -> u64 {
         self.expected_samples.saturating_sub(self.played_samples)
     }
 }
@@ -569,6 +596,17 @@ pub struct Receipt {
     /// whether the sender's cadence is what makes it so, and the second cannot be
     /// recovered from the first because the two classes are interleaved in it.
     pub pair: PairReport,
+    /// A8.1's target-independent population: the excess delay of every admitted
+    /// datagram above the run's own best case, drift-corrected, with the cluster
+    /// structure at every threshold the curve is evaluated at.
+    ///
+    /// Beside [`Receipt::arrival_delay_us`] rather than instead of it, and
+    /// derived from the same subtraction. The delay above says what margin this
+    /// run's target actually had, which is a statement about one target; this
+    /// says what every candidate target would have cost on this population,
+    /// which is the question the target sweep could not answer by running one
+    /// arm per candidate.
+    pub excess: ExcessReport,
     pub counts: Counts,
     pub loss: Loss,
     /// Datagrams that parsed as Opus and carried another SSRC. Not this
@@ -590,8 +628,8 @@ pub struct Receipt {
 }
 
 impl Receipt {
-    pub fn continuity(&self) -> Continuity {
-        Continuity::of(self.counts, self.producer.refused_frames)
+    pub fn concealment(&self) -> Concealment {
+        Concealment::of(self.counts, self.producer.refused_frames)
     }
 
     pub fn frame_samples(&self) -> u64 {
@@ -649,12 +687,17 @@ impl Receipt {
         self.producer.scheduled_as.is_real_time() && self.receiver_scheduled_as.is_real_time()
     }
 
-    /// The worst ten seconds of the run, by continuity.
+    /// The worst ten seconds of the run, by how much of it was concealed.
     ///
-    /// A run's total hole can be small and still be one window that lost
-    /// everything, and that window is the one worth looking at.
-    pub fn worst_window_hole(&self) -> u64 {
-        self.windows.iter().map(WindowRow::hole).max().unwrap_or(0)
+    /// A run's total can be small and still be one window in which almost
+    /// nothing of the source survived, and that window is the one worth
+    /// looking at.
+    pub fn worst_window_concealed(&self) -> u64 {
+        self.windows
+            .iter()
+            .map(WindowRow::concealed)
+            .max()
+            .unwrap_or(0)
     }
 }
 
@@ -889,6 +932,7 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
         ScheduledAs,
         Option<Percentiles>,
         PairReport,
+        ExcessReport,
         Vec<WindowRow>,
         f64,
         u64,
@@ -910,7 +954,7 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
         // up, because the schedule is absolute - but the buffer had eight
         // frames in it by then against a ceiling of six, so it skipped forward
         // and gave up five frames of a stream that had arrived perfectly well.
-        // Every one of those was a hole in the continuity accounting charged to
+        // Every one of those counted as concealed source audio charged to
         // a link that had done nothing. Warmed up first, the thread is already
         // sitting in its wait when the anchor is published.
         let producer = {
@@ -978,14 +1022,14 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
             // `AudioDeviceDestroyIOProcID` took about thirty milliseconds on
             // this machine, and a receiver still admitting packets across them
             // pushed six frames into a buffer nothing was pulling from: the
-            // ceiling fired, five frames were given up, and 1200 samples of
-            // hole were charged to a link that had already finished. The run's
+            // ceiling fired, five frames were given up, and 1200 samples were
+            // counted concealed against a link that had already finished. The run's
             // window shuts with its last pull.
             shared.stop.store(true, Ordering::Relaxed);
             windows
         };
         let span_seconds = Timestamp::now().saturating_since(began).as_secs_f64();
-        let (receiver_scheduled_as, arrival_delay_us, pair) =
+        let (receiver_scheduled_as, arrival_delay_us, pair, excess) =
             receiver.join().expect("the receive thread does not panic");
         let produced = producer.join().expect("the producer thread does not panic");
         Ok((
@@ -993,6 +1037,7 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
             receiver_scheduled_as,
             arrival_delay_us,
             pair,
+            excess,
             windows,
             span_seconds,
             start_call,
@@ -1004,6 +1049,7 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
         receiver_scheduled_as,
         arrival_delay_us,
         pair,
+        excess,
         windows,
         span_seconds,
         start_call,
@@ -1035,6 +1081,7 @@ pub fn receive(options: ReceiveOptions) -> Result<Receipt, ReceiveError> {
         receiver_scheduled_as,
         arrival_delay_us,
         pair: pair.with_underruns(producer.underruns_by_class),
+        excess,
         counts: shared.buffer.lock().counts(),
         loss: *shared.loss.lock(),
         foreign_ssrc: shared.foreign_ssrc.load(Ordering::Relaxed),
@@ -1102,7 +1149,7 @@ fn listen(
     sample_rate: u32,
     store: usize,
     frame_samples: u32,
-) -> (ScheduledAs, Option<Percentiles>, PairReport) {
+) -> (ScheduledAs, Option<Percentiles>, PairReport, ExcessReport) {
     let scheduled_as = ScheduledAs::request(period.get());
     let mut datagram = [0u8; MAX_UDP_PAYLOAD];
     // Where the stream's clock met this one, kept here rather than asked of the
@@ -1114,6 +1161,13 @@ fn listen(
     // it takes no lock; the underruns it also reports belong to the producer's
     // schedule and are folded in once, at the end.
     let mut pairs = PairTiming::new(frame_samples, store);
+    // A8.1's population, fed from the same subtraction the delay above comes
+    // from. Sized from the same store, because it holds one entry per admitted
+    // datagram and the run cannot admit more than it can pull, and told the
+    // frame duration as the two numbers the packets themselves carry rather
+    // than as a third statement of it.
+    let mut excess =
+        ExcessTrace::with_capacity(store, f64::from(frame_samples) / f64::from(sample_rate));
     loop {
         // Checked before every read and not only after a timeout. On the first
         // run this loop only ever tested the flag when the socket went quiet,
@@ -1210,6 +1264,17 @@ fn listen(
                         late_us as i64,
                         admission == Admission::Late,
                     );
+                    // The same number again, with the frame's own timeline
+                    // position beside it. The anchor's playout is still in it
+                    // and comes off once at the end, against the run's minimum
+                    // rather than against whatever the first datagram did: see
+                    // `crate::excess` for why that is the whole point.
+                    //
+                    // Restricted to the frames the buffer gave a grid position,
+                    // because a cluster is consecutive in timeline positions and
+                    // an off-grid timestamp has none. The buffer counts those
+                    // and the harness above refuses a run with any.
+                    excess.record(ticks as i64 / i64::from(frame_samples), late_us as i64);
                 }
             } else if let Some(playout) = shared.playout_start_ns() {
                 anchor = Some((packet.timestamp, playout));
@@ -1219,10 +1284,22 @@ fn listen(
                 // on the first frame they happened to see would label them
                 // oppositely half the time, and the labelling is the answer.
                 pairs.anchor(packet.timestamp);
+                // The anchoring frame's own excess, by the same arithmetic at a
+                // distance of zero. One frame of a quarter of a million, and it
+                // is here because the reference the whole curve is referred to
+                // is the minimum over the population: a population that
+                // silently omits a member is one somebody has to be told about.
+                let late_us = (i128::from(at.as_nanos()) - i128::from(playout)) / 1_000;
+                excess.record(0, late_us as i64);
             }
         }
     }
-    (scheduled_as, delay_us.percentiles(), pairs.finish())
+    (
+        scheduled_as,
+        delay_us.percentiles(),
+        pairs.finish(),
+        excess.finish(),
+    )
 }
 
 /// Microseconds either side of a moment, shifted so a distribution of them can
@@ -1637,31 +1714,31 @@ mod tests {
         }
     }
 
-    /// The shape of a run that worked: every sample the cursor travelled
-    /// reached the device, and the accounting says so.
+    /// The shape of a run that worked: every sample the cursor travelled came
+    /// from the source, and the accounting says so.
     #[test]
-    fn a_run_that_carried_everything_has_no_hole() {
-        let continuity = Continuity::of(counts(288_000, 288_000), 0);
-        assert_eq!(continuity.hole(), 0);
-        assert!(continuity.unbroken());
+    fn a_run_that_carried_everything_concealed_nothing() {
+        let accounting = Concealment::of(counts(288_000, 288_000), 0);
+        assert_eq!(accounting.concealed(), 0);
+        assert!(accounting.nothing_concealed());
     }
 
-    /// The failure the whole phase turns on. Gap concealment is credited, so a
-    /// run that lost packets and concealed them is still continuous; an
-    /// underrun is not, so a run whose buffer emptied is not.
+    /// The distinction the whole phase turns on. Gap concealment is credited,
+    /// because the source's own audio sits on both sides of it; an underrun is
+    /// not, because nothing of the source was there.
     #[test]
-    fn concealment_is_played_and_an_underrun_is_not() {
+    fn a_bridged_gap_is_played_and_an_underrun_is_concealed() {
         // A thousand frames of 240 samples. Fifty were concealed across gaps
         // and the buffer never emptied, so every position was carried.
-        let concealed = Continuity::of(counts(240_000, 240_000), 0);
-        assert_eq!(concealed.hole(), 0);
+        let bridged = Concealment::of(counts(240_000, 240_000), 0);
+        assert_eq!(bridged.concealed(), 0);
 
         // The same run with fifty of those positions found by an empty buffer
-        // instead: the concealer still ran, and the accounting refuses to
-        // credit what it produced.
-        let starved = Continuity::of(counts(240_000, 228_000), 0);
-        assert_eq!(starved.hole(), 12_000);
-        assert!(!starved.unbroken());
+        // instead: the concealer still ran, so the device was still fed, and
+        // the accounting refuses to credit what it invented as source audio.
+        let starved = Concealment::of(counts(240_000, 228_000), 0);
+        assert_eq!(starved.concealed(), 12_000);
+        assert!(!starved.nothing_concealed());
     }
 
     /// A frame the producer generated and the ring had no room for reached
@@ -1669,21 +1746,21 @@ mod tests {
     /// credited.
     #[test]
     fn frames_the_ring_refused_are_not_played() {
-        let continuity = Continuity::of(counts(240_000, 240_000), 480);
-        assert_eq!(continuity.played, 239_520);
-        assert_eq!(continuity.hole(), 480);
+        let accounting = Concealment::of(counts(240_000, 240_000), 480);
+        assert_eq!(accounting.played, 239_520);
+        assert_eq!(accounting.concealed(), 480);
     }
 
     /// The defect this project has read as success five times: nothing
     /// happened, so nothing is missing, and a bare comparison of two zeroes
     /// says the run was perfect.
     #[test]
-    fn a_run_that_carried_nothing_is_not_unbroken() {
-        let nothing = Continuity::of(counts(0, 0), 0);
-        assert_eq!(nothing.hole(), 0);
+    fn a_run_that_carried_nothing_cannot_claim_it_concealed_nothing() {
+        let nothing = Concealment::of(counts(0, 0), 0);
+        assert_eq!(nothing.concealed(), 0);
         assert!(
-            !nothing.unbroken(),
-            "a hole of zero over an expectation of zero is an absence and not a result"
+            !nothing.nothing_concealed(),
+            "a concealed count of zero over an expectation of zero is an absence and not a result"
         );
     }
 
@@ -1785,7 +1862,7 @@ mod tests {
         let row = later.since(&earlier, Duration::from_secs(10), None);
         assert_eq!(row.expected_samples, 480_000);
         assert_eq!(row.played_samples, 478_760);
-        assert_eq!(row.hole(), 1_240);
+        assert_eq!(row.concealed(), 1_240);
         assert_eq!(row.rtp_lost, 4);
         assert_eq!(row.render_callbacks, 1_875);
         assert_eq!(row.render_underruns, 0);

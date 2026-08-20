@@ -113,8 +113,8 @@ pub enum Pull {
     Conceal,
     /// Nothing is buffered at all. Conceal it too — a render callback handed no
     /// samples produces a click, and this phase must not invent a failure the
-    /// next phase will not have — but it is a hole in the audio, not a bridge
-    /// across one.
+    /// next phase will not have — but it is source audio replaced rather than a
+    /// bridge across a gap in it.
     Underrun,
 }
 
@@ -173,9 +173,20 @@ pub struct Counts {
 }
 
 impl Counts {
-    /// Samples the stream should have produced that the sink never got. Zero is
-    /// the only good value; anything else is audio that was not there.
-    pub fn continuity_hole(&self) -> u64 {
+    /// Samples of source audio the sink was handed the concealer's invention in
+    /// place of. Zero is the only good value; anything else is audio the source
+    /// produced and the listener never heard.
+    ///
+    /// This is a fidelity loss and not a playout failure, and the name says so
+    /// because the older one did not. The sink was fed across every one of these
+    /// samples: an empty buffer still hands the caller a concealed frame, so the
+    /// timeline never stops and the device is never handed silence. Forty of the
+    /// forty envelopes committed under `results/audio` report zero render
+    /// underruns, so nothing in this project's measured history has ever starved
+    /// a device, and calling this quantity a hole in continuity overstated every
+    /// figure derived from it. Playout continuity is the device's own
+    /// `render_underruns` and is reported separately.
+    pub fn concealed_samples(&self) -> u64 {
         self.expected_samples.saturating_sub(self.played_samples)
     }
 }
@@ -804,7 +815,7 @@ mod tests {
         assert_eq!(counts.played, 4);
         assert_eq!(counts.concealed, 0);
         assert_eq!(counts.late, 0);
-        assert_eq!(counts.continuity_hole(), 0);
+        assert_eq!(counts.concealed_samples(), 0);
     }
 
     #[test]
@@ -878,12 +889,12 @@ mod tests {
     }
 
     #[test]
-    fn continuity_counts_a_concealed_frame_as_played_and_an_underrun_as_a_hole() {
+    fn a_concealed_frame_counts_as_played_and_an_underrun_counts_as_concealed() {
         let stream = Stream::new(4);
         let mut buffer = buffer(10);
         let frame = u64::from(buffer.frame_samples());
 
-        // A gap with the stream still running: concealed, and continuous.
+        // A gap with the stream still running: concealed, and credited.
         for index in [0, 1, 3] {
             push(&mut buffer, &stream, index, at());
         }
@@ -893,7 +904,7 @@ mod tests {
         let bridged = buffer.counts();
         assert_eq!(bridged.expected_samples, 4 * frame);
         assert_eq!(bridged.played_samples, 4 * frame);
-        assert_eq!(bridged.continuity_hole(), 0);
+        assert_eq!(bridged.concealed_samples(), 0);
 
         // Two periods with nothing at all behind them: the stream did not
         // produce that audio, and the account says so.
@@ -902,14 +913,14 @@ mod tests {
         let starved = buffer.counts();
         assert_eq!(starved.expected_samples, 6 * frame);
         assert_eq!(starved.played_samples, 4 * frame);
-        assert_eq!(starved.continuity_hole(), 2 * frame);
+        assert_eq!(starved.concealed_samples(), 2 * frame);
     }
 
     #[test]
-    fn frames_given_up_to_hold_the_ceiling_are_holes_too() {
+    fn frames_given_up_to_hold_the_ceiling_count_as_concealed_too() {
         // Not asked for by name, but it follows from the same definition and
         // would otherwise be the one way a frame can vanish without the
-        // continuity counter noticing.
+        // concealment counter noticing.
         let stream = Stream::new(12);
         let mut buffer = buffer(10);
         for index in 0..12 {
@@ -922,7 +933,7 @@ mod tests {
         let frame = u64::from(buffer.frame_samples());
         assert_eq!(counts.expected_samples, 12 * frame);
         assert_eq!(counts.played_samples, 2 * frame);
-        assert_eq!(counts.continuity_hole(), 10 * frame);
+        assert_eq!(counts.concealed_samples(), 10 * frame);
     }
 
     #[test]

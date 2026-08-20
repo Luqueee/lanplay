@@ -1,0 +1,1321 @@
+{
+  "checks": [
+    {
+      "kind": "must_not_be_zero",
+      "name": "the stream arrived",
+      "reads": "rtp_received",
+      "why": "every figure in this document is computed over these datagrams, so a run that received none makes each of them an absence rather than a number"
+    },
+    {
+      "kind": "must_not_be_zero",
+      "name": "audio was decoded and not merely concealed",
+      "reads": "frames_played",
+      "why": "the concealer produces plausible samples from an empty stream indefinitely, so a callback count, an underrun count of zero and a concealment figure are all consistent with a path that carried nothing; a decoded frame is not"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "source concealment: none of the source was replaced",
+      "population": "samples_expected",
+      "reads": "concealed_samples",
+      "why": "expected counts every per-channel sample the playout cursor travelled and played counts the ones the producer deposited, with a gap concealment credited because the source's own audio sits either side of it and an underrun refused because nothing of the source was there. The difference is source audio the listener was handed an invention in place of, which is a fidelity loss and not a playout failure - the concealer keeps the device fed throughout, and forty of the forty envelopes committed under results/audio report zero render underruns, so this project has never once handed a device silence. The population is the expected samples, because zero concealed out of zero expected is a run that carried nothing"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "playout continuity: the device was never handed silence",
+      "population": "render_callbacks",
+      "reads": "render_underruns",
+      "why": "the other half of the pair above, and stated as its own criterion because a concealment figure quoted alone invites its reader to believe the device was starved. A cycle the ring could not fill is a whole IO buffer of silence sent to a device in place of audio, which is audible however small the sample count beside it looks; the population is the cycles, because a run in which the device never ran must not pass this by having had no chance to fail it"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "no frame arrived in time and failed to decode",
+      "population": "frames_played",
+      "reads": "decode_failures",
+      "why": "a payload the decoder refuses is a disagreement between the two ends about the format, which no amount of buffering repairs and which concealment hides completely in every other counter here"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "no packet carried a timestamp off the frame grid",
+      "population": "rtp_received",
+      "reads": "rtp_off_grid",
+      "why": "a timestamp that is not a whole number of frames from the one that anchored the stream is a sender running at another frame duration, and the symptom is a run that conceals everything and plays nothing"
+    },
+    {
+      "bound": 500.0,
+      "kind": "must_be_below",
+      "name": "decode p99 under a tenth of the frame",
+      "reads": "decode_p99_us",
+      "why": "a tenth of the 5 ms frame is 500 us, and the producer has to decode and deposit inside its period or the device finds an empty ring; p99 rather than the mean, because a frame late once every hundred is a click a listener hears"
+    },
+    {
+      "kind": "must_be_within",
+      "name": "the left channel arrives as its own tone",
+      "reads": "tone_left_hz",
+      "target": 997.0,
+      "tolerance": 5.0,
+      "why": "a packet count and a callback count agree just as happily when the path carries digital silence, and this project has read that agreement as success; 997 Hz comes out of the samples that were played, at a window resolution of 2 Hz"
+    },
+    {
+      "kind": "must_be_within",
+      "name": "the right channel arrives as its own tone",
+      "reads": "tone_right_hz",
+      "target": 1997.0,
+      "tolerance": 5.0,
+      "why": "the two channels carry different frequencies so that channel order is provable across the whole link rather than assumed, and a right channel reading 997 Hz is what a swap looks like"
+    },
+    {
+      "kind": "must_not_be_zero",
+      "name": "the played channels stay distinct",
+      "reads": "tone_channels_distinct",
+      "why": "two channels reading one frequency is consistent with a fold to mono, with one channel encoded twice, and with an analysis reading its own scratch buffer, and every count in this document is consistent with all three"
+    }
+  ],
+  "declared": [
+    "rtp receive",
+    "jitter buffer",
+    "opus decode",
+    "coreaudio render"
+  ],
+  "environment": {
+    "channels": 2,
+    "device": "Altavoces del MacBook Pro",
+    "device_chosen": "named",
+    "device_span_s": 119.951258708,
+    "excess": {
+      "arrivals": 24002,
+      "arrivals_dropped": 0,
+      "bin_us": 250,
+      "block_seconds": 10.0,
+      "blocks": 12,
+      "corrected": {
+        "bins": [
+          [
+            0.0,
+            22688
+          ],
+          [
+            0.25,
+            43
+          ],
+          [
+            0.5,
+            17
+          ],
+          [
+            0.75,
+            12
+          ],
+          [
+            1.0,
+            8
+          ],
+          [
+            1.25,
+            6
+          ],
+          [
+            1.5,
+            6
+          ],
+          [
+            1.75,
+            4
+          ],
+          [
+            2.0,
+            3
+          ],
+          [
+            2.25,
+            2
+          ],
+          [
+            2.5,
+            6
+          ],
+          [
+            2.75,
+            3
+          ],
+          [
+            3.25,
+            1
+          ],
+          [
+            3.5,
+            1
+          ],
+          [
+            3.75,
+            2
+          ],
+          [
+            4.25,
+            1
+          ],
+          [
+            4.5,
+            3
+          ],
+          [
+            5.0,
+            2
+          ],
+          [
+            5.25,
+            4
+          ],
+          [
+            5.5,
+            2
+          ],
+          [
+            6.25,
+            2
+          ],
+          [
+            6.5,
+            1
+          ],
+          [
+            7.0,
+            1
+          ],
+          [
+            7.25,
+            1
+          ],
+          [
+            9.5,
+            1
+          ],
+          [
+            10.0,
+            1
+          ],
+          [
+            10.25,
+            1
+          ],
+          [
+            11.0,
+            1
+          ],
+          [
+            12.0,
+            1
+          ],
+          [
+            14.25,
+            1
+          ],
+          [
+            17.0,
+            1
+          ],
+          [
+            39.0,
+            1
+          ],
+          [
+            39.25,
+            7
+          ],
+          [
+            39.5,
+            568
+          ],
+          [
+            39.75,
+            2
+          ],
+          [
+            40.0,
+            588
+          ],
+          [
+            40.5,
+            2
+          ],
+          [
+            40.75,
+            1
+          ],
+          [
+            41.0,
+            1
+          ],
+          [
+            41.5,
+            2
+          ],
+          [
+            41.75,
+            1
+          ],
+          [
+            42.25,
+            2
+          ],
+          [
+            62.25,
+            1
+          ]
+        ],
+        "max_ms": 62.312,
+        "over_100ms": 0,
+        "p50_ms": 0.038,
+        "p95_ms": 3.98,
+        "p99_ms": 40.044
+      },
+      "drift": {
+        "accumulated_ms": -0.009483307692307692,
+        "agrees_with_reference": false,
+        "blocks_fitted": 12,
+        "delay_slope_ppm": -0.07902097902097902,
+        "delay_slope_ppm_all_points": -2.343068445375337,
+        "reference_source_ppm": 9.29,
+        "source_ppm": 0.07902097902097902,
+        "source_ppm_all_points": 2.343068445375337
+      },
+      "frames_missing": 1,
+      "minimum_clusters": 30,
+      "pair_cadence_ms": null,
+      "population": 24002,
+      "raw": {
+        "bins": [
+          [
+            0.0,
+            22685
+          ],
+          [
+            0.25,
+            45
+          ],
+          [
+            0.5,
+            18
+          ],
+          [
+            0.75,
+            12
+          ],
+          [
+            1.0,
+            8
+          ],
+          [
+            1.25,
+            6
+          ],
+          [
+            1.5,
+            6
+          ],
+          [
+            1.75,
+            4
+          ],
+          [
+            2.0,
+            3
+          ],
+          [
+            2.25,
+            2
+          ],
+          [
+            2.5,
+            5
+          ],
+          [
+            2.75,
+            4
+          ],
+          [
+            3.25,
+            1
+          ],
+          [
+            3.5,
+            1
+          ],
+          [
+            3.75,
+            2
+          ],
+          [
+            4.25,
+            1
+          ],
+          [
+            4.5,
+            3
+          ],
+          [
+            5.0,
+            2
+          ],
+          [
+            5.25,
+            4
+          ],
+          [
+            5.5,
+            2
+          ],
+          [
+            6.25,
+            2
+          ],
+          [
+            6.5,
+            1
+          ],
+          [
+            7.0,
+            1
+          ],
+          [
+            7.25,
+            1
+          ],
+          [
+            9.5,
+            1
+          ],
+          [
+            10.25,
+            2
+          ],
+          [
+            11.0,
+            1
+          ],
+          [
+            12.0,
+            1
+          ],
+          [
+            14.25,
+            1
+          ],
+          [
+            17.0,
+            1
+          ],
+          [
+            39.0,
+            1
+          ],
+          [
+            39.25,
+            7
+          ],
+          [
+            39.5,
+            567
+          ],
+          [
+            39.75,
+            3
+          ],
+          [
+            40.0,
+            588
+          ],
+          [
+            40.5,
+            2
+          ],
+          [
+            40.75,
+            1
+          ],
+          [
+            41.0,
+            1
+          ],
+          [
+            41.5,
+            2
+          ],
+          [
+            41.75,
+            1
+          ],
+          [
+            42.25,
+            2
+          ],
+          [
+            62.25,
+            1
+          ]
+        ],
+        "max_ms": 62.319,
+        "over_100ms": 0,
+        "p50_ms": 0.04,
+        "p95_ms": 3.986,
+        "p99_ms": 40.046
+      },
+      "repeated_frames": 0,
+      "sequence_breaks": 1,
+      "stream_s": 120.01,
+      "thresholds": [
+        {
+          "block_clusters_per_min_max": 618.0,
+          "block_clusters_per_min_min": 450.0,
+          "block_clusters_per_min_p50": 570.0,
+          "cluster_frames_max": 4,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 1,
+          "cluster_gap_max_ms": 760.0,
+          "cluster_gap_min_ms": 5.0,
+          "cluster_gap_p50_ms": 75.0,
+          "cluster_ms_max": 20.0,
+          "cluster_worst_max_ms": 62.312,
+          "cluster_worst_p50_ms": 40.014,
+          "cluster_worst_p95_ms": 40.081,
+          "clusters": 1131,
+          "clusters_per_min": 565.4528789267561,
+          "late": 1196,
+          "late_fraction": 0.04982918090159153,
+          "late_per_min": 597.9501708190984,
+          "late_raw": 1196,
+          "ms": 5,
+          "rate_quotable": true
+        },
+        {
+          "block_clusters_per_min_max": 606.0,
+          "block_clusters_per_min_min": 450.0,
+          "block_clusters_per_min_p50": 564.0,
+          "cluster_frames_max": 3,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 1,
+          "cluster_gap_max_ms": 760.0,
+          "cluster_gap_min_ms": 5.0,
+          "cluster_gap_p50_ms": 75.0,
+          "cluster_ms_max": 15.0,
+          "cluster_worst_max_ms": 62.312,
+          "cluster_worst_p50_ms": 40.015,
+          "cluster_worst_p95_ms": 40.081,
+          "clusters": 1122,
+          "clusters_per_min": 560.9532538955087,
+          "late": 1182,
+          "late_fraction": 0.04924589617531872,
+          "late_per_min": 590.9507541038247,
+          "late_raw": 1182,
+          "ms": 10,
+          "rate_quotable": true
+        },
+        {
+          "block_clusters_per_min_max": 606.0,
+          "block_clusters_per_min_min": 450.0,
+          "block_clusters_per_min_p50": 558.0,
+          "cluster_frames_max": 3,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 1,
+          "cluster_gap_max_ms": 760.0,
+          "cluster_gap_min_ms": 5.0,
+          "cluster_gap_p50_ms": 75.0,
+          "cluster_ms_max": 15.0,
+          "cluster_worst_max_ms": 62.312,
+          "cluster_worst_p50_ms": 40.015,
+          "cluster_worst_p95_ms": 40.081,
+          "clusters": 1120,
+          "clusters_per_min": 559.9533372218981,
+          "late": 1177,
+          "late_fraction": 0.04903758020164986,
+          "late_per_min": 588.4509624197983,
+          "late_raw": 1177,
+          "ms": 15,
+          "rate_quotable": true
+        },
+        {
+          "block_clusters_per_min_max": 606.0,
+          "block_clusters_per_min_min": 450.0,
+          "block_clusters_per_min_p50": 558.0,
+          "cluster_frames_max": 3,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 1,
+          "cluster_gap_max_ms": 760.0,
+          "cluster_gap_min_ms": 5.0,
+          "cluster_gap_p50_ms": 75.0,
+          "cluster_ms_max": 15.0,
+          "cluster_worst_max_ms": 62.312,
+          "cluster_worst_p50_ms": 40.015,
+          "cluster_worst_p95_ms": 40.081,
+          "clusters": 1120,
+          "clusters_per_min": 559.9533372218981,
+          "late": 1176,
+          "late_fraction": 0.04899591700691609,
+          "late_per_min": 587.9510040829931,
+          "late_raw": 1176,
+          "ms": 20,
+          "rate_quotable": true
+        },
+        {
+          "block_clusters_per_min_max": 606.0,
+          "block_clusters_per_min_min": 450.0,
+          "block_clusters_per_min_p50": 558.0,
+          "cluster_frames_max": 3,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 1,
+          "cluster_gap_max_ms": 760.0,
+          "cluster_gap_min_ms": 5.0,
+          "cluster_gap_p50_ms": 75.0,
+          "cluster_ms_max": 15.0,
+          "cluster_worst_max_ms": 62.312,
+          "cluster_worst_p50_ms": 40.015,
+          "cluster_worst_p95_ms": 40.081,
+          "clusters": 1120,
+          "clusters_per_min": 559.9533372218981,
+          "late": 1176,
+          "late_fraction": 0.04899591700691609,
+          "late_per_min": 587.9510040829931,
+          "late_raw": 1176,
+          "ms": 25,
+          "rate_quotable": true
+        },
+        {
+          "block_clusters_per_min_max": 606.0,
+          "block_clusters_per_min_min": 450.0,
+          "block_clusters_per_min_p50": 558.0,
+          "cluster_frames_max": 3,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 1,
+          "cluster_gap_max_ms": 760.0,
+          "cluster_gap_min_ms": 5.0,
+          "cluster_gap_p50_ms": 75.0,
+          "cluster_ms_max": 15.0,
+          "cluster_worst_max_ms": 62.312,
+          "cluster_worst_p50_ms": 40.015,
+          "cluster_worst_p95_ms": 40.081,
+          "clusters": 1120,
+          "clusters_per_min": 559.9533372218981,
+          "late": 1176,
+          "late_fraction": 0.04899591700691609,
+          "late_per_min": 587.9510040829931,
+          "late_raw": 1176,
+          "ms": 30,
+          "rate_quotable": true
+        },
+        {
+          "block_clusters_per_min_max": 354.0,
+          "block_clusters_per_min_min": 192.0,
+          "block_clusters_per_min_p50": 300.0,
+          "cluster_frames_max": 2,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 1,
+          "cluster_gap_max_ms": 1215.0,
+          "cluster_gap_min_ms": 5.0,
+          "cluster_gap_p50_ms": 135.0,
+          "cluster_ms_max": 10.0,
+          "cluster_worst_max_ms": 62.312,
+          "cluster_worst_p50_ms": 40.039,
+          "cluster_worst_p95_ms": 40.108,
+          "clusters": 586,
+          "clusters_per_min": 292.97558536788597,
+          "late": 598,
+          "late_fraction": 0.024914590450795766,
+          "late_per_min": 298.9750854095492,
+          "late_raw": 598,
+          "ms": 40,
+          "rate_quotable": true
+        },
+        {
+          "block_clusters_per_min_max": 6.0,
+          "block_clusters_per_min_min": 0.0,
+          "block_clusters_per_min_p50": 0.0,
+          "cluster_frames_max": 1,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 1,
+          "cluster_gap_max_ms": null,
+          "cluster_gap_min_ms": null,
+          "cluster_gap_p50_ms": null,
+          "cluster_ms_max": 5.0,
+          "cluster_worst_max_ms": 62.312,
+          "cluster_worst_p50_ms": 62.312,
+          "cluster_worst_p95_ms": 62.312,
+          "clusters": 1,
+          "clusters_per_min": 0.4999583368052662,
+          "late": 1,
+          "late_fraction": 0.00004166319473377219,
+          "late_per_min": 0.4999583368052662,
+          "late_raw": 1,
+          "ms": 50,
+          "rate_quotable": false
+        },
+        {
+          "block_clusters_per_min_max": 6.0,
+          "block_clusters_per_min_min": 0.0,
+          "block_clusters_per_min_p50": 0.0,
+          "cluster_frames_max": 1,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 1,
+          "cluster_gap_max_ms": null,
+          "cluster_gap_min_ms": null,
+          "cluster_gap_p50_ms": null,
+          "cluster_ms_max": 5.0,
+          "cluster_worst_max_ms": 62.312,
+          "cluster_worst_p50_ms": 62.312,
+          "cluster_worst_p95_ms": 62.312,
+          "clusters": 1,
+          "clusters_per_min": 0.4999583368052662,
+          "late": 1,
+          "late_fraction": 0.00004166319473377219,
+          "late_per_min": 0.4999583368052662,
+          "late_raw": 1,
+          "ms": 60,
+          "rate_quotable": false
+        },
+        {
+          "block_clusters_per_min_max": 0.0,
+          "block_clusters_per_min_min": 0.0,
+          "block_clusters_per_min_p50": 0.0,
+          "cluster_frames_max": null,
+          "cluster_frames_p50": null,
+          "cluster_frames_p95": null,
+          "cluster_gap_max_ms": null,
+          "cluster_gap_min_ms": null,
+          "cluster_gap_p50_ms": null,
+          "cluster_ms_max": null,
+          "cluster_worst_max_ms": null,
+          "cluster_worst_p50_ms": null,
+          "cluster_worst_p95_ms": null,
+          "clusters": 0,
+          "clusters_per_min": 0.0,
+          "late": 0,
+          "late_fraction": 0.0,
+          "late_per_min": 0.0,
+          "late_raw": 0,
+          "ms": 80,
+          "rate_quotable": false
+        },
+        {
+          "block_clusters_per_min_max": 0.0,
+          "block_clusters_per_min_min": 0.0,
+          "block_clusters_per_min_p50": 0.0,
+          "cluster_frames_max": null,
+          "cluster_frames_p50": null,
+          "cluster_frames_p95": null,
+          "cluster_gap_max_ms": null,
+          "cluster_gap_min_ms": null,
+          "cluster_gap_p50_ms": null,
+          "cluster_ms_max": null,
+          "cluster_worst_max_ms": null,
+          "cluster_worst_p50_ms": null,
+          "cluster_worst_p95_ms": null,
+          "clusters": 0,
+          "clusters_per_min": 0.0,
+          "late": 0,
+          "late_fraction": 0.0,
+          "late_per_min": 0.0,
+          "late_raw": 0,
+          "ms": 100,
+          "rate_quotable": false
+        }
+      ]
+    },
+    "frame_ms": 5,
+    "io_buffer_frames": 256,
+    "jitter_ceiling_ms": 30.0,
+    "jitter_slots": 8,
+    "jitter_target_ms": 10.0,
+    "measurements_dropped": 0,
+    "producer_scheduled_as": "time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms",
+    "receiver_scheduled_as": "time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms",
+    "ring_frames": 4096,
+    "ring_prime_frames": 496,
+    "sample_rate_hz": 48000,
+    "ssrc": 4288843096,
+    "windows": [
+      {
+        "concealed_samples": 2400,
+        "frames_played": 1892,
+        "jitter_occupancy_max_ms": 10.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 10.0,
+        "jitter_occupancy_p99_ms": 10.0,
+        "jitter_occupancy_pulls": 2001,
+        "jitter_underruns": 10,
+        "plc_frames": 109,
+        "render_callbacks": 1876,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2003,
+        "samples_expected": 480240,
+        "samples_played": 477840,
+        "seconds": 10.006073375
+      },
+      {
+        "concealed_samples": 1920,
+        "frames_played": 1895,
+        "jitter_occupancy_max_ms": 10.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 5.0,
+        "jitter_occupancy_p95_ms": 10.0,
+        "jitter_occupancy_p99_ms": 10.0,
+        "jitter_occupancy_pulls": 2000,
+        "jitter_underruns": 8,
+        "plc_frames": 105,
+        "render_callbacks": 1876,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 1,
+        "rtp_received": 1999,
+        "samples_expected": 480000,
+        "samples_played": 478080,
+        "seconds": 10.001972667
+      },
+      {
+        "concealed_samples": 960,
+        "frames_played": 1902,
+        "jitter_occupancy_max_ms": 10.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 10.0,
+        "jitter_occupancy_p99_ms": 10.0,
+        "jitter_occupancy_pulls": 2000,
+        "jitter_underruns": 4,
+        "plc_frames": 98,
+        "render_callbacks": 1875,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2001,
+        "samples_expected": 480000,
+        "samples_played": 479040,
+        "seconds": 10.001123417
+      },
+      {
+        "concealed_samples": 240,
+        "frames_played": 1904,
+        "jitter_occupancy_max_ms": 10.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 10.0,
+        "jitter_occupancy_p99_ms": 10.0,
+        "jitter_occupancy_pulls": 2001,
+        "jitter_underruns": 1,
+        "plc_frames": 97,
+        "render_callbacks": 1875,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 1,
+        "rtp_received": 2000,
+        "samples_expected": 480240,
+        "samples_played": 480000,
+        "seconds": 10.003722125
+      },
+      {
+        "concealed_samples": 480,
+        "frames_played": 1907,
+        "jitter_occupancy_max_ms": 10.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 10.0,
+        "jitter_occupancy_p99_ms": 10.0,
+        "jitter_occupancy_pulls": 2001,
+        "jitter_underruns": 2,
+        "plc_frames": 94,
+        "render_callbacks": 1876,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2002,
+        "samples_expected": 480240,
+        "samples_played": 479760,
+        "seconds": 10.004961958
+      },
+      {
+        "concealed_samples": 240,
+        "frames_played": 1899,
+        "jitter_occupancy_max_ms": 10.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 10.0,
+        "jitter_occupancy_p99_ms": 10.0,
+        "jitter_occupancy_pulls": 2001,
+        "jitter_underruns": 1,
+        "plc_frames": 102,
+        "render_callbacks": 1876,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2001,
+        "samples_expected": 480240,
+        "samples_played": 480000,
+        "seconds": 10.004793583
+      },
+      {
+        "concealed_samples": 240,
+        "frames_played": 1895,
+        "jitter_occupancy_max_ms": 10.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 10.0,
+        "jitter_occupancy_p99_ms": 10.0,
+        "jitter_occupancy_pulls": 2000,
+        "jitter_underruns": 1,
+        "plc_frames": 105,
+        "render_callbacks": 1875,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 1,
+        "rtp_received": 1999,
+        "samples_expected": 480000,
+        "samples_played": 479760,
+        "seconds": 10.00073
+      },
+      {
+        "concealed_samples": 240,
+        "frames_played": 1901,
+        "jitter_occupancy_max_ms": 10.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 10.0,
+        "jitter_occupancy_p99_ms": 10.0,
+        "jitter_occupancy_pulls": 2001,
+        "jitter_underruns": 1,
+        "plc_frames": 100,
+        "render_callbacks": 1876,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2002,
+        "samples_expected": 480240,
+        "samples_played": 480000,
+        "seconds": 10.003203292
+      },
+      {
+        "concealed_samples": 0,
+        "frames_played": 1905,
+        "jitter_occupancy_max_ms": 10.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 10.0,
+        "jitter_occupancy_p99_ms": 10.0,
+        "jitter_occupancy_pulls": 2000,
+        "jitter_underruns": 0,
+        "plc_frames": 95,
+        "render_callbacks": 1875,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2000,
+        "samples_expected": 480000,
+        "samples_played": 480000,
+        "seconds": 10.002008958
+      },
+      {
+        "concealed_samples": 720,
+        "frames_played": 1918,
+        "jitter_occupancy_max_ms": 10.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 10.0,
+        "jitter_occupancy_p99_ms": 10.0,
+        "jitter_occupancy_pulls": 2001,
+        "jitter_underruns": 3,
+        "plc_frames": 83,
+        "render_callbacks": 1876,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2001,
+        "samples_expected": 480240,
+        "samples_played": 479520,
+        "seconds": 10.00279925
+      },
+      {
+        "concealed_samples": 240,
+        "frames_played": 1905,
+        "jitter_occupancy_max_ms": 10.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 10.0,
+        "jitter_occupancy_p99_ms": 10.0,
+        "jitter_occupancy_pulls": 2001,
+        "jitter_underruns": 1,
+        "plc_frames": 96,
+        "render_callbacks": 1876,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2001,
+        "samples_expected": 480240,
+        "samples_played": 480000,
+        "seconds": 10.004157084
+      },
+      {
+        "concealed_samples": 240,
+        "frames_played": 1887,
+        "jitter_occupancy_max_ms": 10.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 10.0,
+        "jitter_occupancy_p99_ms": 10.0,
+        "jitter_occupancy_pulls": 1984,
+        "jitter_underruns": 1,
+        "plc_frames": 97,
+        "render_callbacks": 1860,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 1,
+        "rtp_received": 1983,
+        "samples_expected": 476160,
+        "samples_played": 475920,
+        "seconds": 9.922914
+      }
+    ]
+  },
+  "exercised": [
+    "rtp receive",
+    "jitter buffer",
+    "opus decode",
+    "coreaudio render"
+  ],
+  "findings": [
+    "0.004 per cent of the stream was lost over the link, 1 packets of the 24003 the sequence numbers describe",
+    "frames arrived -10.0 ms past their moment at p50, -6.1 at p95, 30.0 at p99 and 52.3 at worst, against a target of 10 ms; negative is margin in hand, and the shape is what says whether the target is short by a fixed amount every frame pays or long enough for all but a tail",
+    "the jitter buffer held 10.0 ms at p50 and 10.0 ms at p99 against a 10 ms target, measured after serving each frame",
+    "window by window that occupancy went from 10.0 ms at p50 in the first of 12 windows to 10.0 in the last, staying between 5.0 and 10.0; a run-wide percentile cannot be separated back into these, so whether the buffer grew during the arm is readable here and nowhere above",
+    "the ring sat at 2176 frames of 4096 at p50, having been primed to 496; the difference is the 32.8 ms `AudioDeviceStart` spent getting the device going, during which the producer kept depositing and the device consumed nothing, so it is the ring's contribution to latency and it belongs to the device rather than to the link",
+    "the source clock runs +0.08 ppm referred to this Mac's timebase, as this run's own per-block minima fit it, against A7's +9.29 ppm for the same pair, and THEY DISAGREE BY MORE THAN A FACTOR OF TWO, so one of the two measurements is wrong and neither may be cited until that is settled. That is a delay slope of -0.08 ppm - a fast source makes the subtracted RTP term outrun arrival time, so the two have opposite signs and both are stated because reading one as the other is how this reported a disagreement on its first radio run. Over the 120 s of stream time it is -0.01 ms of accumulated skew, which took +0.002 ms off the p99 of the raw curve and +0.007 ms off its maximum. The same fit over every arrival rather than the minima gives +2.34 ppm, and the two differing is the burst sensitivity that chose the estimator",
+    "excess above this run's own best case reached 0.04 ms at p50, 3.98 at p95, 40.04 at p99 and 62.31 at worst over 24002 arrivals, with 0 of them past the 100 ms the curve reports out to; the reference is the minimum over the run and not the first packet, so this is comparable with another run's and an arrival delay anchored on one datagram is not",
+    "a 5 ms target would have left 1196 frames of 24002 past their moment, 4.9829 per cent, at 597.95 a minute and 565.45 clusters a minute: clusters of 1 frames at p50, 1 at p95 and 4 at worst - 20 ms of timeline in the worst one - separated by 75 ms at p50 and 5 ms at closest",
+    "a 10 ms target would have left 1182 frames of 24002 past their moment, 4.9246 per cent, at 590.95 a minute and 560.95 clusters a minute: clusters of 1 frames at p50, 1 at p95 and 3 at worst - 15 ms of timeline in the worst one - separated by 75 ms at p50 and 5 ms at closest",
+    "a 20 ms target would have left 1176 frames of 24002 past their moment, 4.8996 per cent, at 587.95 a minute and 559.95 clusters a minute: clusters of 1 frames at p50, 1 at p95 and 3 at worst - 15 ms of timeline in the worst one - separated by 75 ms at p50 and 5 ms at closest"
+  ],
+  "gate": "audio-e2e-gate",
+  "observations": {
+    "arrival_delay_max_ms": 52.262,
+    "arrival_delay_min_ms": -10.057,
+    "arrival_delay_p50_ms": -10.017,
+    "arrival_delay_p95_ms": -6.071,
+    "arrival_delay_p99_ms": 29.989,
+    "buffer_growth_samples": 2768,
+    "buffer_held_samples": 2768,
+    "buffer_invariant_residual": 0,
+    "concealed_samples": 7920,
+    "deadlines_granted": 1,
+    "decode_failures": 0,
+    "decode_max_us": 43,
+    "decode_p50_us": 7,
+    "decode_p99_us": 16,
+    "device_start_latency_ms": 32.836458,
+    "excess_arrivals": 24002,
+    "excess_arrivals_dropped": 0,
+    "excess_block_clusters_per_min_max_100ms": 0,
+    "excess_block_clusters_per_min_max_10ms": 606,
+    "excess_block_clusters_per_min_max_15ms": 606,
+    "excess_block_clusters_per_min_max_20ms": 606,
+    "excess_block_clusters_per_min_max_25ms": 606,
+    "excess_block_clusters_per_min_max_30ms": 606,
+    "excess_block_clusters_per_min_max_40ms": 354,
+    "excess_block_clusters_per_min_max_50ms": 6,
+    "excess_block_clusters_per_min_max_5ms": 618,
+    "excess_block_clusters_per_min_max_60ms": 6,
+    "excess_block_clusters_per_min_max_80ms": 0,
+    "excess_block_clusters_per_min_min_100ms": 0,
+    "excess_block_clusters_per_min_min_10ms": 450,
+    "excess_block_clusters_per_min_min_15ms": 450,
+    "excess_block_clusters_per_min_min_20ms": 450,
+    "excess_block_clusters_per_min_min_25ms": 450,
+    "excess_block_clusters_per_min_min_30ms": 450,
+    "excess_block_clusters_per_min_min_40ms": 192,
+    "excess_block_clusters_per_min_min_50ms": 0,
+    "excess_block_clusters_per_min_min_5ms": 450,
+    "excess_block_clusters_per_min_min_60ms": 0,
+    "excess_block_clusters_per_min_min_80ms": 0,
+    "excess_block_clusters_per_min_p50_100ms": 0,
+    "excess_block_clusters_per_min_p50_10ms": 564,
+    "excess_block_clusters_per_min_p50_15ms": 558,
+    "excess_block_clusters_per_min_p50_20ms": 558,
+    "excess_block_clusters_per_min_p50_25ms": 558,
+    "excess_block_clusters_per_min_p50_30ms": 558,
+    "excess_block_clusters_per_min_p50_40ms": 300,
+    "excess_block_clusters_per_min_p50_50ms": 0,
+    "excess_block_clusters_per_min_p50_5ms": 570,
+    "excess_block_clusters_per_min_p50_60ms": 0,
+    "excess_block_clusters_per_min_p50_80ms": 0,
+    "excess_blocks": 12,
+    "excess_cluster_frames_max_10ms": 3,
+    "excess_cluster_frames_max_15ms": 3,
+    "excess_cluster_frames_max_20ms": 3,
+    "excess_cluster_frames_max_25ms": 3,
+    "excess_cluster_frames_max_30ms": 3,
+    "excess_cluster_frames_max_40ms": 2,
+    "excess_cluster_frames_max_50ms": 1,
+    "excess_cluster_frames_max_5ms": 4,
+    "excess_cluster_frames_max_60ms": 1,
+    "excess_cluster_frames_p50_10ms": 1,
+    "excess_cluster_frames_p50_15ms": 1,
+    "excess_cluster_frames_p50_20ms": 1,
+    "excess_cluster_frames_p50_25ms": 1,
+    "excess_cluster_frames_p50_30ms": 1,
+    "excess_cluster_frames_p50_40ms": 1,
+    "excess_cluster_frames_p50_50ms": 1,
+    "excess_cluster_frames_p50_5ms": 1,
+    "excess_cluster_frames_p50_60ms": 1,
+    "excess_cluster_frames_p95_10ms": 1,
+    "excess_cluster_frames_p95_15ms": 1,
+    "excess_cluster_frames_p95_20ms": 1,
+    "excess_cluster_frames_p95_25ms": 1,
+    "excess_cluster_frames_p95_30ms": 1,
+    "excess_cluster_frames_p95_40ms": 1,
+    "excess_cluster_frames_p95_50ms": 1,
+    "excess_cluster_frames_p95_5ms": 1,
+    "excess_cluster_frames_p95_60ms": 1,
+    "excess_cluster_gap_min_ms_10ms": 5,
+    "excess_cluster_gap_min_ms_15ms": 5,
+    "excess_cluster_gap_min_ms_20ms": 5,
+    "excess_cluster_gap_min_ms_25ms": 5,
+    "excess_cluster_gap_min_ms_30ms": 5,
+    "excess_cluster_gap_min_ms_40ms": 5,
+    "excess_cluster_gap_min_ms_5ms": 5,
+    "excess_cluster_gap_p50_ms_10ms": 75,
+    "excess_cluster_gap_p50_ms_15ms": 75,
+    "excess_cluster_gap_p50_ms_20ms": 75,
+    "excess_cluster_gap_p50_ms_25ms": 75,
+    "excess_cluster_gap_p50_ms_30ms": 75,
+    "excess_cluster_gap_p50_ms_40ms": 135,
+    "excess_cluster_gap_p50_ms_5ms": 75,
+    "excess_cluster_ms_max_10ms": 15,
+    "excess_cluster_ms_max_15ms": 15,
+    "excess_cluster_ms_max_20ms": 15,
+    "excess_cluster_ms_max_25ms": 15,
+    "excess_cluster_ms_max_30ms": 15,
+    "excess_cluster_ms_max_40ms": 10,
+    "excess_cluster_ms_max_50ms": 5,
+    "excess_cluster_ms_max_5ms": 20,
+    "excess_cluster_ms_max_60ms": 5,
+    "excess_cluster_worst_max_ms_10ms": 62.312,
+    "excess_cluster_worst_max_ms_15ms": 62.312,
+    "excess_cluster_worst_max_ms_20ms": 62.312,
+    "excess_cluster_worst_max_ms_25ms": 62.312,
+    "excess_cluster_worst_max_ms_30ms": 62.312,
+    "excess_cluster_worst_max_ms_40ms": 62.312,
+    "excess_cluster_worst_max_ms_50ms": 62.312,
+    "excess_cluster_worst_max_ms_5ms": 62.312,
+    "excess_cluster_worst_max_ms_60ms": 62.312,
+    "excess_cluster_worst_p50_ms_10ms": 40.015,
+    "excess_cluster_worst_p50_ms_15ms": 40.015,
+    "excess_cluster_worst_p50_ms_20ms": 40.015,
+    "excess_cluster_worst_p50_ms_25ms": 40.015,
+    "excess_cluster_worst_p50_ms_30ms": 40.015,
+    "excess_cluster_worst_p50_ms_40ms": 40.039,
+    "excess_cluster_worst_p50_ms_50ms": 62.312,
+    "excess_cluster_worst_p50_ms_5ms": 40.014,
+    "excess_cluster_worst_p50_ms_60ms": 62.312,
+    "excess_clusters_100ms": 0,
+    "excess_clusters_10ms": 1122,
+    "excess_clusters_15ms": 1120,
+    "excess_clusters_20ms": 1120,
+    "excess_clusters_25ms": 1120,
+    "excess_clusters_30ms": 1120,
+    "excess_clusters_40ms": 586,
+    "excess_clusters_50ms": 1,
+    "excess_clusters_5ms": 1131,
+    "excess_clusters_60ms": 1,
+    "excess_clusters_80ms": 0,
+    "excess_clusters_per_min_100ms": 0,
+    "excess_clusters_per_min_10ms": 560.9532538955087,
+    "excess_clusters_per_min_15ms": 559.9533372218981,
+    "excess_clusters_per_min_20ms": 559.9533372218981,
+    "excess_clusters_per_min_25ms": 559.9533372218981,
+    "excess_clusters_per_min_30ms": 559.9533372218981,
+    "excess_clusters_per_min_40ms": 292.97558536788597,
+    "excess_clusters_per_min_50ms": 0.4999583368052662,
+    "excess_clusters_per_min_5ms": 565.4528789267561,
+    "excess_clusters_per_min_60ms": 0.4999583368052662,
+    "excess_clusters_per_min_80ms": 0,
+    "excess_corrected_max_ms": 62.312,
+    "excess_corrected_over_100ms": 0,
+    "excess_corrected_p50_ms": 0.038,
+    "excess_corrected_p95_ms": 3.98,
+    "excess_corrected_p99_ms": 40.044,
+    "excess_delay_slope_ppm": -0.07902097902097902,
+    "excess_delay_slope_ppm_all_points": -2.343068445375337,
+    "excess_drift_accumulated_ms": -0.009483307692307692,
+    "excess_drift_agrees_with_a7": 0,
+    "excess_drift_blocks": 12,
+    "excess_drift_removed_max_ms": 0.007,
+    "excess_drift_removed_p99_ms": 0.002,
+    "excess_frames_missing": 1,
+    "excess_late_100ms": 0,
+    "excess_late_10ms": 1182,
+    "excess_late_15ms": 1177,
+    "excess_late_20ms": 1176,
+    "excess_late_25ms": 1176,
+    "excess_late_30ms": 1176,
+    "excess_late_40ms": 598,
+    "excess_late_50ms": 1,
+    "excess_late_5ms": 1196,
+    "excess_late_60ms": 1,
+    "excess_late_80ms": 0,
+    "excess_late_fraction_100ms": 0,
+    "excess_late_fraction_10ms": 0.04924589617531872,
+    "excess_late_fraction_15ms": 0.04903758020164986,
+    "excess_late_fraction_20ms": 0.04899591700691609,
+    "excess_late_fraction_25ms": 0.04899591700691609,
+    "excess_late_fraction_30ms": 0.04899591700691609,
+    "excess_late_fraction_40ms": 0.024914590450795766,
+    "excess_late_fraction_50ms": 0.00004166319473377219,
+    "excess_late_fraction_5ms": 0.04982918090159153,
+    "excess_late_fraction_60ms": 0.00004166319473377219,
+    "excess_late_fraction_80ms": 0,
+    "excess_late_per_min_100ms": 0,
+    "excess_late_per_min_10ms": 590.9507541038247,
+    "excess_late_per_min_15ms": 588.4509624197983,
+    "excess_late_per_min_20ms": 587.9510040829931,
+    "excess_late_per_min_25ms": 587.9510040829931,
+    "excess_late_per_min_30ms": 587.9510040829931,
+    "excess_late_per_min_40ms": 298.9750854095492,
+    "excess_late_per_min_50ms": 0.4999583368052662,
+    "excess_late_per_min_5ms": 597.9501708190984,
+    "excess_late_per_min_60ms": 0.4999583368052662,
+    "excess_late_per_min_80ms": 0,
+    "excess_late_raw_100ms": 0,
+    "excess_late_raw_10ms": 1182,
+    "excess_late_raw_15ms": 1177,
+    "excess_late_raw_20ms": 1176,
+    "excess_late_raw_25ms": 1176,
+    "excess_late_raw_30ms": 1176,
+    "excess_late_raw_40ms": 598,
+    "excess_late_raw_50ms": 1,
+    "excess_late_raw_5ms": 1196,
+    "excess_late_raw_60ms": 1,
+    "excess_late_raw_80ms": 0,
+    "excess_population": 24002,
+    "excess_rate_quotable_100ms": 0,
+    "excess_rate_quotable_10ms": 1,
+    "excess_rate_quotable_15ms": 1,
+    "excess_rate_quotable_20ms": 1,
+    "excess_rate_quotable_25ms": 1,
+    "excess_rate_quotable_30ms": 1,
+    "excess_rate_quotable_40ms": 1,
+    "excess_rate_quotable_50ms": 0,
+    "excess_rate_quotable_5ms": 1,
+    "excess_rate_quotable_60ms": 0,
+    "excess_rate_quotable_80ms": 0,
+    "excess_raw_max_ms": 62.319,
+    "excess_raw_over_100ms": 0,
+    "excess_raw_p50_ms": 0.04,
+    "excess_raw_p95_ms": 3.986,
+    "excess_raw_p99_ms": 40.046,
+    "excess_reference_source_ppm": 9.29,
+    "excess_repeated_frames": 0,
+    "excess_sequence_breaks": 1,
+    "excess_source_ppm": 0.07902097902097902,
+    "excess_source_ppm_all_points": 2.343068445375337,
+    "excess_stream_s": 120.01,
+    "frames_played": 22817,
+    "jitter_occupancy_max_ms": 10,
+    "jitter_occupancy_p50_ms": 10,
+    "jitter_occupancy_p95_ms": 10,
+    "jitter_occupancy_p99_ms": 10,
+    "jitter_overrun_frames": 0,
+    "jitter_overruns": 0,
+    "jitter_underruns": 33,
+    "pair_anchor_rtp": 1893132830,
+    "pair_class0_arrival_max_ms": 52.262,
+    "pair_class0_arrival_min_ms": -10.057,
+    "pair_class0_arrival_p50_ms": -10.015,
+    "pair_class0_arrival_p95_ms": 29.476,
+    "pair_class0_arrival_p99_ms": 29.991,
+    "pair_class0_frames": 12000,
+    "pair_class0_late": 612,
+    "pair_class0_offset_samples": 0,
+    "pair_class0_step_max_ms": 41.788,
+    "pair_class0_step_min_ms": -45.289,
+    "pair_class0_step_p50_ms": -0.005,
+    "pair_class0_step_p95_ms": 0.121,
+    "pair_class0_step_p99_ms": 39.993,
+    "pair_class0_step_pairs": 11999,
+    "pair_class0_underruns": 20,
+    "pair_class1_arrival_max_ms": 32.29,
+    "pair_class1_arrival_min_ms": -10.054,
+    "pair_class1_arrival_p50_ms": -10.019,
+    "pair_class1_arrival_p95_ms": -9.384,
+    "pair_class1_arrival_p99_ms": 29.987,
+    "pair_class1_frames": 12001,
+    "pair_class1_late": 570,
+    "pair_class1_offset_samples": 240,
+    "pair_class1_step_max_ms": 62.031,
+    "pair_class1_step_min_ms": -42.183,
+    "pair_class1_step_p50_ms": 0.004,
+    "pair_class1_step_p95_ms": 3.646,
+    "pair_class1_step_p99_ms": 40.004,
+    "pair_class1_step_pairs": 12000,
+    "pair_class1_underruns": 13,
+    "pair_frame_samples": 240,
+    "pair_samples_dropped": 0,
+    "pair_unanchored": 0,
+    "plc_frames": 1183,
+    "producer_interval_p50_us": 5000,
+    "producer_interval_p99_us": 5000,
+    "render_callbacks": 22492,
+    "render_frames_consumed": 5757952,
+    "render_interval_p50_us": 5333,
+    "render_interval_p99_us": 5346,
+    "render_odd_cycles": 0,
+    "render_overrun_frames": 0,
+    "render_overruns": 0,
+    "render_underrun_frames": 0,
+    "render_underruns": 0,
+    "ring_occupancy_max_frames": 2304,
+    "ring_occupancy_min_frames": 2032,
+    "ring_occupancy_p50_frames": 2176,
+    "rtp_duplicate": 0,
+    "rtp_expected": 24003,
+    "rtp_foreign_ssrc": 0,
+    "rtp_late": 1182,
+    "rtp_lost": 1,
+    "rtp_off_grid": 0,
+    "rtp_oversize": 0,
+    "rtp_received": 24002,
+    "rtp_reordered": 1176,
+    "rtp_unique": 24002,
+    "samples_concealed_in": 283920,
+    "samples_consumed": 5757952,
+    "samples_discarded": 283920,
+    "samples_expected": 5760000,
+    "samples_played": 5752080,
+    "samples_produced": 5760720,
+    "sink_host_time_scatter_samples": 0.20881744385908474,
+    "sink_invalid_timestamps": 0,
+    "sink_ppm": 6.135440093230589,
+    "sink_ppm_endpoints": 6.179960160353566,
+    "sink_ppm_error": 0.0008376797018959667,
+    "sink_rate_readings": 22492,
+    "sink_rate_span_s": 119.951258706,
+    "sink_sample_time_samples": 5757696,
+    "tone_analysed_frames": 24000,
+    "tone_channels_distinct": 1,
+    "tone_left_dbfs": -19.676557592738867,
+    "tone_left_hz": 996.9998770192057,
+    "tone_resolution_hz": 2,
+    "tone_right_dbfs": -19.691945312207416,
+    "tone_right_hz": 1997.0029329088675,
+    "windows": 12,
+    "worst_window_concealed": 2400
+  },
+  "run": {
+    "args": {
+      "bind": "127.0.0.1:5016",
+      "buffer_frames": 256,
+      "frame_ms": 5,
+      "ring_frames": 4096,
+      "target_ms": 10.0
+    },
+    "arm": "control",
+    "commit": null,
+    "span_s": 120.046488625,
+    "started_unix_ms": 1787220617793
+  }
+}

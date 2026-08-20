@@ -153,8 +153,29 @@ failure, because a criterion that actually disagreed is a stronger statement tha
 nobody could read. This paragraph was true and unenforced for a while: `report()`
 collected only failures, so an unreadable deciding check was printed under "what could
 not be tested" and the verdict above it said `PASS`. A6's harness found it while wiring
-itself and had to insist on ten observation keys by name to protect itself; that
+itself and had to insist on eleven observation keys by name to protect itself; that
 insistence stays, as a second lock on a door that is now shut.
+
+#### A criterion that reads one quantity and is named for another
+
+A population is not the whole of the discipline. A criterion named `continuity` decided
+A6 and A8 while reading `continuity_hole`, which measures source audio the concealer stood
+in for - a fidelity loss - and not a playout that stopped. The two are separate counters
+and the difference is measured rather than argued: exactly forty envelopes committed under
+`results/audio` state `render_underruns`, and all forty state it as zero over a positive
+callback population, including the arm behind a relay holding four hundred milliseconds out
+of every two thousand. The device has never once been handed silence in this project. The
+concealer keeps the timeline fed whatever the network does.
+
+So the observation is `concealed_samples`, every ratio from it is a **concealment ratio**,
+and `render_underruns` over a positive population of `render_callbacks` is its own
+criterion reported beside it rather than assumed away. Both, never one: a concealment
+figure quoted alone invites its reader to hear a click nobody heard, and a zero underrun
+count quoted alone says nothing about how much of the source survived.
+
+The general rule the episode leaves behind is that a criterion's name is part of its
+correctness. A name that overstates what its counter measures cannot be caught by any
+population field, because the arithmetic was right the whole time.
 
 The same three answers apply to the conditions a gate runs under, not only to the checks
 inside it, and that is a rule for every harness here rather than a habit of some:
@@ -166,7 +187,7 @@ REFUSED  the conditions needed to interpret the gate did not exist
 ```
 
 A radio that degrades during a run makes the run REFUSED. A stable radio with a two per cent
-continuity hole is a FAIL. The distinction is not politeness: a moving link is not a defect in
+concealment ratio is a FAIL. The distinction is not politeness: a moving link is not a defect in
 the system under test, it is the absence of a condition under which that system can be measured,
 and recording it as a failure invites the next reader to go looking for a bug that is not there.
 Three of the audio phase's runs are labelled with the link's state for exactly this reason, and a

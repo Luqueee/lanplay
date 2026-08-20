@@ -28,7 +28,7 @@ use lanplay_telemetry::Nanos;
     name = "audio-e2e-receiver",
     version,
     about = "Receives the host's Opus stream over RTP and renders it through CoreAudio, \
-             accounting for continuity end to end"
+             accounting for source concealment and playout continuity end to end"
 )]
 struct Args {
     /// Where to listen. The host sends here.

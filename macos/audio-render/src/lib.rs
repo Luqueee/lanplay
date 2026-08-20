@@ -86,6 +86,7 @@
 //! inserted here would make every number in the report a statement about the
 //! converter.
 
+pub mod excess;
 pub mod format;
 pub mod occupancy;
 pub mod pairs;
@@ -103,6 +104,7 @@ pub mod run;
 #[cfg(target_os = "macos")]
 pub mod stream;
 
+pub use excess::{ExcessCurve, ExcessReport, ExcessTrace};
 pub use format::{Layout, OutputFormat, SampleKind};
 pub use occupancy::{OccupancyReader, WindowOccupancy};
 pub use report::{Report, Verdict};

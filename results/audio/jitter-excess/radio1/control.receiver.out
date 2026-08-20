@@ -1,0 +1,90 @@
+audio-e2e-receiver: producer scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+producer scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+receiver scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+every deadline granted yes
+rtp received 24003
+rtp lost 0 of 24003 expected
+rtp duplicate 0
+rtp reordered 1171
+rtp late 1351
+arrival delay ms p50 -13.5 p95 21.6 p99 28.1 max 75.9 min -19.6
+pair anchor rtp 1213872561 frame samples 240
+pair class 0 offset samples 0 frames 12001 late 670 underruns 108
+pair class 0 arrival ms p50 -12.100 p95 17.539 p99 28.687 min -14.586 max 71.828 over 12001
+pair class 0 step ms p50 -4.998 p95 -1.789 p99 36.973 min -47.144 max 37.561 over 12000
+pair class 0 step histogram ms under:547 -5:10406 -4:325 -3:111 -2:16 -1:2 0:2 1:2 5:1 over:588
+pair class 1 offset samples 240 frames 12001 late 681 underruns 83
+pair class 1 arrival ms p50 -17.006 p95 21.772 p99 25.185 min -19.585 max 75.936 over 12001
+pair class 1 step ms p50 5.001 p95 9.408 p99 45.076 min -46.494 max 87.999 over 12001
+pair class 1 step histogram ms under:568 -5:75 -4:11 -3:8 -2:10 -1:21 0:22 1:59 2:231 3:1017 4:3922 5:4664 6:659 7:96 8:31 9:17 10:10 11:7 12:6 over:567
+pair measurements dropped 0 unanchored 0
+excess arrivals 24003 dropped 0 repeated 0 blocks 12
+excess population 24003 over 120.0 s of stream time, 0 frames missing, 0 sequence breaks
+excess source ppm +16.87 against A7 +9.29 agrees yes all points +18.34
+excess delay slope ppm -16.87 over 12 blocks, -2.02 ms accumulated
+excess pair cadence 5 ms, 53.43 per cent of the population in clusters of one frame separated by one, which is two frames per captured packet and not the link
+excess raw ms p50 6.09 p95 41.14 p99 47.65 max 95.52 over 100 ms 0
+excess corrected ms p50 5.53 p95 40.61 p99 46.50 max 95.20 over 100 ms 0
+excess table    T  late    frac%   /min  clusters  /min  frames p50/p95/max  worst ms  gap ms p50/min
+excess row     5   12825  53.431  6411.97     11175  5587.03              1/3/23  95.2                 5/5
+excess row    10    1534   6.391  766.94      1189  594.45              1/2/17  95.2                65/5
+excess row    15    1410   5.874  704.94      1168  583.95              1/2/16  95.2                70/5
+excess row    20    1331   5.545  665.44      1151  575.45              1/2/14  95.2                70/5
+excess row    25    1282   5.341  640.95      1138  568.95              1/2/13  95.2                70/5
+excess row    30    1254   5.224  626.95      1130  564.95              1/2/12  95.2                70/5
+excess row    40    1222   5.091  610.95      1122  560.95              1/2/10  95.2                75/5
+excess row    50      47   0.196   23.50        20      -               1/7/8  95.2             5075/25
+excess row    60      24   0.100   12.00        11      -               1/6/6  95.2             5490/10
+excess row    80       5   0.021    2.50         4      -               1/2/2  95.2          27635/5110
+excess row   100       0   0.000    0.00         0      -                   -  -                      -
+frames played 22649
+plc frames 1351
+jitter occupancy ms p50 10.0 p95 15.0 p99 15.0 max 15.0
+jitter underruns 191
+jitter overruns 0 dropping 0 frames
+decode us p50 7 p99 15
+render callbacks 22491
+render underruns 0 over 0 frames
+render overruns 0 over 0 frames
+source expected 5760000 played 5714160 nothing concealed no
+playout continuity 0 render underruns over 22491 callbacks
+tone left 997.0 right 1997.0
+sink ppm +6.690 error 0.001 over 22491 readings and 119.946 s
+sink ppm endpoints +6.638
+sink sample time samples 5757439
+sink host time scatter 0.21 samples estimates agree yes
+sink invalid timestamps 0
+samples produced 5760720 consumed 5757696 discarded 324240 concealed in 324240
+buffer growth 3024 samples held 3024 residual 0
+concealed 45840 samples over 24000 frame periods
+worst window concealed 9360 samples
+tone channels distinct yes
+tone resolution 2.00 hz over 24000 frames
+rtp off grid 0
+rtp oversize 0
+rtp foreign ssrc 0
+decode failures 0
+conceal us p50 33 p99 38
+producer interval us p50 5000 p99 5000 max 5001
+render interval us p50 5333 p99 5345 max 5368
+ring occupancy frames min 2080 p50 2224 max 2352 of 4096 primed to 496 after a 33.8 ms device start
+ring frames refused 0 consumed 5757696
+jitter target ms 10 ceiling ms 30 over 8 slots
+frame ms 5
+device Altavoces del MacBook Pro (named) at 48000 Hz 2 ch 32 bit float with a 256 frame io buffer
+bind 0.0.0.0:5016 ssrc 3622897629
+odd cycles 0
+measurements dropped 0
+span s 120.0 device span s 119.9
+window 0 s 10.0 rtp/s 200 lost 1 plc 104 played 1898 jitter underruns 4 callbacks 1876 underruns 0 overruns 0 expected 480480 played 479520 concealed 960 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2002 pulls held 2848
+window 1 s 10.0 rtp/s 200 lost 0 plc 126 played 1874 jitter underruns 17 callbacks 1875 underruns 0 overruns 0 expected 480000 played 475920 concealed 4080 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls held 2848
+window 2 s 10.0 rtp/s 200 lost 0 plc 115 played 1885 jitter underruns 22 callbacks 1875 underruns 0 overruns 0 expected 480000 played 474720 concealed 5280 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls held 2848
+window 3 s 10.0 rtp/s 200 lost 0 plc 121 played 1880 jitter underruns 23 callbacks 1876 underruns 0 overruns 0 expected 480240 played 474720 concealed 5520 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls held 2592
+window 4 s 10.0 rtp/s 200 lost 0 plc 134 played 1866 jitter underruns 39 callbacks 1875 underruns 0 overruns 0 expected 480000 played 470640 concealed 9360 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls held 3072
+window 5 s 10.0 rtp/s 200 lost 1 plc 115 played 1886 jitter underruns 13 callbacks 1876 underruns 0 overruns 0 expected 480240 played 477120 concealed 3120 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls held 2816
+window 6 s 10.0 rtp/s 200 lost 0 plc 101 played 1899 jitter underruns 1 callbacks 1875 underruns 0 overruns 0 expected 480000 played 479760 concealed 240 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls held 2816
+window 7 s 10.0 rtp/s 200 lost 0 plc 123 played 1877 jitter underruns 22 callbacks 1875 underruns 0 overruns 0 expected 480000 played 474720 concealed 5280 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls held 2816
+window 8 s 10.0 rtp/s 200 lost 0 plc 93 played 1908 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls held 2800
+window 9 s 10.0 rtp/s 200 lost 0 plc 109 played 1892 jitter underruns 22 callbacks 1875 underruns 0 overruns 0 expected 480240 played 474960 concealed 5280 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2001 pulls held 3040
+window 10 s 10.0 rtp/s 200 lost 0 plc 104 played 1896 jitter underruns 16 callbacks 1876 underruns 0 overruns 0 expected 480000 played 476160 concealed 3840 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 2000 pulls held 2784
+window 11 s 9.9 rtp/s 200 lost 0 plc 106 played 1879 jitter underruns 12 callbacks 1860 underruns 0 overruns 0 expected 476400 played 473520 concealed 2880 occupancy ms p50 10.0 p95 15.0 p99 15.0 min 0.0 max 15.0 over 1985 pulls held 2784

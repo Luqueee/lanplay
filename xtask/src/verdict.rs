@@ -596,14 +596,16 @@ mod tests {
     fn a_criterion_that_could_not_be_read_is_a_refusal_that_names_what_was_missing() {
         let envelope = envelope(
             r#""packets": 6001"#,
-            r#"{ "name": "continuity", "kind": "must_be_zero", "reads": "continuity_hole",
+            r#"{ "name": "source concealment", "kind": "must_be_zero", "reads": "concealed_samples",
                  "population": "samples_expected",
-                 "why": "concealment counts as played and an underrun does not, so this is what tells a carried run from an empty one" }"#,
+                 "why": "a gap concealment counts as played and an underrun does not, so this is what tells a carried run from an empty one" }"#,
         );
         let (text, answer) = report(&envelope);
         assert_eq!(answer, Verdict::Refused);
         assert!(
-            text.contains("REFUSE continuity: nothing named continuity_hole was observed"),
+            text.contains(
+                "REFUSE source concealment: nothing named concealed_samples was observed"
+            ),
             "the verdict names the observation, so nobody has to open the document: {text}"
         );
         assert!(
@@ -617,9 +619,9 @@ mod tests {
         let envelope = envelope(
             r#""gaps": 3, "packets": 6001"#,
             &format!(
-                r#"{ZERO_OVER_PACKETS}, {{ "name": "continuity", "kind": "must_be_zero",
-                     "reads": "continuity_hole", "population": "samples_expected",
-                     "why": "a run whose continuity was never measured is not a run that held continuity" }}"#
+                r#"{ZERO_OVER_PACKETS}, {{ "name": "source concealment", "kind": "must_be_zero",
+                     "reads": "concealed_samples", "population": "samples_expected",
+                     "why": "a run whose concealment was never measured is not a run that concealed nothing" }}"#
             ),
         );
         let (text, answer) = report(&envelope);

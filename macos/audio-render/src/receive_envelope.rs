@@ -19,6 +19,7 @@ use lanplay_audio_capture::analysis::hertz;
 use lanplay_tone_source::tone::CONTRACT;
 use serde_json::{Map, Value, json};
 
+use crate::excess::{self, ExcessCurve, ExcessReport, Threshold};
 use crate::pairs::{BUCKETS, Spread, bucket_floor_us};
 use crate::receive::{DELAY_BIAS_US, Receipt, WindowRow, unbias_micros};
 
@@ -39,6 +40,14 @@ const TONE_TOLERANCE_HZ: f64 = 5.0;
 /// is a fiftieth of this bound, so a run near it has changed something.
 const DECODE_BUDGET_FRACTION: f64 = 10.0;
 
+/// What A7 measured this pair of machines at, referred to the Mac's timebase.
+///
+/// Here so that A8.1's own fit is reported against a figure taken by a different
+/// instrument rather than against nothing. A7 closed +238 samples predicted
+/// against +238 +-75 observed at this rate, which is why it is the reference and
+/// not merely an earlier reading.
+const A7_PPM: f64 = 9.29;
+
 /// What the gate covers, and what a run has to reach to be allowed to claim it.
 const DECLARED: [&str; 4] = [
     "rtp receive",
@@ -49,8 +58,12 @@ const DECLARED: [&str; 4] = [
 
 pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Option<&str>) -> String {
     let frame_ms = receipt.config.frame.millis();
+    // The same duration as a float, because a cluster's length and the gap
+    // between two clusters are counted in timeline positions and reported in
+    // milliseconds, and one frame is one position.
+    let frame_ms_f = f64::from(frame_ms);
     let decode_budget_us = f64::from(frame_ms) * 1_000.0 / DECODE_BUDGET_FRACTION;
-    let continuity = receipt.continuity();
+    let concealment = receipt.concealment();
     let producer = &receipt.producer;
     let render = &receipt.render;
     let counts = receipt.counts;
@@ -210,10 +223,13 @@ pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Optio
         observe("buffer_invariant_residual", invariant.residual() as f64);
     }
 
-    observe("samples_expected", continuity.expected as f64);
-    observe("samples_played", continuity.played as f64);
-    observe("continuity_hole", continuity.hole() as f64);
-    observe("worst_window_hole", receipt.worst_window_hole() as f64);
+    observe("samples_expected", concealment.expected as f64);
+    observe("samples_played", concealment.played as f64);
+    observe("concealed_samples", concealment.concealed() as f64);
+    observe(
+        "worst_window_concealed",
+        receipt.worst_window_concealed() as f64,
+    );
     observe("windows", receipt.windows.len() as f64);
     observe(
         "deadlines_granted",
@@ -238,9 +254,129 @@ pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Optio
         );
     }
 
+    // A8.1. Stated as observations and nowhere in `checks`, deliberately: this
+    // document is also the end-to-end gate's, and a criterion added here would
+    // be evaluated by a gate that never asked for it - including on the runs
+    // where the curve is legitimately absent, which `xtask verdict` reads as a
+    // refusal. The excess criteria live in `tools/jitter-excess.sh`, which is
+    // the harness that turns on them.
+    //
+    // The three counts outside the curve are stated whether or not there is a
+    // curve, because they are the reasons there might not be one.
+    observe("excess_arrivals", receipt.excess.arrivals as f64);
+    observe("excess_arrivals_dropped", receipt.excess.dropped as f64);
+    observe("excess_repeated_frames", receipt.excess.repeated as f64);
+    observe("excess_blocks", receipt.excess.blocks as f64);
+    if let Some(curve) = &receipt.excess.curve {
+        observe("excess_population", curve.population as f64);
+        // Stream time, from the RTP timestamps alone, so every rate below
+        // crosses no clock. Beside the run's span rather than instead of it: the
+        // two disagreeing by more than the drift would mean one of them is
+        // measuring something else.
+        observe("excess_stream_s", curve.stream_seconds);
+        observe("excess_frames_missing", curve.frames_missing as f64);
+        observe("excess_sequence_breaks", curve.sequence_breaks as f64);
+        // Two quantities under names that say which is which. The delay slope is
+        // what the correction subtracts; the source rate is its negation and is
+        // the one comparable with A7's figure. Reading one as the other cost this
+        // gate its first radio run's finding, and a key called `excess_drift_ppm`
+        // is exactly the name that invited it.
+        observe("excess_delay_slope_ppm", curve.drift.delay_ppm);
+        observe(
+            "excess_delay_slope_ppm_all_points",
+            curve.drift.delay_ppm_all_points,
+        );
+        observe("excess_source_ppm", curve.drift.source_ppm());
+        observe(
+            "excess_source_ppm_all_points",
+            curve.drift.source_ppm_all_points(),
+        );
+        observe("excess_drift_blocks", curve.drift.blocks as f64);
+        observe("excess_drift_accumulated_ms", curve.drift.accumulated_ms);
+        observe("excess_reference_source_ppm", A7_PPM);
+        observe(
+            "excess_drift_agrees_with_a7",
+            f64::from(u8::from(curve.drift_agrees_with(A7_PPM))),
+        );
+        // The pair cadence, as the threshold that carries its signature or as an
+        // absence. Absent rather than zero: a threshold of 0 ms is not a row.
+        if let Some(cadence) = curve.pair_cadence() {
+            observe("excess_pair_cadence_ms", f64::from(cadence.millis));
+            observe("excess_pair_cadence_late", cadence.late as f64);
+            observe("excess_pair_cadence_fraction", curve.fraction(cadence.late));
+        }
+        // Both curves, because the correction is only checkable beside the thing
+        // it corrected. The difference at p99 and at the maximum is how many
+        // milliseconds of the raw tail were the two clocks rather than the link.
+        for (prefix, shape) in [("raw", &curve.raw), ("corrected", &curve.corrected)] {
+            let spread = shape.spread;
+            observe(&format!("excess_{prefix}_p50_ms"), signed_ms(spread.p50));
+            observe(&format!("excess_{prefix}_p95_ms"), signed_ms(spread.p95));
+            observe(&format!("excess_{prefix}_p99_ms"), signed_ms(spread.p99));
+            observe(&format!("excess_{prefix}_max_ms"), signed_ms(spread.max));
+            observe(
+                &format!("excess_{prefix}_over_100ms"),
+                shape.over_span() as f64,
+            );
+        }
+        observe(
+            "excess_drift_removed_p99_ms",
+            signed_ms(curve.raw.spread.p99 - curve.corrected.spread.p99),
+        );
+        observe(
+            "excess_drift_removed_max_ms",
+            signed_ms(curve.raw.spread.max - curve.corrected.spread.max),
+        );
+        for threshold in &curve.thresholds {
+            let key = |name: &str| format!("excess_{name}_{}ms", threshold.millis);
+            observe(&key("late"), threshold.late as f64);
+            observe(&key("late_raw"), threshold.late_raw as f64);
+            observe(&key("late_fraction"), curve.fraction(threshold.late));
+            observe(&key("late_per_min"), curve.per_minute(threshold.late));
+            observe(&key("clusters"), threshold.clusters as f64);
+            observe(
+                &key("clusters_per_min"),
+                curve.per_minute(threshold.clusters),
+            );
+            // A rate a reader may quote and a rate they may not are told apart
+            // here rather than in the reader's head. Below thirty clusters the
+            // fractional standard error is worse than a fifth and the rate above
+            // is a number whose interval covers everything anybody would do with
+            // it.
+            observe(
+                &key("rate_quotable"),
+                f64::from(u8::from(threshold.rate_is_quotable())),
+            );
+            if let Some(frames) = threshold.cluster_frames {
+                observe(&key("cluster_frames_p50"), frames.p50 as f64);
+                observe(&key("cluster_frames_p95"), frames.p95 as f64);
+                observe(&key("cluster_frames_max"), frames.max as f64);
+                observe(&key("cluster_ms_max"), frames.max as f64 * frame_ms_f);
+            }
+            if let Some(worst) = threshold.cluster_worst_us {
+                observe(&key("cluster_worst_p50_ms"), signed_ms(worst.p50));
+                observe(&key("cluster_worst_max_ms"), signed_ms(worst.max));
+            }
+            if let Some(gap) = threshold.cluster_gap_frames {
+                observe(&key("cluster_gap_min_ms"), gap.min as f64 * frame_ms_f);
+                observe(&key("cluster_gap_p50_ms"), gap.p50 as f64 * frame_ms_f);
+            }
+            // The spread of a rate, from blocks of stream time and never from a
+            // binomial over frames: the frames inside a cluster are one event,
+            // so a binomial would overstate the precision by the mean cluster
+            // size.
+            if let Some(blocks) = threshold.block_clusters {
+                let rate = 60.0 / excess::BLOCK_SECONDS;
+                observe(&key("block_clusters_per_min_min"), blocks.min as f64 * rate);
+                observe(&key("block_clusters_per_min_p50"), blocks.p50 as f64 * rate);
+                observe(&key("block_clusters_per_min_max"), blocks.max as f64 * rate);
+            }
+        }
+    }
+
     let exercised: Vec<&str> = [
         ("rtp receive", counts.received > 0),
-        ("jitter buffer", continuity.expected > 0),
+        ("jitter buffer", concealment.expected > 0),
         ("opus decode", counts.played > 0),
         ("coreaudio render", render.callbacks > 0),
     ]
@@ -261,30 +397,37 @@ pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Optio
             "kind": "must_not_be_zero",
             "reads": "frames_played",
             "why": "the concealer produces plausible samples from an empty stream indefinitely, \
-                    so a callback count, an underrun count of zero and a continuity figure are \
+                    so a callback count, an underrun count of zero and a concealment figure are \
                     all consistent with a path that carried nothing; a decoded frame is not",
         },
         {
-            "name": "every sample the stream produced reached the device",
+            "name": "source concealment: none of the source was replaced",
             "kind": "must_be_zero",
-            "reads": "continuity_hole",
+            "reads": "concealed_samples",
             "population": "samples_expected",
-            "why": "this is the criterion the phase turns on: expected counts every per-channel \
-                    sample the playout cursor travelled and played counts the ones the producer \
-                    deposited, with a gap concealment credited because the waveform continued \
-                    across it and an underrun refused because nothing of the stream was there. \
-                    The population is the expected samples, because a hole of zero over an \
-                    expectation of zero is a run that carried nothing",
+            "why": "expected counts every per-channel sample the playout cursor travelled and \
+                    played counts the ones the producer deposited, with a gap concealment \
+                    credited because the source's own audio sits either side of it and an \
+                    underrun refused because nothing of the source was there. The difference is \
+                    source audio the listener was handed an invention in place of, which is a \
+                    fidelity loss and not a playout failure - the concealer keeps the device fed \
+                    throughout, and forty of the forty envelopes committed under results/audio \
+                    report zero render underruns, so this project has never once handed a device \
+                    silence. The population is the expected samples, because zero concealed out \
+                    of zero expected is a run that carried nothing",
         },
         {
-            "name": "the device was never handed silence",
+            "name": "playout continuity: the device was never handed silence",
             "kind": "must_be_zero",
             "reads": "render_underruns",
             "population": "render_callbacks",
-            "why": "a cycle the ring could not fill is a whole IO buffer of silence sent to a \
-                    device in place of audio, which is audible however small the sample count \
-                    beside it looks; the population is the cycles, because no cycles means no \
-                    silence for a trivial reason",
+            "why": "the other half of the pair above, and stated as its own criterion because a \
+                    concealment figure quoted alone invites its reader to believe the device was \
+                    starved. A cycle the ring could not fill is a whole IO buffer of silence \
+                    sent to a device in place of audio, which is audible however small the \
+                    sample count beside it looks; the population is the cycles, because a run \
+                    in which the device never ran must not pass this by having had no chance to \
+                    fail it",
         },
         {
             "name": "no frame arrived in time and failed to decode",
@@ -369,7 +512,100 @@ pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Optio
     };
     let lowest_window_p50 = optional_millis(window_p50s().min());
     let highest_window_p50 = optional_millis(window_p50s().max());
-    let findings = json!([
+    // A8.1's own prose. The findings list is where a run says what it
+    // established that no criterion votes on, and the drift comparison belongs
+    // here for exactly that reason: A7 measured a pair of crystals directly and
+    // this measures the same pair through a radio, so a disagreement is a result
+    // about one of the two instruments rather than a defect in this run - and it
+    // must not pass unremarked either.
+    let excess_findings: Vec<String> = match &receipt.excess.curve {
+        None => vec![format!(
+            "no excess curve: {} arrivals were filed, {} were dropped for want of room, {} \
+             claimed a timeline position twice, and the run covered {} blocks of {:.0} s against \
+             the {} a line needs; every figure a curve would have carried is absent rather than \
+             zero",
+            receipt.excess.arrivals,
+            receipt.excess.dropped,
+            receipt.excess.repeated,
+            receipt.excess.blocks,
+            excess::BLOCK_SECONDS,
+            3,
+        )],
+        Some(curve) => {
+            let mut findings = vec![
+                format!(
+                    "the source clock runs {:+.2} ppm referred to this Mac's timebase, as this \
+                     run's own per-block minima fit it, against A7's {A7_PPM:+.2} ppm for the \
+                     same pair, and {}. That is a delay slope of {:+.2} ppm - a fast source \
+                     makes the subtracted RTP term outrun arrival time, so the two have opposite \
+                     signs and both are stated because reading one as the other is how this \
+                     reported a disagreement on its first radio run. Over the {:.0} s of stream \
+                     time it is {:+.2} ms of accumulated skew, which took {:+.3} ms off the p99 \
+                     of the raw curve and {:+.3} ms off its maximum. The same fit over every \
+                     arrival rather than the minima gives {:+.2} ppm, and the two differing is \
+                     the burst sensitivity that chose the estimator",
+                    curve.drift.source_ppm(),
+                    if curve.drift_agrees_with(A7_PPM) {
+                        "the two agree to within a factor of two"
+                    } else {
+                        "THEY DISAGREE BY MORE THAN A FACTOR OF TWO, so one of the two \
+                         measurements is wrong and neither may be cited until that is settled"
+                    },
+                    curve.drift.delay_ppm,
+                    curve.stream_seconds,
+                    curve.drift.accumulated_ms,
+                    signed_ms(curve.raw.spread.p99 - curve.corrected.spread.p99),
+                    signed_ms(curve.raw.spread.max - curve.corrected.spread.max),
+                    curve.drift.source_ppm_all_points(),
+                ),
+                format!(
+                    "excess above this run's own best case reached {:.2} ms at p50, {:.2} at \
+                     p95, {:.2} at p99 and {:.2} at worst over {} arrivals, with {} of them past \
+                     the 100 ms the curve reports out to; the reference is the minimum over the \
+                     run and not the first packet, so this is comparable with another run's and \
+                     an arrival delay anchored on one datagram is not",
+                    signed_ms(curve.corrected.spread.p50),
+                    signed_ms(curve.corrected.spread.p95),
+                    signed_ms(curve.corrected.spread.p99),
+                    signed_ms(curve.corrected.spread.max),
+                    curve.population,
+                    curve.corrected.over_span(),
+                ),
+            ];
+            // Before the per-threshold rows, because a reader who meets the 5 ms
+            // row first will read half the population late as a broken link.
+            if let Some(cadence) = curve.pair_cadence() {
+                findings.push(format!(
+                    "the {} ms row is the sender's pair cadence and not the link: {:.2} per cent \
+                     of the population is late there, in clusters of one frame separated by gaps \
+                     of one frame, and that alternation is not something a radio can do because \
+                     a burst is consecutive by definition. Two Opus frames ride in one captured \
+                     packet, so both arrive at one instant while the second sits a frame later \
+                     in stream time and its excess is exactly a frame lower - A6.1 measured the \
+                     same thing from the other side at -4.996 ms per pair at p50, with 96 per \
+                     cent of pairs inside the [-5,-4) ms bucket over 8998, 9000 and 120004 \
+                     pairs, and found the first member is the one that goes late in practice at \
+                     524 against 384, 476 against 354 and 8594 against 6391. What this \
+                     establishes is a floor: a target below the pair spacing cannot hold both \
+                     members of a pair, so {} ms is structurally unreachable on this sender for \
+                     a reason that has nothing to do with the air. What it does not establish is \
+                     that spacing the pair in the sender would be an improvement - that would \
+                     also delay the second frame by a frame in real time, and whether the floor \
+                     it removes is worth the delay it adds is arithmetic nobody has done",
+                    cadence.millis,
+                    curve.fraction(cadence.late) * 100.0,
+                    cadence.millis,
+                ));
+            }
+            for millis in [5, 10, 20] {
+                if let Some(threshold) = curve.at(millis) {
+                    findings.push(threshold_finding(curve, threshold, frame_ms_f));
+                }
+            }
+            findings
+        }
+    };
+    let mut findings: Vec<String> = vec![
         format!(
             "{:.3} per cent of the stream was lost over the link, {} packets of the {} the \
              sequence numbers describe",
@@ -416,7 +652,8 @@ pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Optio
             render.ring_prime_frames,
             render.start_latency_ms,
         ),
-    ]);
+    ];
+    findings.extend(excess_findings);
 
     // A clock behind the epoch is a machine whose time nobody set, and a stamp
     // of zero says that rather than a date in 1969.
@@ -445,7 +682,7 @@ pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Optio
                 "render_overruns": row.render_overruns,
                 "samples_expected": row.expected_samples,
                 "samples_played": row.played_samples,
-                "continuity_hole": row.hole(),
+                "concealed_samples": row.concealed(),
                 "jitter_occupancy_pulls": held.map_or(0, |held| held.count),
                 "jitter_occupancy_min_ms": held.map(|held| millis(held.min)),
                 "jitter_occupancy_p50_ms": held.map(|held| millis(held.p50)),
@@ -455,6 +692,16 @@ pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Optio
             })
         })
         .collect();
+
+    // The whole table, structured, beside the flat observations rather than
+    // instead of them. Every number a criterion turns on is above as its own
+    // observation, because that is where `xtask verdict` reads; this is for the
+    // reader who wants the shape - a histogram is 401 numbers and a flat map is
+    // no place for it, and a curve nobody can plot is a curve nobody checks.
+    //
+    // Under `environment` because that is the one part of the document schema
+    // that takes free-form values, which is also where the window rows live.
+    let excess = excess_table(&receipt.excess, frame_ms_f);
 
     let document = json!({
         "gate": "audio-e2e-gate",
@@ -497,6 +744,7 @@ pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Optio
             "device_span_s": render.span_seconds,
             "measurements_dropped": render.samples_dropped,
             "windows": windows,
+            "excess": excess,
         },
         "declared": DECLARED,
         "exercised": exercised,
@@ -506,6 +754,160 @@ pub fn document(receipt: &Receipt, started: SystemTime, arm: &str, commit: Optio
     });
 
     format!("{document:#}\n")
+}
+
+/// One threshold in prose, for a reader who will not open the table.
+///
+/// Both halves, always. The fraction says how much of the stream a target of
+/// this size would have discarded and the cluster figures say what that would
+/// have sounded like, and neither is recoverable from the other: 100 isolated
+/// late frames and 20 bursts of five are the same fraction and are not the same
+/// experience.
+fn threshold_finding(curve: &ExcessCurve, threshold: &Threshold, frame_ms: f64) -> String {
+    let rate = if threshold.rate_is_quotable() {
+        format!(
+            "{:.2} clusters a minute",
+            curve.per_minute(threshold.clusters)
+        )
+    } else {
+        format!(
+            "{} clusters in the whole run, which is under the {} a rate needs, so no rate is \
+             quoted",
+            threshold.clusters,
+            excess::MINIMUM_CLUSTERS
+        )
+    };
+    let shape = match (threshold.cluster_frames, threshold.cluster_gap_frames) {
+        (Some(frames), gap) => format!(
+            "clusters of {} frames at p50, {} at p95 and {} at worst - {:.0} ms of timeline in \
+             the worst one - separated by {}",
+            frames.p50,
+            frames.p95,
+            frames.max,
+            frames.max as f64 * frame_ms,
+            gap.map_or_else(
+                || "nothing, because one cluster has no gap beside it".to_string(),
+                |gap| format!(
+                    "{:.0} ms at p50 and {:.0} ms at closest",
+                    gap.p50 as f64 * frame_ms,
+                    gap.min as f64 * frame_ms
+                )
+            ),
+        ),
+        (None, _) => "no cluster at all, so nothing to describe the shape of".to_string(),
+    };
+    format!(
+        "a {} ms target would have left {} frames of {} past their moment, {:.4} per cent, at \
+         {:.2} a minute and {rate}: {shape}",
+        threshold.millis,
+        threshold.late,
+        curve.population,
+        curve.fraction(threshold.late) * 100.0,
+        curve.per_minute(threshold.late),
+    )
+}
+
+/// The whole curve as a structure, or the reasons there is not one.
+fn excess_table(report: &ExcessReport, frame_ms: f64) -> Value {
+    // The counts that explain an absent curve are outside the curve, so they are
+    // stated either way. A table holding `"curve": null` and nothing else would
+    // send its reader looking for a reason that is not in the document.
+    let mut table = Map::new();
+    table.insert("arrivals".into(), json!(report.arrivals));
+    table.insert("arrivals_dropped".into(), json!(report.dropped));
+    table.insert("repeated_frames".into(), json!(report.repeated));
+    table.insert("blocks".into(), json!(report.blocks));
+    table.insert("block_seconds".into(), json!(excess::BLOCK_SECONDS));
+    table.insert("bin_us".into(), json!(excess::BIN_US));
+    table.insert("minimum_clusters".into(), json!(excess::MINIMUM_CLUSTERS));
+    let Some(curve) = &report.curve else {
+        return Value::Object(table);
+    };
+
+    table.insert("population".into(), json!(curve.population));
+    table.insert("stream_s".into(), json!(curve.stream_seconds));
+    table.insert("frames_missing".into(), json!(curve.frames_missing));
+    table.insert("sequence_breaks".into(), json!(curve.sequence_breaks));
+    table.insert(
+        "drift".into(),
+        json!({
+            // The source clock's rate first, because it is the one a reader
+            // compares with anything else, and the delay slope beside it because
+            // it is what the correction actually subtracts. Opposite signs, and
+            // both named, for the reason `excess::Drift` derives.
+            "source_ppm": curve.drift.source_ppm(),
+            "source_ppm_all_points": curve.drift.source_ppm_all_points(),
+            "delay_slope_ppm": curve.drift.delay_ppm,
+            "delay_slope_ppm_all_points": curve.drift.delay_ppm_all_points,
+            "blocks_fitted": curve.drift.blocks,
+            "accumulated_ms": curve.drift.accumulated_ms,
+            "reference_source_ppm": A7_PPM,
+            "agrees_with_reference": curve.drift_agrees_with(A7_PPM),
+        }),
+    );
+    table.insert(
+        "pair_cadence_ms".into(),
+        json!(curve.pair_cadence().map(|threshold| threshold.millis)),
+    );
+    for (name, shape) in [("raw", &curve.raw), ("corrected", &curve.corrected)] {
+        table.insert(
+            name.into(),
+            json!({
+                "p50_ms": signed_ms(shape.spread.p50),
+                "p95_ms": signed_ms(shape.spread.p95),
+                "p99_ms": signed_ms(shape.spread.p99),
+                "max_ms": signed_ms(shape.spread.max),
+                "over_100ms": shape.over_span(),
+                // Occupied bins only, as `[floor_ms, count]`. Four hundred bins
+                // of which nine are filled is a line whose shape nobody can see,
+                // and the shape above 20 ms is the entire diagnostic this curve
+                // exists to produce.
+                "bins": shape
+                    .bins
+                    .iter()
+                    .enumerate()
+                    .filter(|&(_, &count)| count > 0)
+                    .map(|(bin, &count)| json!([bin as f64 * excess::BIN_US as f64 / 1_000.0, count]))
+                    .collect::<Vec<Value>>(),
+            }),
+        );
+    }
+    let thresholds: Vec<Value> = curve
+        .thresholds
+        .iter()
+        .map(|threshold| {
+            let frames = threshold.cluster_frames;
+            let worst = threshold.cluster_worst_us;
+            let gap = threshold.cluster_gap_frames;
+            let blocks = threshold.block_clusters;
+            let per_block = 60.0 / excess::BLOCK_SECONDS;
+            json!({
+                "ms": threshold.millis,
+                "late": threshold.late,
+                "late_raw": threshold.late_raw,
+                "late_fraction": curve.fraction(threshold.late),
+                "late_per_min": curve.per_minute(threshold.late),
+                "clusters": threshold.clusters,
+                "clusters_per_min": curve.per_minute(threshold.clusters),
+                "rate_quotable": threshold.rate_is_quotable(),
+                "cluster_frames_p50": frames.map(|f| f.p50),
+                "cluster_frames_p95": frames.map(|f| f.p95),
+                "cluster_frames_max": frames.map(|f| f.max),
+                "cluster_ms_max": frames.map(|f| f.max as f64 * frame_ms),
+                "cluster_worst_p50_ms": worst.map(|w| signed_ms(w.p50)),
+                "cluster_worst_p95_ms": worst.map(|w| signed_ms(w.p95)),
+                "cluster_worst_max_ms": worst.map(|w| signed_ms(w.max)),
+                "cluster_gap_min_ms": gap.map(|g| g.min as f64 * frame_ms),
+                "cluster_gap_p50_ms": gap.map(|g| g.p50 as f64 * frame_ms),
+                "cluster_gap_max_ms": gap.map(|g| g.max as f64 * frame_ms),
+                "block_clusters_per_min_min": blocks.map(|b| b.min as f64 * per_block),
+                "block_clusters_per_min_p50": blocks.map(|b| b.p50 as f64 * per_block),
+                "block_clusters_per_min_max": blocks.map(|b| b.max as f64 * per_block),
+            })
+        })
+        .collect();
+    table.insert("thresholds".into(), json!(thresholds));
+    Value::Object(table)
 }
 
 const NOTHING: Percentiles = Percentiles {
@@ -612,10 +1014,114 @@ fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
 }
 
+/// The curve and the cluster table, in the form a person reads when a gate has
+/// just refused.
+///
+/// Every row carries both halves of what a threshold costs, and a rate is
+/// printed as a dash rather than as a number when the run did not see enough
+/// clusters to state one. A rate from four events printed to two decimals is a
+/// precision the measurement does not have, and this project has quoted one
+/// before.
+fn excess_block(f: &mut fmt::Formatter<'_>, report: &ExcessReport, frame_ms: f64) -> fmt::Result {
+    writeln!(
+        f,
+        "excess arrivals {} dropped {} repeated {} blocks {}",
+        report.arrivals, report.dropped, report.repeated, report.blocks
+    )?;
+    let Some(curve) = &report.curve else {
+        return writeln!(
+            f,
+            "excess curve absent, so no threshold below has been measured either way"
+        );
+    };
+    writeln!(
+        f,
+        "excess population {} over {:.1} s of stream time, {} frames missing, {} sequence breaks",
+        curve.population, curve.stream_seconds, curve.frames_missing, curve.sequence_breaks
+    )?;
+    writeln!(
+        f,
+        "excess source ppm {:+.2} against A7 {A7_PPM:+.2} agrees {} all points {:+.2}",
+        curve.drift.source_ppm(),
+        yes_no(curve.drift_agrees_with(A7_PPM)),
+        curve.drift.source_ppm_all_points()
+    )?;
+    writeln!(
+        f,
+        "excess delay slope ppm {:+.2} over {} blocks, {:+.2} ms accumulated",
+        curve.drift.delay_ppm, curve.drift.blocks, curve.drift.accumulated_ms
+    )?;
+    writeln!(
+        f,
+        "excess pair cadence {}",
+        curve.pair_cadence().map_or_else(
+            || "none: no row alternates, so no row is the sender's packing".to_string(),
+            |cadence| format!(
+                "{} ms, {:.2} per cent of the population in clusters of one frame separated by \
+                 one, which is two frames per captured packet and not the link",
+                cadence.millis,
+                curve.fraction(cadence.late) * 100.0
+            )
+        )
+    )?;
+    for (name, shape) in [("raw", &curve.raw), ("corrected", &curve.corrected)] {
+        writeln!(
+            f,
+            "excess {name} ms p50 {:.2} p95 {:.2} p99 {:.2} max {:.2} over 100 ms {}",
+            signed_ms(shape.spread.p50),
+            signed_ms(shape.spread.p95),
+            signed_ms(shape.spread.p99),
+            signed_ms(shape.spread.max),
+            shape.over_span()
+        )?;
+    }
+    writeln!(
+        f,
+        "excess table    T  late    frac%   /min  clusters  /min  frames p50/p95/max  worst ms  \
+         gap ms p50/min"
+    )?;
+    for threshold in &curve.thresholds {
+        let rate = if threshold.rate_is_quotable() {
+            format!("{:5.2}", curve.per_minute(threshold.clusters))
+        } else {
+            "    -".to_string()
+        };
+        let frames = threshold.cluster_frames;
+        let worst = threshold.cluster_worst_us;
+        let gap = threshold.cluster_gap_frames;
+        writeln!(
+            f,
+            "excess row  {:4}  {:6}  {:6.3}  {:6.2}  {:8}  {rate}  {:>18}  {:8}  {:>14}",
+            threshold.millis,
+            threshold.late,
+            curve.fraction(threshold.late) * 100.0,
+            curve.per_minute(threshold.late),
+            threshold.clusters,
+            frames.map_or_else(
+                || "-".to_string(),
+                |frames| format!("{}/{}/{}", frames.p50, frames.p95, frames.max)
+            ),
+            worst.map_or_else(
+                || "-".to_string(),
+                |worst| format!("{:.1}", signed_ms(worst.max))
+            ),
+            gap.map_or_else(
+                || "-".to_string(),
+                |gap| format!(
+                    "{:.0}/{:.0}",
+                    gap.p50 as f64 * frame_ms,
+                    gap.min as f64 * frame_ms
+                )
+            ),
+        )?;
+    }
+    Ok(())
+}
+
 impl fmt::Display for Receipt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let counts = self.counts;
-        let continuity = self.continuity();
+        let concealment = self.concealment();
         let producer = &self.producer;
         let render = &self.render;
         let occupancy = producer.occupancy_us.unwrap_or(NOTHING);
@@ -690,6 +1196,13 @@ impl fmt::Display for Receipt {
             "pair measurements dropped {} unanchored {}",
             self.pair.samples_dropped, self.pair.unanchored
         )?;
+
+        // A8.1, which is the table this whole run exists to produce and is
+        // therefore printed rather than left to whoever opens the JSON. One row
+        // per threshold, because the point of the population is that it answers
+        // every threshold at once and a reader has to be able to see the curve
+        // fall.
+        excess_block(f, &self.excess, f64::from(self.config.frame.millis()))?;
         writeln!(f, "frames played {}", counts.played)?;
         writeln!(f, "plc frames {}", counts.concealed)?;
         writeln!(
@@ -718,14 +1231,21 @@ impl fmt::Display for Receipt {
             "render overruns {} over {} frames",
             render.overruns, render.overrun_frames
         )?;
-        // The line the phase is decided on, and the one a reader should look
-        // at first when everything above it looks healthy.
+        // The pair the phase is decided on, and the two lines a reader should
+        // look at first when everything above them looks healthy. Both, never
+        // one: source concealment alone reads as a starved device to anybody
+        // who has not been told that the concealer never stops feeding one.
         writeln!(
             f,
-            "continuity expected {} played {} unbroken {}",
-            continuity.expected,
-            continuity.played,
-            yes_no(continuity.unbroken())
+            "source expected {} played {} nothing concealed {}",
+            concealment.expected,
+            concealment.played,
+            yes_no(concealment.nothing_concealed())
+        )?;
+        writeln!(
+            f,
+            "playout continuity {} render underruns over {} callbacks",
+            render.underruns, render.callbacks
         )?;
         writeln!(
             f,
@@ -781,11 +1301,15 @@ impl fmt::Display for Receipt {
         // would want it.
         writeln!(
             f,
-            "continuity hole {} samples over {} frame periods",
-            continuity.hole(),
-            continuity.expected / self.frame_samples().max(1)
+            "concealed {} samples over {} frame periods",
+            concealment.concealed(),
+            concealment.expected / self.frame_samples().max(1)
         )?;
-        writeln!(f, "worst window hole {} samples", self.worst_window_hole())?;
+        writeln!(
+            f,
+            "worst window concealed {} samples",
+            self.worst_window_concealed()
+        )?;
         writeln!(
             f,
             "tone channels distinct {}",
@@ -876,7 +1400,7 @@ impl fmt::Display for WindowRow {
         write!(
             f,
             "s {:.1} rtp/s {:.0} lost {} plc {} played {} jitter underruns {} callbacks {} \
-             underruns {} overruns {} expected {} played {} hole {}",
+             underruns {} overruns {} expected {} played {} concealed {}",
             self.seconds,
             rate(self.rtp_received),
             self.rtp_lost,
@@ -888,13 +1412,13 @@ impl fmt::Display for WindowRow {
             self.render_overruns,
             self.expected_samples,
             self.played_samples,
-            self.hole()
+            self.concealed()
         )?;
-        // After the hole rather than beside the other jitter figures, because it
-        // is what a reader asks next: a hole with the buffer at its target is
-        // audio that arrived too late to be in it, one with the buffer empty is
-        // audio that did not arrive, and one with the buffer at its ceiling is
-        // audio this end threw away.
+        // After the concealed count rather than beside the other jitter
+        // figures, because it is what a reader asks next: concealment with the
+        // buffer at its target is audio that arrived too late to be in it, with
+        // the buffer empty it is audio that did not arrive, and with the buffer
+        // at its ceiling it is audio this end threw away.
         //
         // Absent prints as an absence. Zeroes here would read as a buffer that
         // ran dry for ten seconds, which is the opposite of a window in which

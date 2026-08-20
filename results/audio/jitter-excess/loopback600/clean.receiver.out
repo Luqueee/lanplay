@@ -1,0 +1,138 @@
+audio-e2e-receiver: producer scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+producer scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+receiver scheduled as time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms
+every deadline granted yes
+rtp received 120003
+rtp lost 0 of 120003 expected
+rtp duplicate 0
+rtp reordered 0
+rtp late 1089
+arrival delay ms p50 -10.0 p95 -9.9 p99 -1.7 max 184.9 min -10.0
+pair anchor rtp 4176149654 frame samples 240
+pair class 0 offset samples 0 frames 60001 late 546 underruns 546
+pair class 0 arrival ms p50 -10.021 p95 -9.930 p99 -1.751 min -10.049 max 184.874 over 60001
+pair class 0 step ms p50 0.003 p95 0.047 p99 0.683 min -4.998 max 76.004 over 60000
+pair class 0 step histogram ms -5:681 -4:76 -3:101 -2:188 -1:23277 0:35154 1:148 2:59 3:52 4:37 5:40 6:24 7:19 8:17 9:17 10:18 11:13 12:6 over:73
+pair class 1 offset samples 240 frames 60001 late 543 underruns 543
+pair class 1 arrival ms p50 -10.017 p95 -9.920 p99 -1.720 min -10.048 max 183.450 over 60001
+pair class 1 step ms p50 -0.004 p95 0.036 p99 0.775 min -4.999 max 160.619 over 60001
+pair class 1 step histogram ms -5:666 -4:83 -3:96 -2:167 -1:35189 0:23263 1:146 2:65 3:50 4:50 5:44 6:24 7:20 8:8 9:11 10:9 11:12 12:12 over:86
+pair measurements dropped 0 unanchored 0
+excess arrivals 120003 dropped 0 repeated 0 blocks 60
+excess population 120003 over 600.0 s of stream time, 0 frames missing, 0 sequence breaks
+excess source ppm +0.00 against A7 +9.29 agrees no all points +1.53
+excess delay slope ppm -0.00 over 60 blocks, -0.00 ms accumulated
+excess pair cadence none: no row alternates, so no row is the sender's packing
+excess raw ms p50 0.03 p95 0.12 p99 8.33 max 194.92 over 100 ms 59
+excess corrected ms p50 0.03 p95 0.12 p99 8.33 max 194.92 over 100 ms 59
+excess table    T  late    frac%   /min  clusters  /min  frames p50/p95/max  worst ms  gap ms p50/min
+excess row     5    1637   1.364  163.70       460  46.00             2/13/47  194.9               30/5
+excess row    10    1091   0.909  109.10       225  22.50             3/16/43  194.9               95/5
+excess row    15     807   0.672   80.70       153  15.30             3/18/42  194.9              130/5
+excess row    20     618   0.515   61.80       109  10.90             4/17/41  194.9              170/5
+excess row    25     489   0.407   48.90        75   7.50             4/25/40  194.9              365/5
+excess row    30     401   0.334   40.10        60   6.00             4/24/39  194.9              610/5
+excess row    40     271   0.226   27.10        36   3.60             5/30/37  194.9             1060/5
+excess row    50     189   0.157   18.90        22      -             4/27/35  194.9            1830/10
+excess row    60     142   0.118   14.20        16      -             4/33/33  194.9             2265/5
+excess row    80      91   0.076    9.10         7      -            11/28/28  194.9           6730/445
+excess row   100      59   0.049    5.90         6      -             6/24/24  194.9           8505/495
+frames played 118911
+plc frames 1089
+jitter occupancy ms p50 10.0 p95 10.0 p99 10.0 max 10.0
+jitter underruns 1089
+jitter overruns 0 dropping 0 frames
+decode us p50 7 p99 16
+render callbacks 112493
+render underruns 0 over 0 frames
+render overruns 0 over 0 frames
+source expected 28800000 played 28538640 nothing concealed no
+playout continuity 0 render underruns over 112493 callbacks
+tone left 997.0 right 1997.0
+sink ppm +6.937 error 0.000 over 112493 readings and 599.953 s
+sink ppm endpoints +6.864
+sink sample time samples 28797951
+sink host time scatter 1.17 samples estimates agree yes
+sink invalid timestamps 0
+samples produced 28800720 consumed 28798208 discarded 261360 concealed in 261360
+buffer growth 2512 samples held 2512 residual 0
+concealed 261360 samples over 120000 frame periods
+worst window concealed 68400 samples
+tone channels distinct yes
+tone resolution 2.00 hz over 24000 frames
+rtp off grid 0
+rtp oversize 0
+rtp foreign ssrc 0
+decode failures 0
+conceal us p50 7 p99 42
+producer interval us p50 5000 p99 5000 max 5008
+render interval us p50 5333 p99 5346 max 5380
+ring occupancy frames min 1840 p50 2048 max 2272 of 4096 primed to 496 after a 32.1 ms device start
+ring frames refused 0 consumed 28798208
+jitter target ms 10 ceiling ms 30 over 8 slots
+frame ms 5
+device Altavoces del MacBook Pro (named) at 48000 Hz 2 ch 32 bit float with a 256 frame io buffer
+bind 127.0.0.1:5016 ssrc 53054706
+odd cycles 0
+measurements dropped 0
+span s 600.0 device span s 600.0
+window 0 s 10.0 rtp/s 200 lost 0 plc 0 played 2002 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480480 played 480480 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2002 pulls held 2624
+window 1 s 10.0 rtp/s 200 lost 0 plc 0 played 2000 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480000 played 480000 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2000 pulls held 2368
+window 2 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1875 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2608
+window 3 s 10.0 rtp/s 200 lost 0 plc 1 played 1999 jitter underruns 1 callbacks 1875 underruns 0 overruns 0 expected 480000 played 479760 concealed 240 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2000 pulls held 2608
+window 4 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2592
+window 5 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2001 pulls held 2576
+window 6 s 10.0 rtp/s 200 lost 0 plc 0 played 2000 jitter underruns 0 callbacks 1875 underruns 0 overruns 0 expected 480000 played 480000 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2000 pulls held 2576
+window 7 s 10.0 rtp/s 200 lost 0 plc 29 played 1972 jitter underruns 29 callbacks 1876 underruns 0 overruns 0 expected 480240 played 473280 concealed 6960 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2001 pulls held 2560
+window 8 s 10.0 rtp/s 200 lost 0 plc 14 played 1986 jitter underruns 14 callbacks 1875 underruns 0 overruns 0 expected 480000 played 476640 concealed 3360 occupancy ms p50 5.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2000 pulls held 2560
+window 9 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 5.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2001 pulls held 2544
+window 10 s 10.0 rtp/s 200 lost 0 plc 1 played 1999 jitter underruns 1 callbacks 1876 underruns 0 overruns 0 expected 480000 played 479760 concealed 240 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2000 pulls held 2288
+window 11 s 10.0 rtp/s 200 lost 0 plc 285 played 1716 jitter underruns 285 callbacks 1875 underruns 0 overruns 0 expected 480240 played 411840 concealed 68400 occupancy ms p50 5.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2001 pulls held 2528
+window 12 s 10.0 rtp/s 200 lost 0 plc 277 played 1723 jitter underruns 277 callbacks 1876 underruns 0 overruns 0 expected 480000 played 413520 concealed 66480 occupancy ms p50 5.0 p95 5.0 p99 5.0 min 0.0 max 10.0 over 2000 pulls held 2272
+window 13 s 10.0 rtp/s 200 lost 0 plc 123 played 1877 jitter underruns 123 callbacks 1875 underruns 0 overruns 0 expected 480000 played 450480 concealed 29520 occupancy ms p50 5.0 p95 5.0 p99 5.0 min 0.0 max 10.0 over 2000 pulls held 2272
+window 14 s 10.0 rtp/s 200 lost 0 plc 128 played 1873 jitter underruns 128 callbacks 1875 underruns 0 overruns 0 expected 480240 played 449520 concealed 30720 occupancy ms p50 5.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2001 pulls held 2512
+window 15 s 10.0 rtp/s 200 lost 0 plc 9 played 1992 jitter underruns 9 callbacks 1876 underruns 0 overruns 0 expected 480240 played 478080 concealed 2160 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2001 pulls held 2496
+window 16 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2001 pulls held 2480
+window 17 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2464
+window 18 s 10.0 rtp/s 200 lost 0 plc 15 played 1986 jitter underruns 15 callbacks 1876 underruns 0 overruns 0 expected 480240 played 476640 concealed 3600 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2001 pulls held 2448
+window 19 s 10.0 rtp/s 200 lost 0 plc 13 played 1987 jitter underruns 13 callbacks 1875 underruns 0 overruns 0 expected 480000 played 476880 concealed 3120 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2000 pulls held 2448
+window 20 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2432
+window 21 s 10.0 rtp/s 200 lost 0 plc 1 played 1999 jitter underruns 1 callbacks 1875 underruns 0 overruns 0 expected 480000 played 479760 concealed 240 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2000 pulls held 2432
+window 22 s 10.0 rtp/s 200 lost 0 plc 0 played 2000 jitter underruns 0 callbacks 1875 underruns 0 overruns 0 expected 480000 played 480000 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2000 pulls held 2432
+window 23 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2416
+window 24 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2400
+window 25 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2384
+window 26 s 10.0 rtp/s 200 lost 0 plc 0 played 2000 jitter underruns 0 callbacks 1875 underruns 0 overruns 0 expected 480000 played 480000 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2000 pulls held 2384
+window 27 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2368
+window 28 s 10.0 rtp/s 200 lost 0 plc 0 played 2000 jitter underruns 0 callbacks 1875 underruns 0 overruns 0 expected 480000 played 480000 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2000 pulls held 2368
+window 29 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2001 pulls held 2352
+window 30 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2336
+window 31 s 10.0 rtp/s 200 lost 0 plc 0 played 2000 jitter underruns 0 callbacks 1875 underruns 0 overruns 0 expected 480000 played 480000 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2000 pulls held 2336
+window 32 s 10.0 rtp/s 199 lost 0 plc 46 played 1955 jitter underruns 46 callbacks 1876 underruns 0 overruns 0 expected 480240 played 469200 concealed 11040 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2001 pulls held 1840
+window 33 s 10.0 rtp/s 201 lost 0 plc 69 played 1932 jitter underruns 69 callbacks 1876 underruns 0 overruns 0 expected 480240 played 463680 concealed 16560 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2001 pulls held 2304
+window 34 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2288
+window 35 s 10.0 rtp/s 200 lost 0 plc 0 played 2000 jitter underruns 0 callbacks 1875 underruns 0 overruns 0 expected 480000 played 480000 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2000 pulls held 2288
+window 36 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1875 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2528
+window 37 s 10.0 rtp/s 200 lost 0 plc 6 played 1994 jitter underruns 6 callbacks 1876 underruns 0 overruns 0 expected 480000 played 478560 concealed 1440 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2000 pulls held 2272
+window 38 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1875 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2001 pulls held 2512
+window 39 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2496
+window 40 s 10.0 rtp/s 200 lost 0 plc 40 played 1961 jitter underruns 40 callbacks 1877 underruns 0 overruns 0 expected 480240 played 470640 concealed 9600 occupancy ms p50 5.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2001 pulls held 2224
+window 41 s 10.0 rtp/s 200 lost 0 plc 10 played 1992 jitter underruns 10 callbacks 1876 underruns 0 overruns 0 expected 480480 played 478080 concealed 2400 occupancy ms p50 5.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2002 pulls held 2448
+window 42 s 10.0 rtp/s 200 lost 0 plc 0 played 2000 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480000 played 480000 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2000 pulls held 2192
+window 43 s 10.0 rtp/s 200 lost 0 plc 13 played 1988 jitter underruns 13 callbacks 1875 underruns 0 overruns 0 expected 480240 played 477120 concealed 3120 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2001 pulls held 2432
+window 44 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2001 pulls held 2416
+window 45 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2400
+window 46 s 10.0 rtp/s 200 lost 0 plc 7 played 1994 jitter underruns 7 callbacks 1876 underruns 0 overruns 0 expected 480240 played 478560 concealed 1680 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2001 pulls held 2384
+window 47 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2368
+window 48 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2352
+window 49 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2336
+window 50 s 10.0 rtp/s 200 lost 0 plc 0 played 2000 jitter underruns 0 callbacks 1875 underruns 0 overruns 0 expected 480000 played 480000 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2000 pulls held 2336
+window 51 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2320
+window 52 s 10.0 rtp/s 200 lost 0 plc 2 played 1999 jitter underruns 2 callbacks 1876 underruns 0 overruns 0 expected 480240 played 479760 concealed 480 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 0.0 max 10.0 over 2001 pulls held 2304
+window 53 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1875 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2544
+window 54 s 10.0 rtp/s 200 lost 0 plc 0 played 2000 jitter underruns 0 callbacks 1875 underruns 0 overruns 0 expected 480000 played 480000 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2000 pulls held 2544
+window 55 s 10.0 rtp/s 200 lost 0 plc 0 played 2000 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480000 played 480000 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2000 pulls held 2288
+window 56 s 10.0 rtp/s 200 lost 0 plc 0 played 2000 jitter underruns 0 callbacks 1875 underruns 0 overruns 0 expected 480000 played 480000 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2000 pulls held 2288
+window 57 s 10.0 rtp/s 200 lost 0 plc 0 played 2001 jitter underruns 0 callbacks 1875 underruns 0 overruns 0 expected 480240 played 480240 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2001 pulls held 2528
+window 58 s 10.0 rtp/s 200 lost 0 plc 0 played 2000 jitter underruns 0 callbacks 1876 underruns 0 overruns 0 expected 480000 played 480000 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 2000 pulls held 2272
+window 59 s 9.8 rtp/s 200 lost 0 plc 0 played 1952 jitter underruns 0 callbacks 1830 underruns 0 overruns 0 expected 468480 played 468480 concealed 0 occupancy ms p50 10.0 p95 10.0 p99 10.0 min 5.0 max 10.0 over 1952 pulls held 2272

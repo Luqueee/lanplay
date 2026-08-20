@@ -1,0 +1,2709 @@
+{
+  "checks": [
+    {
+      "kind": "must_not_be_zero",
+      "name": "the stream arrived",
+      "reads": "rtp_received",
+      "why": "every figure in this document is computed over these datagrams, so a run that received none makes each of them an absence rather than a number"
+    },
+    {
+      "kind": "must_not_be_zero",
+      "name": "audio was decoded and not merely concealed",
+      "reads": "frames_played",
+      "why": "the concealer produces plausible samples from an empty stream indefinitely, so a callback count, an underrun count of zero and a concealment figure are all consistent with a path that carried nothing; a decoded frame is not"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "source concealment: none of the source was replaced",
+      "population": "samples_expected",
+      "reads": "concealed_samples",
+      "why": "expected counts every per-channel sample the playout cursor travelled and played counts the ones the producer deposited, with a gap concealment credited because the source's own audio sits either side of it and an underrun refused because nothing of the source was there. The difference is source audio the listener was handed an invention in place of, which is a fidelity loss and not a playout failure - the concealer keeps the device fed throughout, and forty of the forty envelopes committed under results/audio report zero render underruns, so this project has never once handed a device silence. The population is the expected samples, because zero concealed out of zero expected is a run that carried nothing"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "playout continuity: the device was never handed silence",
+      "population": "render_callbacks",
+      "reads": "render_underruns",
+      "why": "the other half of the pair above, and stated as its own criterion because a concealment figure quoted alone invites its reader to believe the device was starved. A cycle the ring could not fill is a whole IO buffer of silence sent to a device in place of audio, which is audible however small the sample count beside it looks; the population is the cycles, because a run in which the device never ran must not pass this by having had no chance to fail it"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "no frame arrived in time and failed to decode",
+      "population": "frames_played",
+      "reads": "decode_failures",
+      "why": "a payload the decoder refuses is a disagreement between the two ends about the format, which no amount of buffering repairs and which concealment hides completely in every other counter here"
+    },
+    {
+      "kind": "must_be_zero",
+      "name": "no packet carried a timestamp off the frame grid",
+      "population": "rtp_received",
+      "reads": "rtp_off_grid",
+      "why": "a timestamp that is not a whole number of frames from the one that anchored the stream is a sender running at another frame duration, and the symptom is a run that conceals everything and plays nothing"
+    },
+    {
+      "bound": 500.0,
+      "kind": "must_be_below",
+      "name": "decode p99 under a tenth of the frame",
+      "reads": "decode_p99_us",
+      "why": "a tenth of the 5 ms frame is 500 us, and the producer has to decode and deposit inside its period or the device finds an empty ring; p99 rather than the mean, because a frame late once every hundred is a click a listener hears"
+    },
+    {
+      "kind": "must_be_within",
+      "name": "the left channel arrives as its own tone",
+      "reads": "tone_left_hz",
+      "target": 997.0,
+      "tolerance": 5.0,
+      "why": "a packet count and a callback count agree just as happily when the path carries digital silence, and this project has read that agreement as success; 997 Hz comes out of the samples that were played, at a window resolution of 2 Hz"
+    },
+    {
+      "kind": "must_be_within",
+      "name": "the right channel arrives as its own tone",
+      "reads": "tone_right_hz",
+      "target": 1997.0,
+      "tolerance": 5.0,
+      "why": "the two channels carry different frequencies so that channel order is provable across the whole link rather than assumed, and a right channel reading 997 Hz is what a swap looks like"
+    },
+    {
+      "kind": "must_not_be_zero",
+      "name": "the played channels stay distinct",
+      "reads": "tone_channels_distinct",
+      "why": "two channels reading one frequency is consistent with a fold to mono, with one channel encoded twice, and with an analysis reading its own scratch buffer, and every count in this document is consistent with all three"
+    }
+  ],
+  "declared": [
+    "rtp receive",
+    "jitter buffer",
+    "opus decode",
+    "coreaudio render"
+  ],
+  "environment": {
+    "channels": 2,
+    "device": "Altavoces del MacBook Pro",
+    "device_chosen": "named",
+    "device_span_s": 119.945849583,
+    "excess": {
+      "arrivals": 24003,
+      "arrivals_dropped": 0,
+      "bin_us": 250,
+      "block_seconds": 10.0,
+      "blocks": 12,
+      "corrected": {
+        "bins": [
+          [
+            0.0,
+            32
+          ],
+          [
+            0.25,
+            332
+          ],
+          [
+            0.5,
+            1037
+          ],
+          [
+            0.75,
+            1280
+          ],
+          [
+            1.0,
+            1227
+          ],
+          [
+            1.25,
+            1241
+          ],
+          [
+            1.5,
+            1320
+          ],
+          [
+            1.75,
+            1314
+          ],
+          [
+            2.0,
+            1393
+          ],
+          [
+            2.25,
+            1013
+          ],
+          [
+            2.5,
+            278
+          ],
+          [
+            2.75,
+            186
+          ],
+          [
+            3.0,
+            160
+          ],
+          [
+            3.25,
+            127
+          ],
+          [
+            3.5,
+            103
+          ],
+          [
+            3.75,
+            64
+          ],
+          [
+            4.0,
+            17
+          ],
+          [
+            4.25,
+            22
+          ],
+          [
+            4.5,
+            24
+          ],
+          [
+            4.75,
+            8
+          ],
+          [
+            5.0,
+            67
+          ],
+          [
+            5.25,
+            638
+          ],
+          [
+            5.5,
+            1168
+          ],
+          [
+            5.75,
+            1308
+          ],
+          [
+            6.0,
+            1250
+          ],
+          [
+            6.25,
+            1271
+          ],
+          [
+            6.5,
+            1309
+          ],
+          [
+            6.75,
+            1331
+          ],
+          [
+            7.0,
+            1344
+          ],
+          [
+            7.25,
+            702
+          ],
+          [
+            7.5,
+            227
+          ],
+          [
+            7.75,
+            172
+          ],
+          [
+            8.0,
+            150
+          ],
+          [
+            8.25,
+            114
+          ],
+          [
+            8.5,
+            99
+          ],
+          [
+            8.75,
+            62
+          ],
+          [
+            9.0,
+            21
+          ],
+          [
+            9.25,
+            25
+          ],
+          [
+            9.5,
+            26
+          ],
+          [
+            9.75,
+            7
+          ],
+          [
+            10.0,
+            16
+          ],
+          [
+            10.25,
+            8
+          ],
+          [
+            10.5,
+            10
+          ],
+          [
+            10.75,
+            10
+          ],
+          [
+            11.0,
+            9
+          ],
+          [
+            11.25,
+            4
+          ],
+          [
+            11.5,
+            5
+          ],
+          [
+            11.75,
+            4
+          ],
+          [
+            12.0,
+            7
+          ],
+          [
+            12.25,
+            4
+          ],
+          [
+            12.5,
+            5
+          ],
+          [
+            12.75,
+            2
+          ],
+          [
+            13.0,
+            3
+          ],
+          [
+            13.25,
+            6
+          ],
+          [
+            13.5,
+            5
+          ],
+          [
+            13.75,
+            5
+          ],
+          [
+            14.0,
+            6
+          ],
+          [
+            14.25,
+            4
+          ],
+          [
+            14.5,
+            7
+          ],
+          [
+            14.75,
+            4
+          ],
+          [
+            15.0,
+            8
+          ],
+          [
+            15.25,
+            4
+          ],
+          [
+            15.5,
+            8
+          ],
+          [
+            15.75,
+            5
+          ],
+          [
+            16.0,
+            8
+          ],
+          [
+            16.25,
+            2
+          ],
+          [
+            16.5,
+            2
+          ],
+          [
+            16.75,
+            5
+          ],
+          [
+            17.0,
+            4
+          ],
+          [
+            17.25,
+            2
+          ],
+          [
+            17.5,
+            3
+          ],
+          [
+            17.75,
+            2
+          ],
+          [
+            18.0,
+            2
+          ],
+          [
+            18.25,
+            3
+          ],
+          [
+            18.5,
+            2
+          ],
+          [
+            18.75,
+            5
+          ],
+          [
+            19.0,
+            3
+          ],
+          [
+            19.25,
+            3
+          ],
+          [
+            19.5,
+            6
+          ],
+          [
+            19.75,
+            2
+          ],
+          [
+            20.0,
+            6
+          ],
+          [
+            20.25,
+            3
+          ],
+          [
+            20.5,
+            5
+          ],
+          [
+            21.0,
+            2
+          ],
+          [
+            21.25,
+            2
+          ],
+          [
+            21.5,
+            3
+          ],
+          [
+            21.75,
+            2
+          ],
+          [
+            22.0,
+            1
+          ],
+          [
+            22.25,
+            1
+          ],
+          [
+            22.5,
+            2
+          ],
+          [
+            22.75,
+            1
+          ],
+          [
+            23.0,
+            1
+          ],
+          [
+            23.25,
+            3
+          ],
+          [
+            23.5,
+            3
+          ],
+          [
+            23.75,
+            5
+          ],
+          [
+            24.0,
+            2
+          ],
+          [
+            24.25,
+            3
+          ],
+          [
+            24.5,
+            4
+          ],
+          [
+            25.0,
+            5
+          ],
+          [
+            25.25,
+            1
+          ],
+          [
+            25.5,
+            1
+          ],
+          [
+            26.25,
+            1
+          ],
+          [
+            26.5,
+            2
+          ],
+          [
+            27.0,
+            1
+          ],
+          [
+            27.5,
+            1
+          ],
+          [
+            28.25,
+            2
+          ],
+          [
+            28.5,
+            3
+          ],
+          [
+            28.75,
+            5
+          ],
+          [
+            29.0,
+            2
+          ],
+          [
+            29.25,
+            2
+          ],
+          [
+            29.5,
+            2
+          ],
+          [
+            30.0,
+            3
+          ],
+          [
+            30.5,
+            1
+          ],
+          [
+            31.0,
+            1
+          ],
+          [
+            32.0,
+            1
+          ],
+          [
+            32.75,
+            1
+          ],
+          [
+            33.25,
+            1
+          ],
+          [
+            33.5,
+            1
+          ],
+          [
+            33.75,
+            3
+          ],
+          [
+            34.0,
+            2
+          ],
+          [
+            34.25,
+            3
+          ],
+          [
+            34.5,
+            1
+          ],
+          [
+            35.0,
+            2
+          ],
+          [
+            35.5,
+            1
+          ],
+          [
+            36.0,
+            1
+          ],
+          [
+            37.75,
+            1
+          ],
+          [
+            38.25,
+            1
+          ],
+          [
+            38.75,
+            3
+          ],
+          [
+            39.0,
+            2
+          ],
+          [
+            39.25,
+            2
+          ],
+          [
+            39.5,
+            1
+          ],
+          [
+            40.0,
+            2
+          ],
+          [
+            40.25,
+            8
+          ],
+          [
+            40.5,
+            26
+          ],
+          [
+            40.75,
+            40
+          ],
+          [
+            41.0,
+            41
+          ],
+          [
+            41.25,
+            50
+          ],
+          [
+            41.5,
+            51
+          ],
+          [
+            41.75,
+            40
+          ],
+          [
+            42.0,
+            50
+          ],
+          [
+            42.25,
+            39
+          ],
+          [
+            42.5,
+            22
+          ],
+          [
+            42.75,
+            28
+          ],
+          [
+            43.0,
+            41
+          ],
+          [
+            43.25,
+            29
+          ],
+          [
+            43.5,
+            29
+          ],
+          [
+            43.75,
+            22
+          ],
+          [
+            44.0,
+            43
+          ],
+          [
+            44.25,
+            41
+          ],
+          [
+            44.5,
+            34
+          ],
+          [
+            44.75,
+            33
+          ],
+          [
+            45.0,
+            35
+          ],
+          [
+            45.25,
+            34
+          ],
+          [
+            45.5,
+            77
+          ],
+          [
+            45.75,
+            55
+          ],
+          [
+            46.0,
+            77
+          ],
+          [
+            46.25,
+            34
+          ],
+          [
+            46.5,
+            36
+          ],
+          [
+            46.75,
+            35
+          ],
+          [
+            47.0,
+            32
+          ],
+          [
+            47.25,
+            19
+          ],
+          [
+            47.5,
+            8
+          ],
+          [
+            47.75,
+            9
+          ],
+          [
+            48.0,
+            9
+          ],
+          [
+            48.25,
+            16
+          ],
+          [
+            48.5,
+            7
+          ],
+          [
+            48.75,
+            6
+          ],
+          [
+            49.0,
+            4
+          ],
+          [
+            49.25,
+            9
+          ],
+          [
+            49.5,
+            2
+          ],
+          [
+            49.75,
+            2
+          ],
+          [
+            50.0,
+            2
+          ],
+          [
+            50.5,
+            1
+          ],
+          [
+            50.75,
+            1
+          ],
+          [
+            51.0,
+            2
+          ],
+          [
+            51.25,
+            1
+          ],
+          [
+            52.75,
+            1
+          ],
+          [
+            53.25,
+            1
+          ],
+          [
+            53.75,
+            2
+          ],
+          [
+            54.0,
+            2
+          ],
+          [
+            54.5,
+            1
+          ],
+          [
+            55.0,
+            1
+          ],
+          [
+            56.0,
+            1
+          ],
+          [
+            58.25,
+            1
+          ],
+          [
+            58.75,
+            2
+          ],
+          [
+            59.0,
+            2
+          ],
+          [
+            59.25,
+            1
+          ],
+          [
+            59.5,
+            1
+          ],
+          [
+            61.0,
+            1
+          ],
+          [
+            62.0,
+            1
+          ],
+          [
+            63.75,
+            2
+          ],
+          [
+            64.0,
+            2
+          ],
+          [
+            64.5,
+            1
+          ],
+          [
+            64.75,
+            1
+          ],
+          [
+            67.0,
+            1
+          ],
+          [
+            68.75,
+            3
+          ],
+          [
+            69.5,
+            1
+          ],
+          [
+            73.75,
+            2
+          ],
+          [
+            74.5,
+            1
+          ],
+          [
+            78.5,
+            1
+          ],
+          [
+            78.75,
+            1
+          ],
+          [
+            79.5,
+            1
+          ],
+          [
+            83.75,
+            1
+          ],
+          [
+            84.25,
+            1
+          ],
+          [
+            89.25,
+            1
+          ],
+          [
+            91.0,
+            1
+          ],
+          [
+            95.0,
+            1
+          ]
+        ],
+        "max_ms": 95.205,
+        "over_100ms": 0,
+        "p50_ms": 5.528,
+        "p95_ms": 40.606,
+        "p99_ms": 46.501
+      },
+      "drift": {
+        "accumulated_ms": -2.024812076923077,
+        "agrees_with_reference": true,
+        "blocks_fitted": 12,
+        "delay_slope_ppm": -16.872027972027972,
+        "delay_slope_ppm_all_points": -18.337861944474476,
+        "reference_source_ppm": 9.29,
+        "source_ppm": 16.872027972027972,
+        "source_ppm_all_points": 18.337861944474476
+      },
+      "frames_missing": 0,
+      "minimum_clusters": 30,
+      "pair_cadence_ms": 5,
+      "population": 24003,
+      "raw": {
+        "bins": [
+          [
+            0.0,
+            4
+          ],
+          [
+            0.25,
+            23
+          ],
+          [
+            0.5,
+            148
+          ],
+          [
+            0.75,
+            313
+          ],
+          [
+            1.0,
+            446
+          ],
+          [
+            1.25,
+            583
+          ],
+          [
+            1.5,
+            810
+          ],
+          [
+            1.75,
+            1010
+          ],
+          [
+            2.0,
+            1084
+          ],
+          [
+            2.25,
+            1165
+          ],
+          [
+            2.5,
+            1172
+          ],
+          [
+            2.75,
+            1001
+          ],
+          [
+            3.0,
+            920
+          ],
+          [
+            3.25,
+            780
+          ],
+          [
+            3.5,
+            577
+          ],
+          [
+            3.75,
+            471
+          ],
+          [
+            4.0,
+            260
+          ],
+          [
+            4.25,
+            141
+          ],
+          [
+            4.5,
+            93
+          ],
+          [
+            4.75,
+            72
+          ],
+          [
+            5.0,
+            42
+          ],
+          [
+            5.25,
+            81
+          ],
+          [
+            5.5,
+            234
+          ],
+          [
+            5.75,
+            393
+          ],
+          [
+            6.0,
+            491
+          ],
+          [
+            6.25,
+            650
+          ],
+          [
+            6.5,
+            893
+          ],
+          [
+            6.75,
+            1110
+          ],
+          [
+            7.0,
+            1150
+          ],
+          [
+            7.25,
+            1172
+          ],
+          [
+            7.5,
+            1108
+          ],
+          [
+            7.75,
+            951
+          ],
+          [
+            8.0,
+            861
+          ],
+          [
+            8.25,
+            728
+          ],
+          [
+            8.5,
+            534
+          ],
+          [
+            8.75,
+            415
+          ],
+          [
+            9.0,
+            207
+          ],
+          [
+            9.25,
+            112
+          ],
+          [
+            9.5,
+            89
+          ],
+          [
+            9.75,
+            64
+          ],
+          [
+            10.0,
+            38
+          ],
+          [
+            10.25,
+            31
+          ],
+          [
+            10.5,
+            22
+          ],
+          [
+            10.75,
+            20
+          ],
+          [
+            11.0,
+            9
+          ],
+          [
+            11.25,
+            13
+          ],
+          [
+            11.5,
+            10
+          ],
+          [
+            11.75,
+            7
+          ],
+          [
+            12.0,
+            10
+          ],
+          [
+            12.25,
+            5
+          ],
+          [
+            12.5,
+            9
+          ],
+          [
+            12.75,
+            2
+          ],
+          [
+            13.0,
+            4
+          ],
+          [
+            13.25,
+            3
+          ],
+          [
+            13.5,
+            11
+          ],
+          [
+            13.75,
+            3
+          ],
+          [
+            14.0,
+            4
+          ],
+          [
+            14.25,
+            6
+          ],
+          [
+            14.5,
+            5
+          ],
+          [
+            14.75,
+            5
+          ],
+          [
+            15.0,
+            1
+          ],
+          [
+            15.25,
+            2
+          ],
+          [
+            15.5,
+            6
+          ],
+          [
+            15.75,
+            8
+          ],
+          [
+            16.0,
+            6
+          ],
+          [
+            16.25,
+            6
+          ],
+          [
+            16.5,
+            3
+          ],
+          [
+            16.75,
+            7
+          ],
+          [
+            17.0,
+            6
+          ],
+          [
+            17.25,
+            3
+          ],
+          [
+            17.5,
+            5
+          ],
+          [
+            17.75,
+            5
+          ],
+          [
+            18.0,
+            1
+          ],
+          [
+            18.25,
+            5
+          ],
+          [
+            18.5,
+            5
+          ],
+          [
+            18.75,
+            2
+          ],
+          [
+            19.0,
+            1
+          ],
+          [
+            19.25,
+            3
+          ],
+          [
+            19.5,
+            5
+          ],
+          [
+            19.75,
+            4
+          ],
+          [
+            20.0,
+            1
+          ],
+          [
+            20.25,
+            2
+          ],
+          [
+            20.5,
+            4
+          ],
+          [
+            20.75,
+            6
+          ],
+          [
+            21.0,
+            3
+          ],
+          [
+            21.25,
+            3
+          ],
+          [
+            21.5,
+            3
+          ],
+          [
+            21.75,
+            2
+          ],
+          [
+            22.0,
+            3
+          ],
+          [
+            22.25,
+            4
+          ],
+          [
+            22.75,
+            4
+          ],
+          [
+            23.25,
+            3
+          ],
+          [
+            23.5,
+            2
+          ],
+          [
+            23.75,
+            1
+          ],
+          [
+            24.0,
+            1
+          ],
+          [
+            24.25,
+            1
+          ],
+          [
+            24.5,
+            5
+          ],
+          [
+            24.75,
+            5
+          ],
+          [
+            25.0,
+            1
+          ],
+          [
+            25.25,
+            3
+          ],
+          [
+            25.5,
+            5
+          ],
+          [
+            25.75,
+            1
+          ],
+          [
+            26.0,
+            2
+          ],
+          [
+            26.25,
+            1
+          ],
+          [
+            26.5,
+            1
+          ],
+          [
+            26.75,
+            1
+          ],
+          [
+            27.0,
+            1
+          ],
+          [
+            27.25,
+            2
+          ],
+          [
+            28.0,
+            1
+          ],
+          [
+            28.25,
+            1
+          ],
+          [
+            28.5,
+            2
+          ],
+          [
+            28.75,
+            2
+          ],
+          [
+            29.25,
+            1
+          ],
+          [
+            29.5,
+            3
+          ],
+          [
+            29.75,
+            3
+          ],
+          [
+            30.0,
+            1
+          ],
+          [
+            30.25,
+            2
+          ],
+          [
+            30.5,
+            3
+          ],
+          [
+            30.75,
+            1
+          ],
+          [
+            31.0,
+            1
+          ],
+          [
+            31.25,
+            1
+          ],
+          [
+            31.75,
+            1
+          ],
+          [
+            32.0,
+            1
+          ],
+          [
+            33.0,
+            1
+          ],
+          [
+            33.5,
+            1
+          ],
+          [
+            33.75,
+            2
+          ],
+          [
+            34.0,
+            1
+          ],
+          [
+            34.5,
+            3
+          ],
+          [
+            35.25,
+            2
+          ],
+          [
+            35.5,
+            3
+          ],
+          [
+            35.75,
+            1
+          ],
+          [
+            36.0,
+            1
+          ],
+          [
+            36.25,
+            1
+          ],
+          [
+            37.0,
+            1
+          ],
+          [
+            38.5,
+            1
+          ],
+          [
+            38.75,
+            1
+          ],
+          [
+            39.0,
+            1
+          ],
+          [
+            39.5,
+            3
+          ],
+          [
+            40.0,
+            1
+          ],
+          [
+            40.25,
+            2
+          ],
+          [
+            40.5,
+            7
+          ],
+          [
+            40.75,
+            12
+          ],
+          [
+            41.0,
+            9
+          ],
+          [
+            41.25,
+            10
+          ],
+          [
+            41.5,
+            23
+          ],
+          [
+            41.75,
+            36
+          ],
+          [
+            42.0,
+            47
+          ],
+          [
+            42.25,
+            42
+          ],
+          [
+            42.5,
+            43
+          ],
+          [
+            42.75,
+            37
+          ],
+          [
+            43.0,
+            52
+          ],
+          [
+            43.25,
+            35
+          ],
+          [
+            43.5,
+            27
+          ],
+          [
+            43.75,
+            32
+          ],
+          [
+            44.0,
+            34
+          ],
+          [
+            44.25,
+            31
+          ],
+          [
+            44.5,
+            36
+          ],
+          [
+            44.75,
+            29
+          ],
+          [
+            45.0,
+            32
+          ],
+          [
+            45.25,
+            30
+          ],
+          [
+            45.5,
+            46
+          ],
+          [
+            45.75,
+            29
+          ],
+          [
+            46.0,
+            46
+          ],
+          [
+            46.25,
+            49
+          ],
+          [
+            46.5,
+            59
+          ],
+          [
+            46.75,
+            46
+          ],
+          [
+            47.0,
+            47
+          ],
+          [
+            47.25,
+            36
+          ],
+          [
+            47.5,
+            40
+          ],
+          [
+            47.75,
+            39
+          ],
+          [
+            48.0,
+            30
+          ],
+          [
+            48.25,
+            23
+          ],
+          [
+            48.5,
+            21
+          ],
+          [
+            48.75,
+            14
+          ],
+          [
+            49.0,
+            4
+          ],
+          [
+            49.25,
+            9
+          ],
+          [
+            49.5,
+            6
+          ],
+          [
+            49.75,
+            11
+          ],
+          [
+            50.0,
+            4
+          ],
+          [
+            50.25,
+            5
+          ],
+          [
+            50.5,
+            4
+          ],
+          [
+            50.75,
+            3
+          ],
+          [
+            51.25,
+            4
+          ],
+          [
+            51.75,
+            3
+          ],
+          [
+            52.0,
+            1
+          ],
+          [
+            53.5,
+            1
+          ],
+          [
+            53.75,
+            1
+          ],
+          [
+            54.25,
+            1
+          ],
+          [
+            54.5,
+            2
+          ],
+          [
+            55.25,
+            1
+          ],
+          [
+            55.5,
+            1
+          ],
+          [
+            56.25,
+            1
+          ],
+          [
+            57.0,
+            1
+          ],
+          [
+            58.5,
+            1
+          ],
+          [
+            58.75,
+            1
+          ],
+          [
+            59.25,
+            1
+          ],
+          [
+            59.5,
+            2
+          ],
+          [
+            60.25,
+            1
+          ],
+          [
+            60.5,
+            1
+          ],
+          [
+            61.25,
+            1
+          ],
+          [
+            62.25,
+            1
+          ],
+          [
+            63.75,
+            1
+          ],
+          [
+            64.5,
+            1
+          ],
+          [
+            65.0,
+            1
+          ],
+          [
+            65.25,
+            1
+          ],
+          [
+            65.5,
+            2
+          ],
+          [
+            67.25,
+            1
+          ],
+          [
+            68.75,
+            1
+          ],
+          [
+            70.25,
+            2
+          ],
+          [
+            70.5,
+            1
+          ],
+          [
+            73.75,
+            1
+          ],
+          [
+            75.25,
+            1
+          ],
+          [
+            75.5,
+            1
+          ],
+          [
+            78.75,
+            1
+          ],
+          [
+            80.25,
+            1
+          ],
+          [
+            80.5,
+            1
+          ],
+          [
+            85.25,
+            1
+          ],
+          [
+            85.5,
+            1
+          ],
+          [
+            90.25,
+            1
+          ],
+          [
+            91.25,
+            1
+          ],
+          [
+            95.5,
+            1
+          ]
+        ],
+        "max_ms": 95.521,
+        "over_100ms": 0,
+        "p50_ms": 6.089,
+        "p95_ms": 41.137,
+        "p99_ms": 47.649
+      },
+      "repeated_frames": 0,
+      "sequence_breaks": 0,
+      "stream_s": 120.01,
+      "thresholds": [
+        {
+          "block_clusters_per_min_max": 5658.0,
+          "block_clusters_per_min_min": 5472.0,
+          "block_clusters_per_min_p50": 5598.0,
+          "cluster_frames_max": 23,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 3,
+          "cluster_gap_max_ms": 15.0,
+          "cluster_gap_min_ms": 5.0,
+          "cluster_gap_p50_ms": 5.0,
+          "cluster_ms_max": 115.0,
+          "cluster_worst_max_ms": 95.205,
+          "cluster_worst_p50_ms": 6.601,
+          "cluster_worst_p95_ms": 44.626,
+          "clusters": 11175,
+          "clusters_per_min": 5587.0344137988495,
+          "late": 12825,
+          "late_fraction": 0.5343082114735658,
+          "late_per_min": 6411.965669527539,
+          "late_raw": 12930,
+          "ms": 5,
+          "rate_quotable": true
+        },
+        {
+          "block_clusters_per_min_max": 678.0,
+          "block_clusters_per_min_min": 504.0,
+          "block_clusters_per_min_p50": 582.0,
+          "cluster_frames_max": 17,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 2,
+          "cluster_gap_max_ms": 760.0,
+          "cluster_gap_min_ms": 5.0,
+          "cluster_gap_p50_ms": 65.0,
+          "cluster_ms_max": 85.0,
+          "cluster_worst_max_ms": 95.205,
+          "cluster_worst_p50_ms": 44.394,
+          "cluster_worst_p95_ms": 48.16,
+          "clusters": 1189,
+          "clusters_per_min": 594.4504624614615,
+          "late": 1534,
+          "late_fraction": 0.06390867808190642,
+          "late_per_min": 766.9360886592783,
+          "late_raw": 1645,
+          "ms": 10,
+          "rate_quotable": true
+        },
+        {
+          "block_clusters_per_min_max": 660.0,
+          "block_clusters_per_min_min": 492.0,
+          "block_clusters_per_min_p50": 570.0,
+          "cluster_frames_max": 16,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 2,
+          "cluster_gap_max_ms": 760.0,
+          "cluster_gap_min_ms": 5.0,
+          "cluster_gap_p50_ms": 70.0,
+          "cluster_ms_max": 80.0,
+          "cluster_worst_max_ms": 95.205,
+          "cluster_worst_p50_ms": 44.478,
+          "cluster_worst_p95_ms": 48.176,
+          "clusters": 1168,
+          "clusters_per_min": 583.9513373885509,
+          "late": 1410,
+          "late_fraction": 0.05874265716785402,
+          "late_per_min": 704.9412548954253,
+          "late_raw": 1428,
+          "ms": 15,
+          "rate_quotable": true
+        },
+        {
+          "block_clusters_per_min_max": 648.0,
+          "block_clusters_per_min_min": 486.0,
+          "block_clusters_per_min_p50": 570.0,
+          "cluster_frames_max": 14,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 2,
+          "cluster_gap_max_ms": 760.0,
+          "cluster_gap_min_ms": 5.0,
+          "cluster_gap_p50_ms": 70.0,
+          "cluster_ms_max": 70.0,
+          "cluster_worst_max_ms": 95.205,
+          "cluster_worst_p50_ms": 44.546,
+          "cluster_worst_p95_ms": 48.27,
+          "clusters": 1151,
+          "clusters_per_min": 575.4520456628615,
+          "late": 1331,
+          "late_fraction": 0.05545140190809482,
+          "late_per_min": 665.4445462878093,
+          "late_raw": 1344,
+          "ms": 20,
+          "rate_quotable": true
+        },
+        {
+          "block_clusters_per_min_max": 642.0,
+          "block_clusters_per_min_min": 486.0,
+          "block_clusters_per_min_p50": 558.0,
+          "cluster_frames_max": 13,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 2,
+          "cluster_gap_max_ms": 760.0,
+          "cluster_gap_min_ms": 5.0,
+          "cluster_gap_p50_ms": 70.0,
+          "cluster_ms_max": 65.0,
+          "cluster_worst_max_ms": 95.205,
+          "cluster_worst_p50_ms": 44.586,
+          "cluster_worst_p95_ms": 48.297,
+          "clusters": 1138,
+          "clusters_per_min": 568.952587284393,
+          "late": 1282,
+          "late_fraction": 0.053409990417864435,
+          "late_per_min": 640.9465877843513,
+          "late_raw": 1291,
+          "ms": 25,
+          "rate_quotable": true
+        },
+        {
+          "block_clusters_per_min_max": 624.0,
+          "block_clusters_per_min_min": 486.0,
+          "block_clusters_per_min_p50": 558.0,
+          "cluster_frames_max": 12,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 2,
+          "cluster_gap_max_ms": 760.0,
+          "cluster_gap_min_ms": 5.0,
+          "cluster_gap_p50_ms": 70.0,
+          "cluster_ms_max": 60.0,
+          "cluster_worst_max_ms": 95.205,
+          "cluster_worst_p50_ms": 44.611,
+          "cluster_worst_p95_ms": 48.297,
+          "clusters": 1130,
+          "clusters_per_min": 564.9529205899508,
+          "late": 1254,
+          "late_fraction": 0.05224346956630421,
+          "late_per_min": 626.9477543538038,
+          "late_raw": 1260,
+          "ms": 30,
+          "rate_quotable": true
+        },
+        {
+          "block_clusters_per_min_max": 624.0,
+          "block_clusters_per_min_min": 486.0,
+          "block_clusters_per_min_p50": 558.0,
+          "cluster_frames_max": 10,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 2,
+          "cluster_gap_max_ms": 760.0,
+          "cluster_gap_min_ms": 5.0,
+          "cluster_gap_p50_ms": 75.0,
+          "cluster_ms_max": 50.0,
+          "cluster_worst_max_ms": 95.205,
+          "cluster_worst_p50_ms": 44.631,
+          "cluster_worst_p95_ms": 48.297,
+          "clusters": 1122,
+          "clusters_per_min": 560.9532538955087,
+          "late": 1222,
+          "late_fraction": 0.05091030287880682,
+          "late_per_min": 610.9490875760353,
+          "late_raw": 1226,
+          "ms": 40,
+          "rate_quotable": true
+        },
+        {
+          "block_clusters_per_min_max": 24.0,
+          "block_clusters_per_min_min": 0.0,
+          "block_clusters_per_min_p50": 6.0,
+          "cluster_frames_max": 8,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 7,
+          "cluster_gap_max_ms": 18910.0,
+          "cluster_gap_min_ms": 25.0,
+          "cluster_gap_p50_ms": 5075.0,
+          "cluster_ms_max": 40.0,
+          "cluster_worst_max_ms": 95.205,
+          "cluster_worst_p50_ms": 58.344,
+          "cluster_worst_p95_ms": 91.011,
+          "clusters": 20,
+          "clusters_per_min": 9.999166736105325,
+          "late": 47,
+          "late_fraction": 0.0019580885722618006,
+          "late_per_min": 23.498041829847512,
+          "late_raw": 64,
+          "ms": 50,
+          "rate_quotable": false
+        },
+        {
+          "block_clusters_per_min_max": 24.0,
+          "block_clusters_per_min_min": 0.0,
+          "block_clusters_per_min_p50": 6.0,
+          "cluster_frames_max": 6,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 6,
+          "cluster_gap_max_ms": 27615.0,
+          "cluster_gap_min_ms": 10.0,
+          "cluster_gap_p50_ms": 5490.0,
+          "cluster_ms_max": 30.0,
+          "cluster_worst_max_ms": 95.205,
+          "cluster_worst_p50_ms": 68.794,
+          "cluster_worst_p95_ms": 95.205,
+          "clusters": 11,
+          "clusters_per_min": 5.499541704857928,
+          "late": 24,
+          "late_fraction": 0.000999875015623047,
+          "late_per_min": 11.999000083326388,
+          "late_raw": 26,
+          "ms": 60,
+          "rate_quotable": false
+        },
+        {
+          "block_clusters_per_min_max": 12.0,
+          "block_clusters_per_min_min": 0.0,
+          "block_clusters_per_min_p50": 0.0,
+          "cluster_frames_max": 2,
+          "cluster_frames_p50": 1,
+          "cluster_frames_p95": 2,
+          "cluster_gap_max_ms": 43040.0,
+          "cluster_gap_min_ms": 5110.0,
+          "cluster_gap_p50_ms": 27635.0,
+          "cluster_ms_max": 10.0,
+          "cluster_worst_max_ms": 95.205,
+          "cluster_worst_p50_ms": 89.37,
+          "cluster_worst_p95_ms": 95.205,
+          "clusters": 4,
+          "clusters_per_min": 1.9998333472210648,
+          "late": 5,
+          "late_fraction": 0.00020830729492146816,
+          "late_per_min": 2.4997916840263312,
+          "late_raw": 7,
+          "ms": 80,
+          "rate_quotable": false
+        },
+        {
+          "block_clusters_per_min_max": 0.0,
+          "block_clusters_per_min_min": 0.0,
+          "block_clusters_per_min_p50": 0.0,
+          "cluster_frames_max": null,
+          "cluster_frames_p50": null,
+          "cluster_frames_p95": null,
+          "cluster_gap_max_ms": null,
+          "cluster_gap_min_ms": null,
+          "cluster_gap_p50_ms": null,
+          "cluster_ms_max": null,
+          "cluster_worst_max_ms": null,
+          "cluster_worst_p50_ms": null,
+          "cluster_worst_p95_ms": null,
+          "clusters": 0,
+          "clusters_per_min": 0.0,
+          "late": 0,
+          "late_fraction": 0.0,
+          "late_per_min": 0.0,
+          "late_raw": 0,
+          "ms": 100,
+          "rate_quotable": false
+        }
+      ]
+    },
+    "frame_ms": 5,
+    "io_buffer_frames": 256,
+    "jitter_ceiling_ms": 30.0,
+    "jitter_slots": 8,
+    "jitter_target_ms": 10.0,
+    "measurements_dropped": 0,
+    "producer_scheduled_as": "time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms",
+    "receiver_scheduled_as": "time constraint, period 5.000 ms computation 0.625 ms constraint 2.500 ms",
+    "ring_frames": 4096,
+    "ring_prime_frames": 496,
+    "sample_rate_hz": 48000,
+    "ssrc": 3622897629,
+    "windows": [
+      {
+        "concealed_samples": 960,
+        "frames_played": 1898,
+        "jitter_occupancy_max_ms": 15.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 15.0,
+        "jitter_occupancy_p99_ms": 15.0,
+        "jitter_occupancy_pulls": 2002,
+        "jitter_underruns": 4,
+        "plc_frames": 104,
+        "render_callbacks": 1876,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 1,
+        "rtp_received": 2001,
+        "samples_expected": 480480,
+        "samples_played": 479520,
+        "seconds": 10.005995083
+      },
+      {
+        "concealed_samples": 4080,
+        "frames_played": 1874,
+        "jitter_occupancy_max_ms": 15.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 15.0,
+        "jitter_occupancy_p99_ms": 15.0,
+        "jitter_occupancy_pulls": 2000,
+        "jitter_underruns": 17,
+        "plc_frames": 126,
+        "render_callbacks": 1875,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2001,
+        "samples_expected": 480000,
+        "samples_played": 475920,
+        "seconds": 10.000853917
+      },
+      {
+        "concealed_samples": 5280,
+        "frames_played": 1885,
+        "jitter_occupancy_max_ms": 15.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 15.0,
+        "jitter_occupancy_p99_ms": 15.0,
+        "jitter_occupancy_pulls": 2000,
+        "jitter_underruns": 22,
+        "plc_frames": 115,
+        "render_callbacks": 1875,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2000,
+        "samples_expected": 480000,
+        "samples_played": 474720,
+        "seconds": 10.001225541
+      },
+      {
+        "concealed_samples": 5520,
+        "frames_played": 1880,
+        "jitter_occupancy_max_ms": 15.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 15.0,
+        "jitter_occupancy_p99_ms": 15.0,
+        "jitter_occupancy_pulls": 2001,
+        "jitter_underruns": 23,
+        "plc_frames": 121,
+        "render_callbacks": 1876,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2000,
+        "samples_expected": 480240,
+        "samples_played": 474720,
+        "seconds": 10.003638459
+      },
+      {
+        "concealed_samples": 9360,
+        "frames_played": 1866,
+        "jitter_occupancy_max_ms": 15.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 15.0,
+        "jitter_occupancy_p99_ms": 15.0,
+        "jitter_occupancy_pulls": 2000,
+        "jitter_underruns": 39,
+        "plc_frames": 134,
+        "render_callbacks": 1875,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2002,
+        "samples_expected": 480000,
+        "samples_played": 470640,
+        "seconds": 10.003531208
+      },
+      {
+        "concealed_samples": 3120,
+        "frames_played": 1886,
+        "jitter_occupancy_max_ms": 15.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 15.0,
+        "jitter_occupancy_p99_ms": 15.0,
+        "jitter_occupancy_pulls": 2001,
+        "jitter_underruns": 13,
+        "plc_frames": 115,
+        "render_callbacks": 1876,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 1,
+        "rtp_received": 1999,
+        "samples_expected": 480240,
+        "samples_played": 477120,
+        "seconds": 10.001091708
+      },
+      {
+        "concealed_samples": 240,
+        "frames_played": 1899,
+        "jitter_occupancy_max_ms": 15.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 15.0,
+        "jitter_occupancy_p99_ms": 15.0,
+        "jitter_occupancy_pulls": 2000,
+        "jitter_underruns": 1,
+        "plc_frames": 101,
+        "render_callbacks": 1875,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2000,
+        "samples_expected": 480000,
+        "samples_played": 479760,
+        "seconds": 10.002192959
+      },
+      {
+        "concealed_samples": 5280,
+        "frames_played": 1877,
+        "jitter_occupancy_max_ms": 15.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 15.0,
+        "jitter_occupancy_p99_ms": 15.0,
+        "jitter_occupancy_pulls": 2000,
+        "jitter_underruns": 22,
+        "plc_frames": 123,
+        "render_callbacks": 1875,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2000,
+        "samples_expected": 480000,
+        "samples_played": 474720,
+        "seconds": 10.002057833
+      },
+      {
+        "concealed_samples": 0,
+        "frames_played": 1908,
+        "jitter_occupancy_max_ms": 15.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 15.0,
+        "jitter_occupancy_p99_ms": 15.0,
+        "jitter_occupancy_pulls": 2001,
+        "jitter_underruns": 0,
+        "plc_frames": 93,
+        "render_callbacks": 1876,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2002,
+        "samples_expected": 480240,
+        "samples_played": 480240,
+        "seconds": 10.00215325
+      },
+      {
+        "concealed_samples": 5280,
+        "frames_played": 1892,
+        "jitter_occupancy_max_ms": 15.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 15.0,
+        "jitter_occupancy_p99_ms": 15.0,
+        "jitter_occupancy_pulls": 2001,
+        "jitter_underruns": 22,
+        "plc_frames": 109,
+        "render_callbacks": 1875,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2001,
+        "samples_expected": 480240,
+        "samples_played": 474960,
+        "seconds": 10.003
+      },
+      {
+        "concealed_samples": 3840,
+        "frames_played": 1896,
+        "jitter_occupancy_max_ms": 15.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 15.0,
+        "jitter_occupancy_p99_ms": 15.0,
+        "jitter_occupancy_pulls": 2000,
+        "jitter_underruns": 16,
+        "plc_frames": 104,
+        "render_callbacks": 1876,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 2000,
+        "samples_expected": 480000,
+        "samples_played": 476160,
+        "seconds": 10.000226667
+      },
+      {
+        "concealed_samples": 2880,
+        "frames_played": 1879,
+        "jitter_occupancy_max_ms": 15.0,
+        "jitter_occupancy_min_ms": 0.0,
+        "jitter_occupancy_p50_ms": 10.0,
+        "jitter_occupancy_p95_ms": 15.0,
+        "jitter_occupancy_p99_ms": 15.0,
+        "jitter_occupancy_pulls": 1985,
+        "jitter_underruns": 12,
+        "plc_frames": 106,
+        "render_callbacks": 1860,
+        "render_overruns": 0,
+        "render_underruns": 0,
+        "rtp_lost": 0,
+        "rtp_received": 1984,
+        "samples_expected": 476400,
+        "samples_played": 473520,
+        "seconds": 9.925040375
+      }
+    ]
+  },
+  "exercised": [
+    "rtp receive",
+    "jitter buffer",
+    "opus decode",
+    "coreaudio render"
+  ],
+  "findings": [
+    "0.000 per cent of the stream was lost over the link, 0 packets of the 24003 the sequence numbers describe",
+    "frames arrived -13.5 ms past their moment at p50, 21.6 at p95, 28.1 at p99 and 75.9 at worst, against a target of 10 ms; negative is margin in hand, and the shape is what says whether the target is short by a fixed amount every frame pays or long enough for all but a tail",
+    "the jitter buffer held 10.0 ms at p50 and 15.0 ms at p99 against a 10 ms target, measured after serving each frame",
+    "window by window that occupancy went from 10.0 ms at p50 in the first of 12 windows to 10.0 in the last, staying between 10.0 and 10.0; a run-wide percentile cannot be separated back into these, so whether the buffer grew during the arm is readable here and nowhere above",
+    "the ring sat at 2224 frames of 4096 at p50, having been primed to 496; the difference is the 33.8 ms `AudioDeviceStart` spent getting the device going, during which the producer kept depositing and the device consumed nothing, so it is the ring's contribution to latency and it belongs to the device rather than to the link",
+    "the source clock runs +16.87 ppm referred to this Mac's timebase, as this run's own per-block minima fit it, against A7's +9.29 ppm for the same pair, and the two agree to within a factor of two. That is a delay slope of -16.87 ppm - a fast source makes the subtracted RTP term outrun arrival time, so the two have opposite signs and both are stated because reading one as the other is how this reported a disagreement on its first radio run. Over the 120 s of stream time it is -2.02 ms of accumulated skew, which took +1.148 ms off the p99 of the raw curve and +0.316 ms off its maximum. The same fit over every arrival rather than the minima gives +18.34 ppm, and the two differing is the burst sensitivity that chose the estimator",
+    "excess above this run's own best case reached 5.53 ms at p50, 40.61 at p95, 46.50 at p99 and 95.20 at worst over 24003 arrivals, with 0 of them past the 100 ms the curve reports out to; the reference is the minimum over the run and not the first packet, so this is comparable with another run's and an arrival delay anchored on one datagram is not",
+    "the 5 ms row is the sender's pair cadence and not the link: 53.43 per cent of the population is late there, in clusters of one frame separated by gaps of one frame, and that alternation is not something a radio can do because a burst is consecutive by definition. Two Opus frames ride in one captured packet, so both arrive at one instant while the second sits a frame later in stream time and its excess is exactly a frame lower - A6.1 measured the same thing from the other side at -4.996 ms per pair at p50, with 96 per cent of pairs inside the [-5,-4) ms bucket over 8998, 9000 and 120004 pairs, and found the first member is the one that goes late in practice at 524 against 384, 476 against 354 and 8594 against 6391. What this establishes is a floor: a target below the pair spacing cannot hold both members of a pair, so 5 ms is structurally unreachable on this sender for a reason that has nothing to do with the air. What it does not establish is that spacing the pair in the sender would be an improvement - that would also delay the second frame by a frame in real time, and whether the floor it removes is worth the delay it adds is arithmetic nobody has done",
+    "a 5 ms target would have left 12825 frames of 24003 past their moment, 53.4308 per cent, at 6411.97 a minute and 5587.03 clusters a minute: clusters of 1 frames at p50, 3 at p95 and 23 at worst - 115 ms of timeline in the worst one - separated by 5 ms at p50 and 5 ms at closest",
+    "a 10 ms target would have left 1534 frames of 24003 past their moment, 6.3909 per cent, at 766.94 a minute and 594.45 clusters a minute: clusters of 1 frames at p50, 2 at p95 and 17 at worst - 85 ms of timeline in the worst one - separated by 65 ms at p50 and 5 ms at closest",
+    "a 20 ms target would have left 1331 frames of 24003 past their moment, 5.5451 per cent, at 665.44 a minute and 575.45 clusters a minute: clusters of 1 frames at p50, 2 at p95 and 14 at worst - 70 ms of timeline in the worst one - separated by 70 ms at p50 and 5 ms at closest"
+  ],
+  "gate": "audio-e2e-gate",
+  "observations": {
+    "arrival_delay_max_ms": 75.936,
+    "arrival_delay_min_ms": -19.585,
+    "arrival_delay_p50_ms": -13.496,
+    "arrival_delay_p95_ms": 21.552,
+    "arrival_delay_p99_ms": 28.064,
+    "buffer_growth_samples": 3024,
+    "buffer_held_samples": 3024,
+    "buffer_invariant_residual": 0,
+    "concealed_samples": 45840,
+    "deadlines_granted": 1,
+    "decode_failures": 0,
+    "decode_max_us": 74,
+    "decode_p50_us": 7,
+    "decode_p99_us": 15,
+    "device_start_latency_ms": 33.75775,
+    "excess_arrivals": 24003,
+    "excess_arrivals_dropped": 0,
+    "excess_block_clusters_per_min_max_100ms": 0,
+    "excess_block_clusters_per_min_max_10ms": 678,
+    "excess_block_clusters_per_min_max_15ms": 660,
+    "excess_block_clusters_per_min_max_20ms": 648,
+    "excess_block_clusters_per_min_max_25ms": 642,
+    "excess_block_clusters_per_min_max_30ms": 624,
+    "excess_block_clusters_per_min_max_40ms": 624,
+    "excess_block_clusters_per_min_max_50ms": 24,
+    "excess_block_clusters_per_min_max_5ms": 5658,
+    "excess_block_clusters_per_min_max_60ms": 24,
+    "excess_block_clusters_per_min_max_80ms": 12,
+    "excess_block_clusters_per_min_min_100ms": 0,
+    "excess_block_clusters_per_min_min_10ms": 504,
+    "excess_block_clusters_per_min_min_15ms": 492,
+    "excess_block_clusters_per_min_min_20ms": 486,
+    "excess_block_clusters_per_min_min_25ms": 486,
+    "excess_block_clusters_per_min_min_30ms": 486,
+    "excess_block_clusters_per_min_min_40ms": 486,
+    "excess_block_clusters_per_min_min_50ms": 0,
+    "excess_block_clusters_per_min_min_5ms": 5472,
+    "excess_block_clusters_per_min_min_60ms": 0,
+    "excess_block_clusters_per_min_min_80ms": 0,
+    "excess_block_clusters_per_min_p50_100ms": 0,
+    "excess_block_clusters_per_min_p50_10ms": 582,
+    "excess_block_clusters_per_min_p50_15ms": 570,
+    "excess_block_clusters_per_min_p50_20ms": 570,
+    "excess_block_clusters_per_min_p50_25ms": 558,
+    "excess_block_clusters_per_min_p50_30ms": 558,
+    "excess_block_clusters_per_min_p50_40ms": 558,
+    "excess_block_clusters_per_min_p50_50ms": 6,
+    "excess_block_clusters_per_min_p50_5ms": 5598,
+    "excess_block_clusters_per_min_p50_60ms": 6,
+    "excess_block_clusters_per_min_p50_80ms": 0,
+    "excess_blocks": 12,
+    "excess_cluster_frames_max_10ms": 17,
+    "excess_cluster_frames_max_15ms": 16,
+    "excess_cluster_frames_max_20ms": 14,
+    "excess_cluster_frames_max_25ms": 13,
+    "excess_cluster_frames_max_30ms": 12,
+    "excess_cluster_frames_max_40ms": 10,
+    "excess_cluster_frames_max_50ms": 8,
+    "excess_cluster_frames_max_5ms": 23,
+    "excess_cluster_frames_max_60ms": 6,
+    "excess_cluster_frames_max_80ms": 2,
+    "excess_cluster_frames_p50_10ms": 1,
+    "excess_cluster_frames_p50_15ms": 1,
+    "excess_cluster_frames_p50_20ms": 1,
+    "excess_cluster_frames_p50_25ms": 1,
+    "excess_cluster_frames_p50_30ms": 1,
+    "excess_cluster_frames_p50_40ms": 1,
+    "excess_cluster_frames_p50_50ms": 1,
+    "excess_cluster_frames_p50_5ms": 1,
+    "excess_cluster_frames_p50_60ms": 1,
+    "excess_cluster_frames_p50_80ms": 1,
+    "excess_cluster_frames_p95_10ms": 2,
+    "excess_cluster_frames_p95_15ms": 2,
+    "excess_cluster_frames_p95_20ms": 2,
+    "excess_cluster_frames_p95_25ms": 2,
+    "excess_cluster_frames_p95_30ms": 2,
+    "excess_cluster_frames_p95_40ms": 2,
+    "excess_cluster_frames_p95_50ms": 7,
+    "excess_cluster_frames_p95_5ms": 3,
+    "excess_cluster_frames_p95_60ms": 6,
+    "excess_cluster_frames_p95_80ms": 2,
+    "excess_cluster_gap_min_ms_10ms": 5,
+    "excess_cluster_gap_min_ms_15ms": 5,
+    "excess_cluster_gap_min_ms_20ms": 5,
+    "excess_cluster_gap_min_ms_25ms": 5,
+    "excess_cluster_gap_min_ms_30ms": 5,
+    "excess_cluster_gap_min_ms_40ms": 5,
+    "excess_cluster_gap_min_ms_50ms": 25,
+    "excess_cluster_gap_min_ms_5ms": 5,
+    "excess_cluster_gap_min_ms_60ms": 10,
+    "excess_cluster_gap_min_ms_80ms": 5110,
+    "excess_cluster_gap_p50_ms_10ms": 65,
+    "excess_cluster_gap_p50_ms_15ms": 70,
+    "excess_cluster_gap_p50_ms_20ms": 70,
+    "excess_cluster_gap_p50_ms_25ms": 70,
+    "excess_cluster_gap_p50_ms_30ms": 70,
+    "excess_cluster_gap_p50_ms_40ms": 75,
+    "excess_cluster_gap_p50_ms_50ms": 5075,
+    "excess_cluster_gap_p50_ms_5ms": 5,
+    "excess_cluster_gap_p50_ms_60ms": 5490,
+    "excess_cluster_gap_p50_ms_80ms": 27635,
+    "excess_cluster_ms_max_10ms": 85,
+    "excess_cluster_ms_max_15ms": 80,
+    "excess_cluster_ms_max_20ms": 70,
+    "excess_cluster_ms_max_25ms": 65,
+    "excess_cluster_ms_max_30ms": 60,
+    "excess_cluster_ms_max_40ms": 50,
+    "excess_cluster_ms_max_50ms": 40,
+    "excess_cluster_ms_max_5ms": 115,
+    "excess_cluster_ms_max_60ms": 30,
+    "excess_cluster_ms_max_80ms": 10,
+    "excess_cluster_worst_max_ms_10ms": 95.205,
+    "excess_cluster_worst_max_ms_15ms": 95.205,
+    "excess_cluster_worst_max_ms_20ms": 95.205,
+    "excess_cluster_worst_max_ms_25ms": 95.205,
+    "excess_cluster_worst_max_ms_30ms": 95.205,
+    "excess_cluster_worst_max_ms_40ms": 95.205,
+    "excess_cluster_worst_max_ms_50ms": 95.205,
+    "excess_cluster_worst_max_ms_5ms": 95.205,
+    "excess_cluster_worst_max_ms_60ms": 95.205,
+    "excess_cluster_worst_max_ms_80ms": 95.205,
+    "excess_cluster_worst_p50_ms_10ms": 44.394,
+    "excess_cluster_worst_p50_ms_15ms": 44.478,
+    "excess_cluster_worst_p50_ms_20ms": 44.546,
+    "excess_cluster_worst_p50_ms_25ms": 44.586,
+    "excess_cluster_worst_p50_ms_30ms": 44.611,
+    "excess_cluster_worst_p50_ms_40ms": 44.631,
+    "excess_cluster_worst_p50_ms_50ms": 58.344,
+    "excess_cluster_worst_p50_ms_5ms": 6.601,
+    "excess_cluster_worst_p50_ms_60ms": 68.794,
+    "excess_cluster_worst_p50_ms_80ms": 89.37,
+    "excess_clusters_100ms": 0,
+    "excess_clusters_10ms": 1189,
+    "excess_clusters_15ms": 1168,
+    "excess_clusters_20ms": 1151,
+    "excess_clusters_25ms": 1138,
+    "excess_clusters_30ms": 1130,
+    "excess_clusters_40ms": 1122,
+    "excess_clusters_50ms": 20,
+    "excess_clusters_5ms": 11175,
+    "excess_clusters_60ms": 11,
+    "excess_clusters_80ms": 4,
+    "excess_clusters_per_min_100ms": 0,
+    "excess_clusters_per_min_10ms": 594.4504624614615,
+    "excess_clusters_per_min_15ms": 583.9513373885509,
+    "excess_clusters_per_min_20ms": 575.4520456628615,
+    "excess_clusters_per_min_25ms": 568.952587284393,
+    "excess_clusters_per_min_30ms": 564.9529205899508,
+    "excess_clusters_per_min_40ms": 560.9532538955087,
+    "excess_clusters_per_min_50ms": 9.999166736105325,
+    "excess_clusters_per_min_5ms": 5587.0344137988495,
+    "excess_clusters_per_min_60ms": 5.499541704857928,
+    "excess_clusters_per_min_80ms": 1.9998333472210648,
+    "excess_corrected_max_ms": 95.205,
+    "excess_corrected_over_100ms": 0,
+    "excess_corrected_p50_ms": 5.528,
+    "excess_corrected_p95_ms": 40.606,
+    "excess_corrected_p99_ms": 46.501,
+    "excess_delay_slope_ppm": -16.872027972027972,
+    "excess_delay_slope_ppm_all_points": -18.337861944474476,
+    "excess_drift_accumulated_ms": -2.024812076923077,
+    "excess_drift_agrees_with_a7": 1,
+    "excess_drift_blocks": 12,
+    "excess_drift_removed_max_ms": 0.316,
+    "excess_drift_removed_p99_ms": 1.148,
+    "excess_frames_missing": 0,
+    "excess_late_100ms": 0,
+    "excess_late_10ms": 1534,
+    "excess_late_15ms": 1410,
+    "excess_late_20ms": 1331,
+    "excess_late_25ms": 1282,
+    "excess_late_30ms": 1254,
+    "excess_late_40ms": 1222,
+    "excess_late_50ms": 47,
+    "excess_late_5ms": 12825,
+    "excess_late_60ms": 24,
+    "excess_late_80ms": 5,
+    "excess_late_fraction_100ms": 0,
+    "excess_late_fraction_10ms": 0.06390867808190642,
+    "excess_late_fraction_15ms": 0.05874265716785402,
+    "excess_late_fraction_20ms": 0.05545140190809482,
+    "excess_late_fraction_25ms": 0.053409990417864435,
+    "excess_late_fraction_30ms": 0.05224346956630421,
+    "excess_late_fraction_40ms": 0.05091030287880682,
+    "excess_late_fraction_50ms": 0.0019580885722618006,
+    "excess_late_fraction_5ms": 0.5343082114735658,
+    "excess_late_fraction_60ms": 0.000999875015623047,
+    "excess_late_fraction_80ms": 0.00020830729492146816,
+    "excess_late_per_min_100ms": 0,
+    "excess_late_per_min_10ms": 766.9360886592783,
+    "excess_late_per_min_15ms": 704.9412548954253,
+    "excess_late_per_min_20ms": 665.4445462878093,
+    "excess_late_per_min_25ms": 640.9465877843513,
+    "excess_late_per_min_30ms": 626.9477543538038,
+    "excess_late_per_min_40ms": 610.9490875760353,
+    "excess_late_per_min_50ms": 23.498041829847512,
+    "excess_late_per_min_5ms": 6411.965669527539,
+    "excess_late_per_min_60ms": 11.999000083326388,
+    "excess_late_per_min_80ms": 2.4997916840263312,
+    "excess_late_raw_100ms": 0,
+    "excess_late_raw_10ms": 1645,
+    "excess_late_raw_15ms": 1428,
+    "excess_late_raw_20ms": 1344,
+    "excess_late_raw_25ms": 1291,
+    "excess_late_raw_30ms": 1260,
+    "excess_late_raw_40ms": 1226,
+    "excess_late_raw_50ms": 64,
+    "excess_late_raw_5ms": 12930,
+    "excess_late_raw_60ms": 26,
+    "excess_late_raw_80ms": 7,
+    "excess_pair_cadence_fraction": 0.5343082114735658,
+    "excess_pair_cadence_late": 12825,
+    "excess_pair_cadence_ms": 5,
+    "excess_population": 24003,
+    "excess_rate_quotable_100ms": 0,
+    "excess_rate_quotable_10ms": 1,
+    "excess_rate_quotable_15ms": 1,
+    "excess_rate_quotable_20ms": 1,
+    "excess_rate_quotable_25ms": 1,
+    "excess_rate_quotable_30ms": 1,
+    "excess_rate_quotable_40ms": 1,
+    "excess_rate_quotable_50ms": 0,
+    "excess_rate_quotable_5ms": 1,
+    "excess_rate_quotable_60ms": 0,
+    "excess_rate_quotable_80ms": 0,
+    "excess_raw_max_ms": 95.521,
+    "excess_raw_over_100ms": 0,
+    "excess_raw_p50_ms": 6.089,
+    "excess_raw_p95_ms": 41.137,
+    "excess_raw_p99_ms": 47.649,
+    "excess_reference_source_ppm": 9.29,
+    "excess_repeated_frames": 0,
+    "excess_sequence_breaks": 0,
+    "excess_source_ppm": 16.872027972027972,
+    "excess_source_ppm_all_points": 18.337861944474476,
+    "excess_stream_s": 120.01,
+    "frames_played": 22649,
+    "jitter_occupancy_max_ms": 15,
+    "jitter_occupancy_p50_ms": 10,
+    "jitter_occupancy_p95_ms": 15,
+    "jitter_occupancy_p99_ms": 15,
+    "jitter_overrun_frames": 0,
+    "jitter_overruns": 0,
+    "jitter_underruns": 191,
+    "pair_anchor_rtp": 1213872561,
+    "pair_class0_arrival_max_ms": 71.828,
+    "pair_class0_arrival_min_ms": -14.586,
+    "pair_class0_arrival_p50_ms": -12.1,
+    "pair_class0_arrival_p95_ms": 17.539,
+    "pair_class0_arrival_p99_ms": 28.687,
+    "pair_class0_frames": 12001,
+    "pair_class0_late": 670,
+    "pair_class0_offset_samples": 0,
+    "pair_class0_step_max_ms": 37.561,
+    "pair_class0_step_min_ms": -47.144,
+    "pair_class0_step_p50_ms": -4.998,
+    "pair_class0_step_p95_ms": -1.789,
+    "pair_class0_step_p99_ms": 36.973,
+    "pair_class0_step_pairs": 12000,
+    "pair_class0_underruns": 108,
+    "pair_class1_arrival_max_ms": 75.936,
+    "pair_class1_arrival_min_ms": -19.585,
+    "pair_class1_arrival_p50_ms": -17.006,
+    "pair_class1_arrival_p95_ms": 21.772,
+    "pair_class1_arrival_p99_ms": 25.185,
+    "pair_class1_frames": 12001,
+    "pair_class1_late": 681,
+    "pair_class1_offset_samples": 240,
+    "pair_class1_step_max_ms": 87.999,
+    "pair_class1_step_min_ms": -46.494,
+    "pair_class1_step_p50_ms": 5.001,
+    "pair_class1_step_p95_ms": 9.408,
+    "pair_class1_step_p99_ms": 45.076,
+    "pair_class1_step_pairs": 12001,
+    "pair_class1_underruns": 83,
+    "pair_frame_samples": 240,
+    "pair_samples_dropped": 0,
+    "pair_unanchored": 0,
+    "plc_frames": 1351,
+    "producer_interval_p50_us": 5000,
+    "producer_interval_p99_us": 5000,
+    "render_callbacks": 22491,
+    "render_frames_consumed": 5757696,
+    "render_interval_p50_us": 5333,
+    "render_interval_p99_us": 5345,
+    "render_odd_cycles": 0,
+    "render_overrun_frames": 0,
+    "render_overruns": 0,
+    "render_underrun_frames": 0,
+    "render_underruns": 0,
+    "ring_occupancy_max_frames": 2352,
+    "ring_occupancy_min_frames": 2080,
+    "ring_occupancy_p50_frames": 2224,
+    "rtp_duplicate": 0,
+    "rtp_expected": 24003,
+    "rtp_foreign_ssrc": 0,
+    "rtp_late": 1351,
+    "rtp_lost": 0,
+    "rtp_off_grid": 0,
+    "rtp_oversize": 0,
+    "rtp_received": 24003,
+    "rtp_reordered": 1171,
+    "rtp_unique": 24003,
+    "samples_concealed_in": 324240,
+    "samples_consumed": 5757696,
+    "samples_discarded": 324240,
+    "samples_expected": 5760000,
+    "samples_played": 5714160,
+    "samples_produced": 5760720,
+    "sink_host_time_scatter_samples": 0.20649185369172937,
+    "sink_invalid_timestamps": 0,
+    "sink_ppm": 6.689942310396517,
+    "sink_ppm_endpoints": 6.6384317265480055,
+    "sink_ppm_error": 0.0008284062180630846,
+    "sink_rate_readings": 22491,
+    "sink_rate_span_s": 119.945849581,
+    "sink_sample_time_samples": 5757439,
+    "tone_analysed_frames": 24000,
+    "tone_channels_distinct": 1,
+    "tone_left_dbfs": -19.681587856519776,
+    "tone_left_hz": 996.9986634943497,
+    "tone_resolution_hz": 2,
+    "tone_right_dbfs": -19.675455410073454,
+    "tone_right_hz": 1996.9978974237329,
+    "windows": 12,
+    "worst_window_concealed": 9360
+  },
+  "run": {
+    "args": {
+      "bind": "0.0.0.0:5016",
+      "buffer_frames": 256,
+      "frame_ms": 5,
+      "ring_frames": 4096,
+      "target_ms": 10.0
+    },
+    "arm": "control",
+    "commit": "385872b",
+    "span_s": 120.0421485,
+    "started_unix_ms": 1787221521632
+  }
+}

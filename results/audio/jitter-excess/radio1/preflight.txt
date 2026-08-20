@@ -1,0 +1,4 @@
+  windows-host     present  ssh windows answered
+  radio            present  en0 is 192.168.1.108 and the host answers
+  audio-endpoint   present  LG ULTRAWIDE (NVIDIA High Definition Audio)
+  audio-output     present  5 output device(s), Altavoces del MacBook Pro by default at 48000 Hz 2 ch

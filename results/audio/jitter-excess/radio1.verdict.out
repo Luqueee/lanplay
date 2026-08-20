@@ -1,0 +1,102 @@
+results   /tmp/jitter-excess/radio1
+  windows-host     present  ssh windows answered
+  radio            present  en0 is 192.168.1.108 and the host answers
+  audio-endpoint   present  LG ULTRAWIDE (NVIDIA High Definition Audio)
+  audio-output     present  5 output device(s), Altavoces del MacBook Pro by default at 48000 Hz 2 ch
+radio     host -> en0 192.168.1.108:5016
+device    rendering through Altavoces del MacBook Pro
+  PASS the link held: -2.01 dB projected over 600 s against a
+built     sender and tone source on the host, receiver here
+
+arm       control: host sending to 192.168.1.108:5017 for 150 s, measuring 120 s
+control   1254 frames past 30 ms, so the fault reached the curve; the clean arm follows
+
+arm       clean: host sending to 192.168.1.108:5016 for 630 s, measuring 600 s
+
+receiver  the clean arm's own criteria, decided by the one evaluator
+  FAIL source concealment: none of the source was replaced: 179040 over 28800000 samples_expected
+  the clean arm disagreed with one of its own criteria, which is reported here and
+  decided below on the curve: a run that concealed source audio still measured the
+  delay that made it conceal, and that delay is this gate's subject
+
+curve     the clean arm, and every condition it means anything under
+
+population 120005 arrivals over 600.0 s of stream time, 60 blocks of 10 s
+           0 packets lost, 0 timeline holes, 0 render underruns over 112493 callbacks
+
+drift
+  source clock      +15.81 ppm referred to this Mac's timebase, fitted through one minimum per block
+  A7's figure       +9.29 ppm for this same pair of machines
+  delay slope       -15.81 ppm, which is what the correction subtracts; a fast source
+                    makes the RTP term outrun arrival time, so the two signs are opposite by construction
+  all points        +15.69 ppm, the estimator a burst destroys, here to be compared against
+  accumulated       -9.48 ms of delay over the run, against the 5 ms between adjacent targets
+  removed from p99  +5.313 ms, and +1.124 ms from the maximum
+  FINDING           the two agree to within a factor of 1.70, so the correction is the
+                    clock pair and not something this run invented. They are not owed an exact
+                    match: A7 compared crystals directly and this compares the source's audio
+                    clock against this Mac's monotonic clock through a radio and a jitter buffer.
+
+pair cadence, and it is not the link
+  the 5 ms row has 50.76 per cent of the population late, in clusters of one
+  frame separated by gaps of one frame. That alternation is not something a radio can do:
+  a burst is consecutive by definition, so no link leaves every second frame on time. Two
+  Opus frames ride in one captured packet, so both arrive at one instant while the second
+  sits a frame later in stream time and its excess is exactly a frame lower. A6.1 measured
+  the same thing from the other side at -4.996 ms per pair at p50, 96 per cent of pairs
+  inside the [-5,-4) ms bucket over 8998, 9000 and 120004 pairs, and found the first member
+  is the one that goes late in practice: 524 against 384, 476 against 354, 8594 against 6391.
+
+  What that establishes is a FLOOR: a target below the pair spacing cannot hold both members
+  of a pair, so 5 ms is structurally unreachable on this sender for a reason that has
+  nothing to do with the air. What it does not establish is that spacing the pair in the
+  sender would be an improvement: that would also delay the second frame by a frame in real
+  time, and whether the floor it removes is worth the delay it adds is arithmetic nobody has
+  done. An argument from this structure for spacing was made and retracted earlier in this
+  session for being wrong by a sign; nothing here revives it.
+
+excess above this run's own best case, in milliseconds
+  raw        p50   8.483  p95  14.961  p99  17.689  max  110.665  past 100 ms 6
+  corrected  p50   5.327  p95   7.669  p99  12.376  max  109.541  past 100 ms 2
+
+the curve, on drift-corrected excess. Rows above 20 ms are shape and authorise no target
+   T ms    late   late %     /min     raw  clusters     /min  frames p50/p95/max  worst ms  gap ms p50/min   per block
+      5   60916  50.7612  6091.40   96420     59055  5905.30              1/1/23     109.5             5/5   5766-6000
+     10    1494   1.2449   149.40   41527       416    41.60             1/12/20     109.5           775/5       0-156
+     15    1033   0.8608   103.30    5815       209    20.90             4/12/19     109.5          1860/5        0-66
+     20     802   0.6683    80.20    1023       162    16.20             4/12/18     109.5          2845/5        0-54
+ *   25     631   0.5258    63.10     785       125    12.50             4/12/17     109.5          4050/5        0-42
+ *   30     504   0.4200    50.40     618       101    10.10             4/11/16     109.5          4080/5        0-30
+ *   40     319   0.2658    31.90     390        66     6.60             5/12/14     109.5        7120/965        0-24
+ *   50     196   0.1633    19.60     245        49     4.90             3/10/12     109.5       10185/975        0-18
+ *   60     103   0.0858    10.30     139        34     3.40              2/8/10     109.5      14310/2060        0-12
+ *   80      20   0.0167     2.00      31         6        -               4/6/6     109.5     52200/22500         0-6
+ *  100       2   0.0017     0.20       6         1        -               2/2/2     109.5               -         0-6
+
+  * the shape above 20 ms says whether this is one heavy distribution or a normal
+    regime with a second class of stall behind it. A figure at 30, 50 or 80 ms
+    authorises nothing: what the latency budget pays is decided elsewhere.
+  a rate is a dash where the run saw fewer clusters than one needs. That is not a
+    rate of zero, it is a count too small for a rate, and the count is beside it.
+  the last column is the per-block spread of the cluster rate. Uncertainty here
+    comes from time blocks and never from a binomial over frames: the frames inside
+    a cluster are one event, so a binomial would overstate the precision by the
+    mean cluster size.
+
+beside it, at the 10 ms target this run was actually configured with:
+  source concealment    179040 of 28800000 samples, 0.6217 per cent replaced by the concealer
+  playout continuity    0 underruns over 112493 callbacks, which is the count that means audible silence
+
+control   the injected distribution has to be visible in the curve, and the clean arm
+          has to not show it. A curve that cannot see a population put in front of it
+          is a curve whose clean arm says nothing.
+
+  HOLD   the injected population is in the curve: 5.224 per cent of frames past 30 ms against 5.0 injected
+  HOLD   the injected shape is a step and not a tail: 1254 frames past 30 ms and 24 past 60 ms, against a 40 ms hold
+  HOLD   the step is where it was injected: p95 at 40.61 ms against a 40 ms hold
+  HOLD   the clean arm does not show it: 0.4200 per cent past 30 ms on the clean arm against 5.224 on the control
+
+PASS the curve was measured over one population with no loss, no timeline hole and no
+     render underrun, and the control's injected distribution is visible in the curve
+     where the clean arm's is not. Rows at or below 20 ms are a target's cost; rows
+     above are shape and authorise nothing.

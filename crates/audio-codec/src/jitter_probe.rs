@@ -777,7 +777,7 @@ impl fmt::Display for Measurement {
         )?;
         writeln!(
             f,
-            "continuity expected {} played {}",
+            "source expected {} played {}",
             counts.expected_samples, counts.played_samples
         )?;
         writeln!(
@@ -797,9 +797,10 @@ impl fmt::Display for Measurement {
         )?;
         writeln!(
             f,
-            "continuity hole {} samples over {} frame periods",
-            counts.continuity_hole(),
-            counts.expected_samples / self.frame_samples().max(1)
+            "concealed {} samples over {} frame periods, jitter underruns {}",
+            counts.concealed_samples(),
+            counts.expected_samples / self.frame_samples().max(1),
+            counts.underruns
         )?;
         writeln!(f, "packets sent {}", self.send.packets)?;
         writeln!(f, "send failures {}", self.send.send_failures)?;
@@ -1008,7 +1009,7 @@ mod tests {
                 "overruns 1 dropping 5 frames",
                 "decode us p50 0 p99 0",
                 "sink interval us p50 0 p99 0",
-                "continuity expected 240480 played 239040",
+                "source expected 240480 played 239040",
                 "tone left 997.0 right 1997.0",
                 "tone channels distinct yes",
             ]

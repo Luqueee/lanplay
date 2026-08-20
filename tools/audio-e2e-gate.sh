@@ -6,17 +6,24 @@
 # and CoreAudio here - and the only thing it can prove that the five isolated gates could
 # not is that the joins hold while both ends run on their own clocks.
 #
-# The criterion is continuity, and it is worth saying why it and not the underrun count.
-# Concealment counts as played, because the listener heard something continuous where a
-# frame was missing; an underrun does not, because the concealer is then running on stale
-# state with nothing behind it. So a run whose underruns are zero because the concealer
-# ran from end to end carried nothing at all, and it passes every zero-check anybody
-# would think to write. What tells those apart is samples expected against samples
-# played, and it is the receiver's `continuity_hole` over a population of
-# `samples_expected` that decides this gate - a hole of zero over an expectation of zero
-# comes back Unavailable from `xtask verdict`, which refuses the whole run rather than
-# passing it. Beside it the receiver states that frames were genuinely decoded rather than
-# concealed throughout, which is the other half of the same distinction.
+# Two criteria and not one, because two different quantities were reported here under
+# one name for the whole of this phase. Source concealment is how much of the audio the
+# sender produced was replaced by the concealer's invention: a gap with the source's own
+# audio either side of it counts as played, and a period the buffer had nothing for does
+# not, so it is the receiver's `concealed_samples` over a population of `samples_expected`
+# that measures fidelity here - zero concealed out of zero expected comes back Unavailable
+# from `xtask verdict`, which refuses the whole run rather than passing it. Playout
+# continuity is `render_underruns` over `render_callbacks`: cycles the device asked for
+# audio and the ring had none, which is an audible click.
+#
+# The pair is the finding and neither half is reported without the other. Forty of the
+# forty envelopes committed under results/audio report zero render underruns, so the
+# device has never once been handed silence in this project - the concealer keeps the
+# timeline fed whatever the radio does. A concealment figure quoted alone therefore invites
+# its reader to hear a starved device that was never starved, which is what the old name
+# for it did. Beside both, the receiver states that frames were genuinely decoded rather
+# than concealed throughout, because a path carrying nothing at all conceals everything and
+# passes every zero-check anybody would think to write.
 #
 # Nothing here parses the other end's prose. Both ends print the keyed block a person
 # reads when a gate fails and both write the JSON envelope `xtask verdict` decides, which
@@ -36,11 +43,11 @@
 # relays the datagrams on this machine and holds everything back for 400 ms every two
 # seconds, forty times the target and thirteen times the ceiling. A hold does not move a
 # frame's timestamp, so the playout cursor walks past the whole burst while it is in
-# flight and every frame of it is discarded as late on arrival; the concealer fills what
-# it can and continuity breaks. Note what does not happen: the device is never handed
-# silence, so the underrun count stays at zero throughout, and an arm that had been judged
-# on underruns would have passed a run that dropped a fifth of the audio. That is the
-# criterion argued for above, demonstrated rather than asserted. The relay is seeded so
+# flight and every frame of it is discarded as late on arrival; the concealer stands in for
+# a fifth of the source. Note what does not happen: the device is never handed silence, so
+# the render underrun count stays at zero throughout, and an arm judged on those would have
+# passed a run in which a fifth of the audio the listener heard was invented. That is the
+# split argued for above, demonstrated rather than asserted. The relay is seeded so
 # that an arm that fails fails the same way twice, and it sits on this side of the radio
 # rather than on the host, so its numbers are not comparable with the clean arms' and are
 # not compared - its whole job is to break the verdict.
@@ -403,6 +410,7 @@ arm_numbers() {
     expected="$("$XTASK" verdict --observation samples_expected "$document")" || return 1
     played="$("$XTASK" verdict --observation samples_played "$document")" || return 1
     underruns="$("$XTASK" verdict --observation render_underruns "$document")" || return 1
+    callbacks="$("$XTASK" verdict --observation render_callbacks "$document")" || return 1
     occupancy="$("$XTASK" verdict --observation jitter_occupancy_p50_ms "$document")" || return 1
     overruns="$("$XTASK" verdict --observation jitter_overruns "$document")" || return 1
 }
@@ -413,11 +421,11 @@ arm_numbers() {
 # Belt and braces, and both of them deliberate. `xtask verdict` no longer passes a run
 # holding a check it could not evaluate: an absent observation or an empty population makes
 # the whole document a refusal, it exits 2, and the report names the observation it wanted.
-# That was the central hole and it is closed. This stays because it names the ten keys this
-# gate in particular turns on, which the general answer cannot know - a document stating no
-# continuity check at all would parse, would decide whatever else it stated, and would never
-# mention the number this phase exists to measure. Asked through the same parser rather than
-# through a pattern over the report, and refused here when one of them is missing.
+# That was the central hole and it is closed. This stays because it names the eleven keys
+# this gate in particular turns on, which the general answer cannot know - a document
+# stating no concealment check at all would parse, would decide whatever else it stated,
+# and would never mention the numbers this phase exists to measure. Asked through the same
+# parser rather than through a pattern over the report, and refused here when one is missing.
 insist() {
     local document="$1"
     shift
@@ -428,7 +436,7 @@ insist() {
     done
 }
 
-# And a population of zero is the same absence wearing the other hat: a hole of zero
+# And a population of zero is the same absence wearing the other hat: zero concealed
 # samples out of zero expected is what a path carrying nothing looks like, and it is the
 # single most common way a gate here has lied.
 insist_positive() {
@@ -437,6 +445,22 @@ insist_positive() {
         refuse "$document does not state $name, which is the population a zero would be measured over"
     awk -v value="$value" 'BEGIN { exit (value > 0 ? 0 : 1) }' ||
         refuse "$document reports $name as $value, so every zero in it is an absence and this run measured nothing"
+}
+
+# A record written before `continuity_hole` became `concealed_samples` states the old key
+# and not the new one, and there is no way to re-decide it here: the criteria inside it are
+# the old criteria, which folded source concealment and playout continuity together under a
+# name that claimed the device had been starved. Refusing and naming the old key is the
+# answer. Reading the old key instead would re-print the conflation this rename exists to
+# end, and insisting on the new one alone would refuse with a message about a key the
+# record's author had never heard of.
+refuse_pre_rename() {
+    local document="$1"
+    "$XTASK" verdict --observation concealed_samples "$document" >/dev/null 2>&1 && return 0
+    "$XTASK" verdict --observation continuity_hole "$document" >/dev/null 2>&1 || return 0
+    refuse "$document states continuity_hole and not concealed_samples, so it was written" \
+        "before source concealment and playout continuity were separated and its criteria are" \
+        "the ones that conflated them. Re-run the gate rather than re-deciding this record"
 }
 
 # Decides one end of one arm and returns what `xtask` decided: 0 held, 1 did not, 2 could
@@ -460,8 +484,9 @@ decide() {
 }
 
 # What each end has to have stated. The capture and encode counts on one side, and on the
-# other the three that carry the phase: the stream arrived, audio was decoded rather than
-# concealed from end to end, and continuity was accounted over a real expectation.
+# other the four that carry the phase: the stream arrived, audio was decoded rather than
+# concealed from end to end, the concealment was accounted over a real expectation, and the
+# render underruns were accounted over a real population of callbacks.
 decide_sender() {
     local document="$1"
     insist "$document" capture_packets capture_frames frames_encoded datagrams_sent samples_captured samples_encoded
@@ -470,8 +495,10 @@ decide_sender() {
 
 decide_receiver() {
     local document="$1"
+    refuse_pre_rename "$document"
     insist "$document" rtp_received rtp_expected rtp_lost plc_frames frames_played \
-        render_callbacks render_underruns samples_expected samples_played continuity_hole
+        render_callbacks render_underruns render_underrun_frames samples_expected \
+        samples_played concealed_samples
     insist_positive "$document" samples_expected
     insist_positive "$document" render_callbacks
     decide "$document"
@@ -516,7 +543,7 @@ decide_receiver "$OUT/$CONTROL_ARM.receiver.json" || control_failed=1
 
 # The long arm runs whenever the short one carried audio, and not only when it held every
 # criterion. The drift over ten minutes is the second thing this phase owes, a link that
-# loses continuity does not make it uninteresting, and a gate that withheld the
+# conceals part of the source does not make it uninteresting, and a gate that withheld the
 # measurement whenever the criterion failed would produce it on exactly the runs that
 # needed it least. What does make ten minutes pointless is a path that carried nothing,
 # and that is refused rather than failed: nothing was measured either way.
@@ -538,7 +565,7 @@ radio_conditions after
 
 echo
 # The conditions every figure below was taken under, and a finding rather than a note: a
-# continuity figure with no association beside it invites a comparison against a run
+# concealment figure with no association beside it invites a comparison against a run
 # taken on a different radio, which is how a weak link contaminated an hour of video
 # measurement in this project without anybody noticing.
 if [ -s "$OUT/radio-before.csv" ] && [ -s "$OUT/radio-after.csv" ]; then
@@ -565,10 +592,11 @@ for arm in "$SHORT_ARM" "$LONG_ARM"; do
         refuse "$document is missing a number a finding reads and the line above names it; a figure computed from a name that is not there is worse than an absent one"
     awk -v arm="$arm" -v datagrams="$datagrams" -v lost="$lost" -v late="$late" \
         -v concealed="$concealed" -v expected="$expected" -v played="$played" \
-        -v underruns="$underruns" 'BEGIN {
+        -v underruns="$underruns" -v callbacks="$callbacks" 'BEGIN {
         printf "  FINDING %s: the radio lost %d of %d datagrams, %.3f %%, and %d arrived past\n", arm, lost, datagrams, (datagrams > 0 ? 100 * lost / datagrams : 0), late
-        printf "          their moment; %d frames were concealed and %d device underruns cost\n", concealed, underruns
-        printf "          continuity %d samples of %d expected\n", expected - played, expected
+        printf "          their moment; the concealer stood in for %d samples of %d expected, %.3f %%,\n", expected - played, expected, (expected > 0 ? 100 * (expected - played) / expected : 0)
+        printf "          over %d concealed frames - and the device was handed silence on %d of its %d\n", concealed, underruns, callbacks
+        printf "          callbacks, which is the half of this pair that says whether anything clicked\n"
     }'
     if [ "$arm" = "$SHORT_ARM" ]; then
         short_occupancy="$occupancy"
@@ -605,8 +633,8 @@ if [ "$control_failed" -eq 0 ]; then
     echo "     clean arm has been shown to be capable of coming out otherwise"
     status=1
 else
-    echo "the control failed as it must: a link stalled for $STALL_MS ms every $STALL_EVERY_MS ms breaks"
-    echo "continuity, and this gate saw it break"
+    echo "the control failed as it must: a link stalled for $STALL_MS ms every $STALL_EVERY_MS ms puts a"
+    echo "fifth of the source through the concealer, and this gate saw it happen"
 fi
 
 echo
@@ -614,5 +642,6 @@ if [ "$status" -ne 0 ]; then
     echo "FAIL an arm did not hold what it stated, and the blocks above say which and why"
     exit 1
 fi
-echo "PASS Windows to Mac audio held continuity end to end over $SHORT_S s and over $LONG_S s,"
-echo "     concealment counted as played and underruns did not, and the control broke it"
+echo "PASS Windows to Mac audio arrived unconcealed over $SHORT_S s and over $LONG_S s with the"
+echo "     device never handed silence, a bridged gap counted as played and an empty buffer did"
+echo "     not, and the control broke it"

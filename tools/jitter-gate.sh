@@ -107,7 +107,7 @@ def arm(name):
         r"^occupancy ms p50 ([\d.]+) p95 ([\d.]+) p99 ([\d.]+) max ([\d.]+)$", body, re.M
     )
     overruns = re.search(r"^overruns (\d+) dropping (\d+) frames$", body, re.M)
-    continuity = re.search(r"^continuity expected (\d+) played (\d+)$", body, re.M)
+    source = re.search(r"^source expected (\d+) played (\d+)$", body, re.M)
     tone = re.search(r"^tone left ([\d.]+) right ([\d.]+)$", body, re.M)
     return {
         "name": name,
@@ -121,7 +121,7 @@ def arm(name):
         "underruns": num(r"^underruns (\d+)$"),
         "overruns": [int(g) for g in overruns.groups()] if overruns else None,
         "occupancy": [float(g) for g in occupancy.groups()] if occupancy else None,
-        "continuity": [int(g) for g in continuity.groups()] if continuity else None,
+        "source": [int(g) for g in source.groups()] if source else None,
         "tone": (float(tone.group(1)), float(tone.group(2))) if tone else None,
     }
 
@@ -142,9 +142,17 @@ for a in arms:
 print()
 for a in arms:
     tone = f"{a['tone'][0]:.1f} / {a['tone'][1]:.1f} Hz" if a["tone"] else "not measured"
-    cont = a["continuity"] or [0, 0]
-    hole = cont[0] - cont[1]
-    print(f"  {a['name']:<7} tone {tone}   continuity expected {cont[0]} played {cont[1]} hole {hole}")
+    src = a["source"] or [0, 0]
+    concealed = src[0] - src[1]
+    # Concealed samples and never a hole in continuity. This probe's sink is in
+    # process and there is no device on the far end of it, so there is no
+    # playout continuity for this gate to report: what these samples measure is
+    # source audio replaced by the concealer, and the pairing that matters is
+    # the jitter underruns printed beside it.
+    print(
+        f"  {a['name']:<7} tone {tone}   source expected {src[0]} played {src[1]} "
+        f"concealed {concealed} over {a['underruns']} jitter underruns"
+    )
 
 failures = []
 findings = []
@@ -165,7 +173,7 @@ for a in arms:
             )
 
     # The criterion the plan cares about most, and it applies to every arm including
-    # the broken ones: a stall may cost continuity but it may never cost unbounded
+    # the broken ones: a stall may cost fidelity but it may never cost unbounded
     # latency.
     if a["occupancy"] is None:
         failures.append(f"{where}: occupancy was not reported, which is the criterion")
@@ -187,10 +195,10 @@ for a in arms:
                 f"clean: occupancy settled at {a['occupancy'][0]:.1f} ms against a "
                 f"{target_ms:.0f} ms target"
             )
-        if a["continuity"] and a["continuity"][0] != a["continuity"][1]:
+        if a["source"] and a["source"][0] != a["source"][1]:
             failures.append(
-                f"clean: continuity expected {a['continuity'][0]} against {a['continuity'][1]} "
-                "played - a clean path has no holes to explain"
+                f"clean: {a['source'][0] - a['source'][1]} samples of source audio were "
+                f"concealed of {a['source'][0]} expected - a clean path has nothing to conceal"
             )
     elif where == "loss":
         # The arm exists to exercise concealment. Zero concealed frames means either
@@ -224,11 +232,12 @@ for a in arms:
                 "reached the buffer and the arm tested nothing"
             )
         else:
-            hole = (a["continuity"][0] - a["continuity"][1]) if a["continuity"] else 0
+            concealed = (a["source"][0] - a["source"][1]) if a["source"] else 0
             findings.append(
                 f"stall: {a['late']} frames arrived past their moment and were discarded, "
-                f"{a['concealed']} concealed, {a['underruns']} underruns, and the "
-                f"{hole} sample hole is exactly {a['underruns']} frames of {hole // max(a['underruns'], 1)}"
+                f"{a['concealed']} concealed, {a['underruns']} jitter underruns, and the "
+                f"{concealed} concealed samples are exactly {a['underruns']} frames of "
+                f"{concealed // max(a['underruns'], 1)}"
             )
             findings.append(
                 "the ceiling was NOT exercised by any arm and cannot be by a delay: only a "

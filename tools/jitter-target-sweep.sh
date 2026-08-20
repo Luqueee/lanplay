@@ -3,19 +3,24 @@
 #
 # The target is not a tuning knob, it is a bill. Every millisecond of it is added to the
 # mouth-to-ear latency of every frame for the life of the product, and it is paid whether
-# or not the link ever needs it. So the answer is the smallest target that holds
-# continuity, and never the largest that reports no faults: if five milliseconds loses
-# audio and ten, fifteen and twenty do not, the answer is ten, and a run that recommended
-# twenty because twenty also looked clean would have charged the listener ten milliseconds
-# for nothing.
+# or not the link ever needs it. So the answer is the smallest target that conceals none of
+# the source, and never the largest that reports no faults: if five milliseconds puts audio
+# through the concealer and ten, fifteen and twenty do not, the answer is ten, and a run
+# that recommended twenty because twenty also looked clean would have charged the listener
+# ten milliseconds for nothing.
 #
-# The deciding counter is the one A6 turns on, for the reason A6 states: continuity, the
-# per-channel samples the playout cursor travelled against the ones the producer actually
-# deposited, with a gap concealment credited because the waveform continued across it and
-# an underrun refused because nothing of the stream was there. Underruns alone cannot
-# decide this. A6's own control broke a fifth of the audio and reported zero underruns
-# throughout, because the concealer kept the device fed the whole way, and an instrument
-# judging targets on underruns would have called that arm clean.
+# The deciding counter is the one A6 turns on, for the reason A6 states: source
+# concealment, the per-channel samples the playout cursor travelled against the ones the
+# producer actually deposited, with a gap credited because the source's own audio sits
+# either side of it and an empty buffer refused because nothing of the source was there.
+# Render underruns cannot decide this and are not the same quantity. A6's own control put a
+# fifth of the audio through the concealer and reported zero render underruns throughout,
+# because the concealer kept the device fed the whole way; forty of the forty envelopes
+# committed under results/audio report the same zero. So playout continuity is a criterion
+# in its own right here, checked over a positive population of callbacks so that an arm
+# whose device never ran cannot pass it by absence, and reported beside every concealment
+# ratio rather than folded into one - an instrument judging targets on render underruns
+# alone would have called that control arm clean.
 #
 # ## What is hard here, and it is not the measurement
 #
@@ -127,26 +132,26 @@
 # the position of the boundary is the whole result.
 #
 # Three of the five are exact rather than statistical, and they are stated in the units the
-# decision is made in - each arm's continuity, held or broke - rather than in a hole fraction
-# averaged over passes. That last point cost an earlier version of this file its verdict
+# decision is made in - each arm's concealment criterion, held or broke - rather than in a
+# ratio averaged over passes. That last point cost an earlier version of this file its verdict
 # section: on the run committed with it, pass one lost between 21 and 37 per cent where
 # passes two and three lost between 0.8 and 2.6, and a per-target mean over those three
 # reported every target as losing fourteen per cent when no arm of any of them ever did.
 #
-# A target whose own three arms disagree, one holding continuity and another not, has had
+# A target whose own three arms disagree, one concealing nothing and another not, has had
 # its outcome decided by the moment its arm ran at rather than by its target, so the
 # boundary is a boundary in time.
 #
 # A pattern that is not a single step in the target: raising the target delays playout
 # strictly, so every frame late at the smaller target is late at the larger, and a smaller
-# target holding continuity where a larger one broke is arithmetically impossible on one
+# target concealing nothing where a larger one did not is arithmetically impossible on one
 # link with one anchor.
 #
 # A pass whose measured margins do not rise with its nominal targets did not sweep what it
 # was asked to. This is the anchor draw caught in the act, and it is not hypothetical: in
 # pass one of the committed run the 5 ms arm ran with 28.05 ms of margin and the 20 ms arm
 # with 20.50, because the datagram that anchored the first turned up that much later than a
-# typical one. Whatever the holes of that pass came out as, it did not compare 5 against 20.
+# typical one. Whatever the ratios of that pass came out as, it did not compare 5 against 20.
 #
 # Then the instrument's resolution against the step it was asked to resolve: the arms at the
 # incumbent target must agree on effective margin to better than 5 ms, the gap between
@@ -178,7 +183,7 @@
 # The control has to fail for that reason and not because something else broke, so it also
 # has to fail by the right amount. Four hundred milliseconds held out of every two thousand
 # is a fifth of the stream past its moment, and A6's control measured exactly that: 2522 of
-# 12005 datagrams late and a continuity hole of 605280 samples of 2880000, 21.0 per cent,
+# 12005 datagrams late and 605280 samples of 2880000 concealed, 21.0 per cent,
 # against 1.7 per cent on its clean arm. A control reporting far less than half that duty
 # cycle is a fault that did not reach the path, which is a harness that broke rather than a
 # criterion that fired, and it is refused rather than counted as the control this gate owes.
@@ -191,16 +196,16 @@
 # builds the same buffer the receiver does: `--target-ms 0` and `--target-ms 1` both report
 # `target ms 5` and a 25 ms ceiling over 7 slots, identical to `--target-ms 5`. So a zero
 # target is not a control at all, it is a fourth copy of the smallest candidate arm, and on
-# a link where 5 ms holds continuity the control would hold it too and this gate would fail
-# on its own instrument. It is refused before a run rather than after, and it is refused for
-# aliasing a candidate rather than for being rejected by the receiver - the receiver accepts
-# it silently, which is what made it worth measuring.
+# a link where 5 ms conceals nothing the control would conceal nothing too and this gate
+# would fail on its own instrument. It is refused before a run rather than after, and it is
+# refused for aliasing a candidate rather than for being rejected by the receiver - the
+# receiver accepts it silently, which is what made it worth measuring.
 #
 # ## What this gate does not cover
 #
 # It chooses a target against this link's tail and says nothing about any other link: a
-# target that holds continuity here has not been shown to hold it at -52 dBm, and one that
-# fails here has not been shown to fail there. It corrects no drift, which is A7, and it
+# target that conceals nothing here has not been shown to conceal nothing at -52 dBm, and one
+# that fails here has not been shown to fail there. It corrects no drift, which is A7, and it
 # does not exercise the buffer's ceiling, which no delay can breach and only a sink slower
 # than its source can. It has no opinion on the latency the winning target costs beyond
 # stating it, because the whole of the argument for choosing the smallest is that the number
@@ -223,8 +228,9 @@
 # a verdict that can only be exercised by spending forty minutes of radio is a verdict
 # nobody exercises.
 #
-# exit 0  a target was chosen, and it is the smallest that held continuity
-# exit 1  no target held continuity, or the control held every criterion
+# exit 0  a target was chosen, and it is the smallest that concealed none of the source
+# exit 1  no target concealed none of it, a device was handed silence, or the control held
+#         every criterion
 # exit 2  refused: the arms were not comparable, or the run was in no position to measure
 
 set -euo pipefail
@@ -360,14 +366,14 @@ trap cleanup EXIT INT TERM
 RECEIVER_KEYS="rtp_received rtp_expected rtp_lost rtp_late rtp_off_grid plc_frames \
 frames_played render_callbacks render_underruns jitter_underruns jitter_overruns \
 jitter_occupancy_p50_ms jitter_occupancy_p95_ms samples_expected samples_played \
-continuity_hole arrival_delay_p50_ms arrival_delay_p95_ms arrival_delay_p99_ms \
+concealed_samples arrival_delay_p50_ms arrival_delay_p95_ms arrival_delay_p99_ms \
 arrival_delay_max_ms jitter_overrun_frames samples_discarded pair_frame_samples"
 
 # The numbers a document is not a result without, insisted on before anything is decided
 # from it. Belt and braces with `xtask verdict`, which already refuses a document holding a
 # criterion it could not read, and deliberately so: this names the keys this gate in
 # particular turns on, which the general answer cannot know. A document stating no
-# continuity check and no arrival delay would parse, would decide whatever else it stated,
+# concealment check and no arrival delay would parse, would decide whatever else it stated,
 # and would never mention the two numbers this phase exists to compare.
 insist() {
     local document="$1"
@@ -379,7 +385,7 @@ insist() {
     done
 }
 
-# A population of zero is absence wearing the other hat: a hole of zero samples out of zero
+# A population of zero is absence wearing the other hat: zero concealed samples out of zero
 # expected is what a path carrying nothing looks like, and it is the single most common way
 # a gate here has lied.
 insist_positive() {
@@ -388,6 +394,21 @@ insist_positive() {
         refuse "$document does not state $name, which is the population a zero would be measured over"
     awk -v value="$value" 'BEGIN { exit (value > 0 ? 0 : 1) }' ||
         refuse "$document reports $name as $value, so every zero in it is an absence and this run measured nothing"
+}
+
+# A record written before `continuity_hole` became `concealed_samples` states the old key
+# and not the new one, and the criteria inside it are the old criteria, which folded source
+# concealment and playout continuity together under a name that claimed the device had been
+# starved. Refusing and naming the old key is the answer. Reading the old key instead would
+# re-print the conflation the rename exists to end, and insisting on the new one alone would
+# refuse with a message about a key the record's author had never heard of.
+refuse_pre_rename() {
+    local document="$1"
+    "$XTASK" verdict --observation concealed_samples "$document" >/dev/null 2>&1 && return 0
+    "$XTASK" verdict --observation continuity_hole "$document" >/dev/null 2>&1 || return 0
+    refuse "$document states continuity_hole and not concealed_samples, so it was written" \
+        "before source concealment and playout continuity were separated and its criteria are" \
+        "the ones that conflated them. Re-run the sweep rather than re-deciding this record"
 }
 
 # Decides one end of one arm and returns what `xtask` decided: 0 held, 1 did not, 2 could
@@ -672,8 +693,9 @@ PY
 
     # What each end has to have stated. The capture and encode counts on one side, and on
     # the other the numbers that carry the phase: the stream arrived, audio was decoded
-    # rather than concealed throughout, continuity was accounted over a real expectation,
-    # and the arrival delays that say what margin this arm actually ran with.
+    # rather than concealed throughout, the concealment was accounted over a real
+    # expectation and the render underruns over a real population of callbacks, and the
+    # arrival delays that say what margin this arm actually ran with.
     record_arm() {
         local arm="$1" pass="$2" target="$3"
         local document="$OUT/$arm.receiver.json"
@@ -684,6 +706,7 @@ PY
         local sender_code=0
         decide "$sender_document" || sender_code=$?
 
+        refuse_pre_rename "$document"
         insist "$document" $RECEIVER_KEYS
         insist_positive "$document" samples_expected
         insist_positive "$document" render_callbacks
@@ -700,8 +723,8 @@ PY
         #
         # An earlier version of this check asked instead for `late == underruns ==
         # concealed`, which is what A6's clean run measured - 4587 of each, and 4587 x 240
-        # exactly the hole. It refused the control arm on its first run, and it was right to:
-        # not about the arm, but about itself. That identity is the general one collapsed
+        # exactly the concealed count. It refused the control arm on its first run, and it was
+        # right to: not about the arm, but about itself. That identity is the general one collapsed
         # onto a run with no buffer overrun and no startup starvation, and the control had 66
         # underruns with no late frame behind them - 18 frames thrown away by two overruns
         # and 48 concealed at the start before anything had arrived. A criterion true only
@@ -733,17 +756,20 @@ PY
                 "arrival tail these targets are being ranked on"
         fi
 
-        # An arm that breaks one of the three below has a mechanism in it this pipeline does
-        # not know about, its continuity figure is not comparable with any other arm's, and a
+        # An arm that breaks one of the four below has a mechanism in it this pipeline does
+        # not know about, its concealment figure is not comparable with any other arm's, and a
         # percentage from it reads exactly like one that is.
-        local late underruns concealed hole discarded dropped frame_samples startup
+        local late underruns concealed samples_concealed discarded dropped frame_samples startup
+        local render_underruns callbacks
         late="$("$XTASK" verdict --observation rtp_late "$document")"
         underruns="$("$XTASK" verdict --observation jitter_underruns "$document")"
         concealed="$("$XTASK" verdict --observation plc_frames "$document")"
-        hole="$("$XTASK" verdict --observation continuity_hole "$document")"
+        samples_concealed="$("$XTASK" verdict --observation concealed_samples "$document")"
         discarded="$("$XTASK" verdict --observation samples_discarded "$document")"
         dropped="$("$XTASK" verdict --observation jitter_overrun_frames "$document")"
         frame_samples="$("$XTASK" verdict --observation pair_frame_samples "$document")"
+        render_underruns="$("$XTASK" verdict --observation render_underruns "$document")"
+        callbacks="$("$XTASK" verdict --observation render_callbacks "$document")"
 
         # The receiver's own frame size against the one this harness asked for, because every
         # identity below multiplies by it and a disagreement would divide the blame silently.
@@ -756,10 +782,25 @@ PY
                 "the only thing that fills a starved callback, so something else is writing into this" \
                 "buffer or something else is emptying it"
 
-        [ "$hole" = "$(((concealed + dropped) * frame_samples))" ] ||
-            refuse "arm $arm has a continuity hole of $hole samples against $concealed concealed and" \
+        [ "$samples_concealed" = "$(((concealed + dropped) * frame_samples))" ] ||
+            refuse "arm $arm concealed $samples_concealed samples against $concealed concealed frames and" \
                 "$dropped thrown away, which is $(((concealed + dropped) * frame_samples)); a frame the" \
                 "device demanded went missing without being played, concealed or dropped"
+
+        # Playout continuity, checked and never assumed, and over the callbacks so that an arm
+        # whose device never ran cannot satisfy it by absence. Every arm this project has
+        # measured comes out zero here - forty of forty committed envelopes - which is exactly
+        # why it has to be a criterion: a number nobody reads is a number nobody notices
+        # changing, and the whole point of separating it from the concealment above is that
+        # this one is the audible failure.
+        [ "$callbacks" -gt 0 ] ||
+            refuse "arm $arm reports $callbacks render callbacks, so the device never ran and its" \
+                "render underrun count of $render_underruns is an absence rather than a result"
+
+        [ "$render_underruns" = "0" ] ||
+            refuse "arm $arm handed the device silence on $render_underruns of its $callbacks callbacks." \
+                "That is an audible click and not a concealed sample, no arm in this project has ever" \
+                "done it, and an arm that does is measuring this machine rather than the arrival tail"
 
         [ "$discarded" = "$(((late + dropped) * frame_samples))" ] ||
             refuse "arm $arm discarded $discarded samples against $late late and $dropped dropped to a" \
@@ -899,25 +940,29 @@ PY
     echo "          against the largest target in the sweep, $CONTROL_TARGET ms"
 
     control_verdict="$(awk -F, '$1 == "control" { print $4 }' "$ARMS")"
-    control_hole="$("$XTASK" verdict --observation continuity_hole "$OUT/control.receiver.json")"
+    control_concealed="$("$XTASK" verdict --observation concealed_samples "$OUT/control.receiver.json")"
     control_expected="$("$XTASK" verdict --observation samples_expected "$OUT/control.receiver.json")"
-    control_pct="$(awk -v h="$control_hole" -v e="$control_expected" 'BEGIN { printf "%.2f", 100 * h / e }')"
+    control_underruns="$("$XTASK" verdict --observation render_underruns "$OUT/control.receiver.json")"
+    control_callbacks="$("$XTASK" verdict --observation render_callbacks "$OUT/control.receiver.json")"
+    control_pct="$(awk -v h="$control_concealed" -v e="$control_expected" 'BEGIN { printf "%.2f", 100 * h / e }')"
 
     if [ "$control_verdict" = "0" ]; then
         echo
         echo "FAIL the control held every criterion while udp-fault stalled the path for $STALL_MS ms"
-        echo "     every $STALL_EVERY_MS ms at seed $SEED against a $CONTROL_TARGET ms target, losing"
-        echo "     $control_hole samples of $control_expected, $control_pct %. Nothing this gate could say"
+        echo "     every $STALL_EVERY_MS ms at seed $SEED against a $CONTROL_TARGET ms target, with"
+        echo "     $control_concealed samples of $control_expected concealed, $control_pct %, with the device"
+        echo "     handed silence on $control_underruns of $control_callbacks callbacks. Nothing this gate could say"
         echo "     about a target has been shown to be capable of coming out otherwise, so the"
         echo "     sweep is not run: a ranking from a counter that cannot move ranks nothing"
         exit 1
     fi
     awk -v pct="$control_pct" -v floor="$CONTROL_FLOOR_PCT" 'BEGIN { exit (pct >= floor ? 0 : 1) }' ||
-        refuse "the control lost only $control_pct % of its samples against the $CONTROL_FLOOR_PCT % that" \
+        refuse "the control had only $control_pct % of its samples concealed against the $CONTROL_FLOOR_PCT % that" \
             "$STALL_MS ms held of every $STALL_EVERY_MS ms must produce, and A6's own control measured 21.0 %:" \
             "the fault did not reach the path, so this arm is a harness that broke rather than a criterion" \
             "that fired and it demonstrates nothing"
-    echo "control   failed as it must, losing $control_hole samples of $control_expected, $control_pct %"
+    echo "control   failed as it must, $control_concealed samples of $control_expected concealed, $control_pct %,"
+    echo "          with the device handed silence on $control_underruns of $control_callbacks callbacks"
 
     # ---- the sweep ----------------------------------------------------------
 
@@ -985,8 +1030,34 @@ control = [row for row in rows if row["arm"] == "control"]
 sweep = [row for row in rows if row["arm"] != "control"]
 
 
-def hole_pct(row):
-    return 100.0 * row["continuity_hole"] / row["samples_expected"]
+# A record written before `continuity_hole` became `concealed_samples` carries the old
+# column, and the second form of this gate re-decides exactly such records. Refusing and
+# naming the old column is the answer; a KeyError is not, and neither is reading the old
+# column and re-printing the conflation the rename exists to end - that name asserted the
+# device had been starved when in forty of forty committed envelopes it never was.
+if rows and "concealed_samples" not in rows[0] and "continuity_hole" in rows[0]:
+    print()
+    print("REFUSE this record states continuity_hole where this gate now reads concealed_samples,")
+    print("       so it was written before source concealment and playout continuity were separated")
+    print("       and its per-arm verdicts are the ones that conflated them. The ranking in it may")
+    print("       be sound and cannot be confirmed here: re-run the sweep rather than re-deciding it.")
+    sys.exit(REFUSE)
+
+
+def concealed_pct(row):
+    return 100.0 * row["concealed_samples"] / row["samples_expected"]
+
+
+# Playout continuity, printed beside every concealment ratio above and never instead of
+# one. The two were reported under a single name for the whole of the audio phase and they
+# are not the same failure: concealment is source audio the listener was handed an
+# invention in place of, and a render underrun is a click. Forty of the forty envelopes
+# committed under results/audio report zero render underruns, so a concealment figure
+# quoted alone invites its reader to hear a device that was never once starved.
+def playout(rows_for):
+    underruns = sum(row["render_underruns"] for row in rows_for)
+    callbacks = sum(row["render_callbacks"] for row in rows_for)
+    return f"{underruns:.0f} render underruns in {callbacks:.0f} callbacks"
 
 
 def late_pct(row):
@@ -1039,16 +1110,16 @@ for target in targets:
     rows_for = sorted(by_target[target], key=lambda row: row["pass"])
     holds = all(row["verdict"] == 0 for row in rows_for)
     findings.append(
-        f"{target:.0f} ms over {len(rows_for)} arm(s): continuity hole "
-        f"{statistics.median(hole_pct(row) for row in rows_for):.3f} % of samples expected at the\n"
-        f"          median of its passes, which were "
-        + ", ".join(f"{hole_pct(row):.3f}" for row in rows_for)
+        f"{target:.0f} ms over {len(rows_for)} arm(s): concealment ratio "
+        f"{statistics.median(concealed_pct(row) for row in rows_for):.3f} % of samples expected at\n"
+        f"          the median of its passes, which were "
+        + ", ".join(f"{concealed_pct(row):.3f}" for row in rows_for)
         + f" %; {sum(row['plc_frames'] for row in rows_for):.0f} frames concealed,\n"
-        f"          {sum(row['render_underruns'] for row in rows_for):.0f} device underruns and "
+        f"          {playout(rows_for)} and "
         f"{sum(row['jitter_overruns'] for row in rows_for):.0f} buffer overruns in total, occupancy p50 "
         f"{min(row['jitter_occupancy_p50_ms'] for row in rows_for):.0f} to\n"
         f"          {max(row['jitter_occupancy_p50_ms'] for row in rows_for):.0f} ms, median margin "
-        f"{statistics.median(margin(row) for row in rows_for):.2f} ms; continuity "
+        f"{statistics.median(margin(row) for row in rows_for):.2f} ms; the concealment criterion "
         f"{'held' if holds else 'broke'}"
     )
 
@@ -1091,8 +1162,8 @@ if deepest_held and len(deepest_held) < len(targets):
     broke_depth = statistics.median(d for target in broke for d in starts[target])
     if held_depth - broke_depth >= step:
         findings.append(
-            f"the targets that held continuity began {held_depth:.1f} ms deep against "
-            f"{broke_depth:.1f} ms for those that\n          broke, a whole frame or more apart, so "
+            f"the targets that concealed nothing began {held_depth:.1f} ms deep against "
+            f"{broke_depth:.1f} ms for those that\n          did not, a whole frame or more apart, so "
             f"part of what separates them is depth they were handed\n          rather than the target "
             f"they were testing; the winner below is not safe to build on"
         )
@@ -1110,7 +1181,7 @@ if deepest_held and len(deepest_held) < len(targets):
 # on this link, pass one ran its 5 ms arm with 28.05 ms of margin and its 20 ms arm with
 # 20.50: the anchoring datagram of the 5 ms arm turned up so late that the arm's effective
 # target exceeded the largest one under test, and the nominal order of that pass means
-# nothing whatever. A reader with the holes alone cannot see that, and it is the single most
+# nothing whatever. A reader with the ratios alone cannot see that, and it is the single most
 # important thing a reader of this gate has to be able to see.
 scrambled = {}
 for pass_number in sorted({row["pass"] for row in sweep}):
@@ -1121,8 +1192,8 @@ for pass_number in sorted({row["pass"] for row in sweep}):
     findings.append(
         f"pass {pass_number:.0f} ordered by what each target lost: "
         + " then ".join(
-            f"{row['target_ms']:.0f} ms at {hole_pct(row):.3f} %"
-            for row in sorted(in_pass, key=hole_pct)
+            f"{row['target_ms']:.0f} ms at {concealed_pct(row):.3f} %"
+            for row in sorted(in_pass, key=concealed_pct)
         )
         + f"\n          and the margin each one actually ran with, in nominal order: "
         + ", ".join(f"{row['target_ms']:.0f} to {margin(row):.2f}" for row in by_nominal)
@@ -1132,7 +1203,8 @@ for pass_number in sorted({row["pass"] for row in sweep}):
 
 for row in sweep:
     findings.append(
-        f"{row['arm']}: {hole_pct(row):.3f} % hole, {late_pct(row):.3f} % late, margin "
+        f"{row['arm']}: {concealed_pct(row):.3f} % concealed beside {playout([row])}, "
+        f"{late_pct(row):.3f} % late, margin\n          "
         f"{margin(row):.2f} ms, worst arrival {row['arrival_delay_max_ms']:.1f} ms,\n"
         f"          radio p10/p50/p90 {row['rssi_p10_dbm']:.0f}/{row['rssi_p50_dbm']:.0f}/"
         f"{row['rssi_p90_dbm']:.0f} dBm from {row['rssi_min_dbm']:.0f}, rate p10/p50/p90 "
@@ -1144,9 +1216,10 @@ for row in sweep:
 if control:
     row = control[0]
     findings.append(
-        f"the control at {row['target_ms']:.0f} ms behind a stalling relay lost {hole_pct(row):.2f} % of its\n"
-        f"          samples and put {late_pct(row):.2f} % of its datagrams past their moment, against a floor of\n"
-        f"          {control_floor:.0f} % that the fault's duty cycle must produce"
+        f"the control at {row['target_ms']:.0f} ms behind a stalling relay had {concealed_pct(row):.2f} % of\n"
+        f"          its samples concealed beside {playout([row])}, and put\n"
+        f"          {late_pct(row):.2f} % of its datagrams past their moment, against a floor of "
+        f"{control_floor:.0f} % that the\n          fault's duty cycle must produce"
     )
 
 # --- the sender end, which says the source was the same each time ------------
@@ -1213,15 +1286,18 @@ mixed = winner is not None and not all(held.values())
 if winner is None:
     worst = max(row["arrival_delay_max_ms"] for row in sweep)
     ranking_failures.append(
-        "no target between {:.0f} and {:.0f} ms held continuity: the hole runs from {:.3f} % to {:.3f} % "
-        "of samples expected across the sweep, so A8 has no answer on this link and the choice is owed "
-        "rather than read off a ranking of failures. The tail is the term - the "
-        "worst arrival in the sweep came {:.0f} ms past its moment, {:.1f} times the largest target under "
-        "test, and no target this phase is allowed to consider is within reach of that".format(
+        "no target between {:.0f} and {:.0f} ms concealed nothing: the concealment ratio runs from "
+        "{:.3f} % to {:.3f} % of samples expected across the sweep, beside {}, so A8 has no answer on "
+        "this link and the choice is owed rather than read off a ranking of failures. What every arm "
+        "lost was fidelity and not playout - the device was fed throughout - and the tail is the "
+        "term: the worst arrival in the sweep came {:.0f} ms past its moment, {:.1f} times the "
+        "largest target under test, and no target this phase is allowed to consider is within reach "
+        "of that".format(
             min(targets),
             max(targets),
-            min(hole_pct(row) for row in sweep),
-            max(hole_pct(row) for row in sweep),
+            min(concealed_pct(row) for row in sweep),
+            max(concealed_pct(row) for row in sweep),
+            playout(sweep),
             worst,
             worst / max(targets),
         )
@@ -1239,14 +1315,14 @@ if len(reference_rows) > 1:
         f"          margins of "
         + ", ".join(f"{margin(row):.2f}" for row in reference_rows)
         + f" ms - a spread of {margin_spread:.2f} ms against the {step:.0f} ms step\n"
-        f"          between adjacent targets - and holes of "
-        + ", ".join(f"{hole_pct(row):.3f}" for row in reference_rows)
+        f"          between adjacent targets - and concealment ratios of "
+        + ", ".join(f"{concealed_pct(row):.3f}" for row in reference_rows)
         + " %"
     )
 
 if mixed:
     # Every test here is in the units the decision is made in, which is the per-arm
-    # held-or-broke and not a hole fraction averaged over passes. An earlier version
+    # held-or-broke and not a concealment ratio averaged over passes. An earlier version
     # compared per-target means and it would have been read off numbers mixing a 37 per cent
     # arm with a 1.3 per cent one, which is the same mistake as comparing two arms taken on
     # two links with the arithmetic hidden one level down.
@@ -1262,7 +1338,7 @@ if mixed:
                 f"the {target:.0f} ms arms disagreed with each other: "
                 + ", ".join(
                     f"pass {row['pass']:.0f} {'held' if row['verdict'] == 0 else 'broke'} at "
-                    f"{hole_pct(row):.3f} %"
+                    f"{concealed_pct(row):.3f} %"
                     for row in sorted(by_target[target], key=lambda row: row["pass"])
                 )
                 + ". One configuration came out both ways, so what decided this target was the moment its "
@@ -1272,7 +1348,7 @@ if mixed:
     for lower, upper in zip(targets, targets[1:]):
         if held[lower] and not held[upper]:
             refusals.append(
-                f"{lower:.0f} ms held continuity where {upper:.0f} ms did not, which the path forbids: a "
+                f"{lower:.0f} ms concealed nothing where {upper:.0f} ms did not, which the path forbids: a "
                 "larger target delays playout strictly, so every frame late at the smaller one is late at "
                 "the larger. The arms were not on one link and the ordering this gate would otherwise have "
                 "reported would be the link's rather than the target's"
@@ -1280,7 +1356,7 @@ if mixed:
     # And whether each pass swept what it meant to. The margin is what decides lateness -
     # a frame is late exactly when its delay past its own moment turns positive - so a pass
     # whose measured margins do not rise with its nominal targets has not compared the
-    # targets at all, whatever its holes came out as.
+    # targets at all, whatever their concealment ratios came out as.
     for pass_number, was_scrambled in sorted(scrambled.items()):
         if was_scrambled:
             in_pass = sorted(
@@ -1354,11 +1430,11 @@ premium = (
     if winner == min(targets)
     else f",\n     costing {winner - min(targets):.0f} ms more than the smallest target under test, and "
     + ", ".join(f"{target:.0f}" for target in targets if not held[target])
-    + " ms losing audio is what bought that"
+    + " ms concealing part of the source is what bought that"
 )
 print(
-    f"PASS {winner:.0f} ms is the smallest jitter target that held continuity, over "
-    f"{len(by_target[winner])} arm(s) of {arm_s:.0f} s each"
+    f"PASS {winner:.0f} ms is the smallest jitter target that concealed none of the source, over "
+    f"{len(by_target[winner])} arm(s) of {arm_s:.0f} s each,\n     with {playout(by_target[winner])}"
     + premium
 )
 sys.exit(PASS)

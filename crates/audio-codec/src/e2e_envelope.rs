@@ -9,7 +9,7 @@
 //! none.
 //!
 //! Every criterion here is about the sending end alone. The receiver emits its
-//! own document, and the continuity that decides the phase is decided there,
+//! own document, and the concealment that decides the phase is decided there,
 //! because only the far end knows what it played. What this end can settle is
 //! everything upstream of the radio: that the endpoint delivered audio, that
 //! every captured sample reached the encoder, that the split left nothing over,
